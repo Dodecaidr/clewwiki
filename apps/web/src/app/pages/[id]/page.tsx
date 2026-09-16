@@ -3,13 +3,18 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
+import { AnchorPanel } from './anchor-panel';
+import type { AnchorPanelItem, AnchorPanelLabels } from './anchor-panel';
 import { DeletePageButton } from './delete-button';
 import { PageBody } from '@/components/page-body';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
+import { getFallbackShare, listAnchorsForPage } from '@/lib/anchors/service';
+import type { AnchorRecord } from '@/lib/anchors/service';
 import { getActiveClaimsForPage, getActiveNotesForPage } from '@/lib/claims/service';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { getPageById, listRevisions } from '@/lib/pages/service';
+import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
 import { assertSameWorkspace } from '@/lib/workspace';
 import { cn, formatDateTime } from '@/lib/utils';
@@ -35,6 +40,52 @@ async function loadPage(id: string) {
   return { session, page };
 }
 
+type AnchorTranslator = Awaited<ReturnType<typeof getTranslations<'anchors'>>>;
+
+/**
+ * Turns the stored `detail` blob into one sentence a reader can act on.
+ *
+ * The blob is JSON written by whichever release last checked the anchor, so
+ * every field is read defensively: an older row must not be able to break the
+ * page it belongs to.
+ */
+function describeAnchorDetail(
+  anchor: AnchorRecord,
+  ta: AnchorTranslator,
+): string | null {
+  const detail = anchor.detail;
+  if (!detail) return null;
+
+  const text = (key: string): string | null => {
+    const value = detail[key];
+    return typeof value === 'string' ? value : null;
+  };
+
+  switch (detail.reason) {
+    case 'body_changed':
+      return ta('detailBodyChanged');
+    case 'moved':
+      return ta('detailMoved', { file: text('moved_to') ?? anchor.fileHint });
+    case 'renamed':
+      return ta('detailRenamed', { name: text('renamed_to') ?? '' });
+    case 'moved_and_renamed':
+      return ta('detailMovedRenamed', {
+        file: text('moved_to') ?? anchor.fileHint,
+        name: text('renamed_to') ?? '',
+      });
+    case 'file_missing':
+      return ta('detailFileMissing', { file: text('file') ?? anchor.fileHint });
+    case 'declaration_missing':
+      return ta('detailDeclarationMissing');
+    case 'range_changed':
+      return ta('detailRangeChanged');
+    case 'range_missing':
+      return ta('detailRangeMissing');
+    default:
+      return null;
+  }
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const loaded = await loadPage((await params).id);
   return { title: loaded?.page.title ?? 'clewwiki' };
@@ -55,13 +106,69 @@ export default async function PageView({ params }: Props) {
   const { page } = loaded;
   const t = await getTranslations('pages');
 
-  const [html, linked, revisions, activeClaims, notes] = await Promise.all([
-    renderMarkdown(page.body),
-    page.linkedPageId ? getPageById(session.workspace.id, page.linkedPageId) : Promise.resolve(null),
-    listRevisions(session.workspace.id, page.id, 5),
-    getActiveClaimsForPage(session.workspace.id, page.id),
-    getActiveNotesForPage(session.workspace.id, page.id),
-  ]);
+  const [html, linked, revisions, activeClaims, notes, pageAnchors, fallbackShare] =
+    await Promise.all([
+      renderMarkdown(page.body),
+      page.linkedPageId
+        ? getPageById(session.workspace.id, page.linkedPageId)
+        : Promise.resolve(null),
+      listRevisions(session.workspace.id, page.id, 5),
+      getActiveClaimsForPage(session.workspace.id, page.id),
+      getActiveNotesForPage(session.workspace.id, page.id),
+      // The state the last check left behind, not a fresh one. Rendering a page
+      // must not wait on a network fetch of somebody's repository; "Check now"
+      // is the button that asks for that deliberately.
+      listAnchorsForPage(session.workspace.id, page.id),
+      getFallbackShare(session.workspace.id),
+    ]);
+
+  const ta = await getTranslations('anchors');
+  const repository = readRepositorySettings(session.workspace.settings);
+
+  const anchorItems: AnchorPanelItem[] = pageAnchors.map((anchor) => ({
+    anchorId: anchor.id,
+    state: anchor.state,
+    kind: anchor.kind,
+    qualifiedName: anchor.qualifiedName,
+    fileHint: anchor.fileHint,
+    sectionId: anchor.sectionId,
+    fallback: anchor.fallback,
+    lineStart: anchor.lineStart,
+    lineEnd: anchor.lineEnd,
+    detailLabel: describeAnchorDetail(anchor, ta),
+    lastCheckedLabel: anchor.lastCheckedAt
+      ? ta('lastChecked', { at: formatDateTime(anchor.lastCheckedAt) ?? '' })
+      : null,
+  }));
+
+  const anchorLabels: AnchorPanelLabels = {
+    heading: ta('heading'),
+    empty: ta('empty'),
+    noRepository: ta('noRepository'),
+    checkNow: ta('checkNow'),
+    confirm: ta('confirm'),
+    remove: ta('remove'),
+    addHeading: ta('addHeading'),
+    fileLabel: ta('fileLabel'),
+    fileHint: ta('fileHint'),
+    targetLabel: ta('targetLabel'),
+    targetHint: ta('targetHint'),
+    sectionLabel: ta('sectionLabel'),
+    sectionHint: ta('sectionHint'),
+    add: ta('add'),
+    wholePage: ta('wholePage'),
+    sectionPrefix: ta('sectionPrefix'),
+    fallbackLabel: ta('fallbackLabel'),
+    fallbackShare: ta('fallbackShareLabel', { percent: 0 }),
+    lastChecked: ta('lastChecked', { at: '' }),
+    errorGeneric: ta('errorGeneric'),
+    states: {
+      fresh: ta('stateFresh'),
+      stale: ta('stateStale'),
+      'moved-renamed': ta('stateMovedRenamed'),
+      lost: ta('stateLost'),
+    },
+  };
 
   // A page-level claim outranks a section claim in the header: it is the
   // stronger statement about who may write to this page right now.
@@ -198,6 +305,18 @@ export default async function PageView({ params }: Props) {
       ) : (
         <PageBody html={html} />
       )}
+
+      <AnchorPanel
+        pageId={page.id}
+        anchors={anchorItems}
+        labels={anchorLabels}
+        hasRepository={repository !== null}
+        fallbackShareLabel={
+          fallbackShare.total > 0
+            ? ta('fallbackShareLabel', { percent: Math.round(fallbackShare.share * 100) })
+            : null
+        }
+      />
 
       <Card>
         <CardHeader>

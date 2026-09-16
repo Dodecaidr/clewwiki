@@ -29,6 +29,12 @@ export async function SiteHeader() {
               <Link href="/tokens" className="text-muted-foreground hover:text-foreground">
                 {t('tokens')}
               </Link>
+              <Link
+                href="/settings/repository"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {t('repository')}
+              </Link>
             </>
           ) : null}
           <Link href="/about" className="text-muted-foreground hover:text-foreground">

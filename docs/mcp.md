@@ -61,6 +61,13 @@ lowercase — `not_found`, `conflict`, `stale_base`, `validation`,
 MCP server uppercases them at its boundary, so a tool result carries the
 codes listed above regardless of which REST condition produced it.
 
+One REST condition has no code in the list above: `repository_unavailable`
+(`502`), raised when the workspace's source repository cannot be reached or
+read while anchors are being checked. It is the instance's own dependency
+failing rather than anything the caller did, and the MCP boundary reports it
+as `CONFLICT` with the git message in `details` — there is no tool input that
+could have avoided it and none that would fix it.
+
 ### wiki.search
 
 Full-text search across the workspace (technical and human documents).
@@ -192,12 +199,33 @@ repository.
 
 ```
 input:  { page_id: string, ref?: string }
-output: { checked_at, anchors: [ { anchor_id, kind, qualified_name, state, detail?: { moved_to?, renamed_to? } } ] }
+output: { checked_at, ref, commit,
+          anchors: [ { anchor_id, kind, qualified_name, file_hint, state,
+                       detail?: { reason, file?, moved_to?, renamed_to?, line_start?, line_end? } } ],
+          fallback_share: { total, fallback, share } }
 ```
 
 Anchor states follow `docs/architecture.md`: `fresh`, `stale`,
 `moved-renamed`, `lost`. Nothing is rewritten; a human or agent clears the
 flag by updating the section and writing with a fresh claim.
+
+`fallback_share` is the share of the workspace's anchors resolved by line
+range rather than by declaration. It rides on the check response rather than
+living behind an endpoint of its own because it is the number that says how
+much the other numbers are worth: line ranges do not survive an edit above
+them, so a workspace whose share is climbing is a workspace whose staleness
+flags are turning into noise.
+
+Clearing a flag is a separate call — `POST /api/v1/anchors/{anchorId}/confirm`
+— which re-baselines the anchor onto whatever is there now. It needs
+`pages:write`, so a person and an agent can both do it, and it is audited under
+whichever of them did: the review is the point, and a review nobody can be
+named for is not one. Creating and deleting anchors
+(`POST`/`DELETE /api/v1/pages/{id}/anchors`, `DELETE /api/v1/anchors/{anchorId}`)
+sit on the same scope. None of the four has a tool of its own in the list above,
+because the tool surface is the writing loop and these are maintenance of the
+scaffolding around it; an agent that needs them reaches the REST API directly
+with the token it already has.
 
 ### wiki.link_docs
 

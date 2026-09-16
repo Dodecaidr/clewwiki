@@ -4,15 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../../packages/anchors/scripts/export-grammars.mjs grammars",
     "dev": "next dev",
+    "prebuild": "node ../../packages/anchors/scripts/export-grammars.mjs grammars",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "pretest": "node ../../packages/anchors/scripts/export-grammars.mjs grammars",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@clewwiki/anchors": "workspace:*",
     "@clewwiki/db": "workspace:*",
     "better-auth": "^1.7.5",
     "class-variance-authority": "^0.7.1",

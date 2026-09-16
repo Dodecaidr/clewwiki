@@ -1,5 +1,8 @@
 import type { ActorKind, PageKind } from '@clewwiki/db';
 
+import { toAnchorResource } from '../anchors/serialize';
+import type { AnchorResource } from '../anchors/serialize';
+import type { AnchorRecord } from '../anchors/service';
 import { toClaimResource } from '../claims/serialize';
 import type { ClaimResource } from '../claims/serialize';
 import type { ClaimRecord } from '../claims/service';
@@ -37,8 +40,11 @@ export interface PageResource {
   updated_by: ActorResource;
   body?: string;
   linked_page?: PageResource | null;
-  /** Always present, empty until Phase 4 ships anchoring. */
-  anchors: never[];
+  /**
+   * The code this page is anchored to, with the state of each anchor as of its
+   * last check. Always present; empty when nothing is anchored.
+   */
+  anchors: AnchorResource[];
   /**
    * The lease currently held on this page, when there is one. A reader sees it
    * before it writes, which is what turns a lost update into a wait.
@@ -54,7 +60,11 @@ export interface PageNodeResource {
   kind: PageKind;
   updated_at: string;
   has_children: boolean;
-  /** Reserved for Phase 4; no anchor can be stale before anchors exist. */
+  /**
+   * How many anchors on this page are not `fresh` — stale, moved-renamed and
+   * lost together. One number, because a tree node has room for a badge and
+   * not for three; the page itself breaks it down.
+   */
   stale_anchor_count: number;
   /** True while someone holds a claim on this page or one of its sections. */
   claimed: boolean;
@@ -76,6 +86,7 @@ export interface SerializePageOptions {
   linkedPage?: PageRecord | null;
   /** Pass `null` to state explicitly that the page is unclaimed. */
   claim?: ClaimRecord | null;
+  anchors?: readonly AnchorRecord[];
 }
 
 export function toPageResource(
@@ -95,7 +106,7 @@ export function toPageResource(
     created_by: { type: page.createdByType, id: page.createdById },
     updated_at: page.updatedAt.toISOString(),
     updated_by: { type: page.updatedByType, id: page.updatedById },
-    anchors: [],
+    anchors: (options.anchors ?? []).map(toAnchorResource),
   };
 
   if (options.includeBody !== false) {
@@ -116,6 +127,7 @@ export function toPageNodeResource(
   page: PageRecord,
   hasChildren: boolean,
   claimed = false,
+  staleAnchorCount = 0,
 ): PageNodeResource {
   return {
     page_id: page.id,
@@ -125,18 +137,20 @@ export function toPageNodeResource(
     kind: page.kind,
     updated_at: page.updatedAt.toISOString(),
     has_children: hasChildren,
-    stale_anchor_count: 0,
+    stale_anchor_count: staleAnchorCount,
     claimed,
   };
 }
 
 /**
- * `claimedPageIds` carries the workspace's live claims, read once for the whole
- * tree rather than once per node.
+ * `claimedPageIds` and `staleAnchorCounts` carry the workspace's live claims
+ * and anchor states, each read once for the whole tree rather than once per
+ * node.
  */
 export function toTreeResource(
   node: PageTreeNode,
   claimedPageIds: ReadonlySet<string> = new Set(),
+  staleAnchorCounts: ReadonlyMap<string, number> = new Map(),
 ): PageNodeResource {
   return {
     page_id: node.id,
@@ -146,9 +160,11 @@ export function toTreeResource(
     kind: node.kind,
     updated_at: node.updatedAt.toISOString(),
     has_children: node.children.length > 0,
-    stale_anchor_count: 0,
+    stale_anchor_count: staleAnchorCounts.get(node.id) ?? 0,
     claimed: claimedPageIds.has(node.id),
-    children: node.children.map((child) => toTreeResource(child, claimedPageIds)),
+    children: node.children.map((child) =>
+      toTreeResource(child, claimedPageIds, staleAnchorCounts),
+    ),
   };
 }
 

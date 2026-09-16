@@ -7,7 +7,8 @@
     "node": ">=22"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["@parcel/watcher", "@swc/core", "esbuild", "unrs-resolver"]
+    "onlyBuiltDependencies": ["@parcel/watcher", "@swc/core", "esbuild", "unrs-resolver"],
+    "ignoredBuiltDependencies": ["tree-sitter-javascript", "tree-sitter-typescript"]
   },
   "scripts": {
     "dev": "pnpm --filter @clewwiki/web dev",

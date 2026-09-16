@@ -104,11 +104,16 @@ One limitation is worth stating plainly while it lasts. A section claim is
 enforced as exclusion — it keeps a page-level claim and a competing claim
 on the same section out — but the write it authorises is still a write of
 the whole page body, because the server has no section boundaries to check
-against until anchors arrive in Phase 4. Two holders of different sections
-writing at the same time are therefore separated by the content hash
-rather than by the section: the second write is refused as `stale_base`
-and the caller re-reads and merges. Nothing is lost, and the check that
-closes the gap is additive.
+a body against. Two holders of different sections writing at the same time
+are therefore separated by the content hash rather than by the section: the
+second write is refused as `stale_base` and the caller re-reads and merges.
+Nothing is lost, and the check that closes the gap is additive.
+
+Anchors do not close it. An anchor's `section_id` names the part of the page
+a piece of code belongs to, which is enough to flag the right section and not
+enough to police a write: it says which section an anchor is about, not where
+that section starts and ends in the Markdown. Deriving boundaries from the
+document's own headings is the additive check, and it is not in this phase.
 
 A claim that outlives the client holding it can be force-released by a
 workspace administrator. That is a human role check, not a scope: an agent
@@ -145,8 +150,27 @@ line-range anchors produced ~50%):
   declaration (configuration, prose) keep a `line_range` plus hash; the
   share of line-range anchors per repository is logged as an early signal
   of eroding trust.
-- **Parsers via tree-sitter.** Swift first, then TypeScript and Kotlin;
-  adding a language means adding its declaration node-type table.
+- **Parsers via tree-sitter, compiled to WebAssembly.** Swift and
+  TypeScript/TSX ship; Kotlin is the next table. Adding a language means
+  adding its declaration node-type table and a grammar file, not touching
+  the pipeline. The grammars are WebAssembly rather than native bindings
+  so that the runtime image stays a plain `node:22-slim` with no compiler
+  toolchain in it — a native grammar would mean `node-gyp` in the image
+  and a rebuild on every Node upgrade, for a parser that is read-only.
+- **The repository is read, never run.** The server keeps a bare mirror
+  per workspace, fetches it under a per-workspace lock, and reads blobs
+  with `git show`. There is no working tree, so nothing from a repository
+  is ever laid out on disk in a form something could execute, and no
+  build, install script or hook runs at any point. Repository content is
+  data — the same rule page bodies are held to. The credential for a
+  private repository is named by environment variable in the workspace's
+  settings rather than stored in them, so it never reaches the database,
+  a backup, or an API response.
+- **Rename recovery matches on the body, not the declaration.** The
+  declaration's token hash covers its name, so a rename changes it by
+  construction; what survives a rename is the hash of the body's tokens,
+  and that is what the recovery stages compare. Bodies below a few tokens
+  are not compared at all, because `{ return nil }` is not evidence.
 
 The same staleness mechanism drives the linked technical/human document
 pair: instead of targeting a code hash, it targets the paired document's

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { apiCreated, apiError, apiJson, readJsonBody, serviceErrorResponse, validationError } from '@/lib/api-response';
+import { getStaleAnchorCounts } from '@/lib/anchors/service';
 import { getActiveClaimsByPage } from '@/lib/claims/service';
 import { authorizePagesRequest, READ_SCOPES, WRITE_SCOPES } from '@/lib/pages-api';
 import { createPage, getPageByPath, getPageTree } from '@/lib/pages/service';
@@ -77,10 +78,14 @@ export async function GET(request: Request) {
       nodes = tree;
     }
 
-    const claimed = new Set((await getActiveClaimsByPage(auth.workspaceId)).keys());
+    const [claims, staleAnchors] = await Promise.all([
+      getActiveClaimsByPage(auth.workspaceId),
+      getStaleAnchorCounts(auth.workspaceId),
+    ]);
+    const claimed = new Set(claims.keys());
     const pruned = prune(nodes, depth).filter((node) => !kind || node.kind === kind);
     return apiJson(
-      { nodes: pruned.map((node) => toTreeResource(node, claimed)) },
+      { nodes: pruned.map((node) => toTreeResource(node, claimed, staleAnchors)) },
       auth.headers,
     );
   } catch (error) {

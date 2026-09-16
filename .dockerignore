@@ -11,6 +11,8 @@ dist
 **/dist
 coverage
 **/coverage
+# Grammars are copied out of node_modules inside the image, not from the host.
+apps/web/grammars
 
 # Secrets must never reach the build context, let alone a layer.
 .env

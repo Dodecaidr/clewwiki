@@ -182,13 +182,98 @@ not get back to its own lease until the TTL ran out. `docs/mcp.md` records
 it, along with the one REST condition the MCP tool cannot produce — a
 write arriving with no claim at all, answered as `conflict`.
 
-## Phase 4 — Anchoring
+## Phase 4 — Anchoring — **complete**
 
 Anchor creation, anchor checking, and the stale badge in the UI.
 
-**Exit criteria**: re-running the Phase 0 spike dataset through the
-shipped anchoring implementation reproduces the same FP/FN numbers within
-tolerance.
+**Exit criteria**: an anchor can be created for a page section pointing at
+a declaration in a linked repository; checking recomputes and returns
+per-anchor state with details; stale, moved-renamed and lost are visible
+on the page and counted in the tree; a formatting-only change does not
+flag; a body change does; a rename or a move is reported as
+moved-renamed; the line-range fallback works for blocks with no
+declaration, and its share is exposed.
+
+**Status**: met.
+
+- `packages/anchors` is the mechanism, and it is a library rather than a
+  module of the web app: it takes source text in and returns
+  declarations, hashes and resolution states, with no dependency on the
+  database, on Next.js or on a running instance. Its unit tests are
+  fixtures, which is what makes "a reformat is silence, a body edit is
+  not" a thing that can be asserted rather than argued about.
+- Grammars are loaded as WebAssembly through `web-tree-sitter`. A native
+  tree-sitter binding would put a compiler toolchain, Python and
+  `node-gyp` into the runtime image and a rebuild into every Node
+  upgrade; a `.wasm` file is one file the runtime reads. TypeScript and
+  TSX come from the grammar's own package, which publishes WebAssembly
+  builds; Swift comes from a prebuilt-WebAssembly distribution, because
+  its own package ships C sources only. The image copies all of them into
+  one directory and points `CLEWWIKI_GRAMMARS_DIR` at it, the same
+  arrangement `CLEWWIKI_MIGRATIONS_DIR` uses for the SQL.
+- Identity is `{kind, qualified_name}`; the file is a hint. The hash
+  covers the parser's token sequence with comments dropped, so
+  re-indenting a function, wrapping its arguments or rewriting its
+  documentation comment changes nothing the checker looks at.
+- Resolution is a ladder: same file and identity → another file, same
+  identity (*moved*) → the same body under a new name in the same
+  container (*renamed*) → the same body anywhere (*moved and renamed*) →
+  `lost`. The rename stages match on the body's token hash rather than on
+  the declaration's full token hash, because the full hash covers the
+  name and a rename changes it by definition. A body shorter than eight
+  tokens is not matched at all: `{ return nil }` is not evidence, and a
+  confident wrong answer is worse than an honest `lost`.
+- The line-range fallback exists for blocks with no declaration —
+  configuration, prose, a table of constants. It normalises indentation
+  and blank lines and hashes what is left. Its share of a workspace's
+  anchors rides along on every check response and is shown under the
+  anchors panel, because a line range does not survive an edit above it
+  and a rising share is the first sign that the badges are becoming
+  noise.
+- `anchors` ships in migration `0003_anchors`. A workspace's repository is
+  a `settings` entry — URL, default ref, and the *name* of an environment
+  variable holding the access token. The token itself never enters the
+  database, a backup or an API response.
+- The server keeps a bare mirror per workspace under `REPOS_DIR`, fetches
+  it under a per-workspace lock, and reads blobs with `git show`. It
+  never creates a working tree and never runs a build, an install script
+  or a hook: repository content is data, the same rule page bodies are
+  held to.
+- `POST`/`GET /api/v1/pages/{id}/anchors`,
+  `GET /api/v1/pages/{id}/anchors/check`,
+  `POST /api/v1/anchors/{anchorId}/confirm` and
+  `DELETE /api/v1/anchors/{anchorId}` are served by the same service
+  layer the UI renders from. `GET /api/v1/pages/{id}` carries `anchors`
+  and tree nodes carry `stale_anchor_count`, as `docs/mcp.md` says.
+- Every handler is workspace-scoped in its SQL predicate, scope-checked
+  (`pages:read` to check, `pages:write` to create, confirm or delete) and
+  audited under `anchor.created`, `anchor.checked`, `anchor.confirmed`,
+  `anchor.deleted` and `workspace.repository_set`.
+- Nothing clears itself. A flag is cleared by `confirm`, which
+  re-baselines the anchor onto what is there now and says who did it — a
+  badge that disappeared on its own would make the silence of every other
+  badge worthless.
+
+Three deviations from the plan as written. The exit criterion in the
+original plan was "re-running the Phase 0 spike dataset reproduces the
+same FP/FN numbers within tolerance"; that dataset is the history of a
+private repository that is not part of this project and cannot be
+committed to it, so the criterion was restated as the behavioural one
+above — each of the mechanism's promised outcomes is asserted on
+fixtures in `packages/anchors` and end to end against a temporary git
+repository in the integration suite. Second, the rename stages of the
+ladder key on the body-token hash rather than on the full token hash the
+plan named: the full hash includes the declaration's name, so it cannot
+by construction be what recovers a rename. Third, Kotlin is not in this
+phase. Swift and TypeScript are, the pipeline above the grammar is
+language-independent, and adding Kotlin is a declaration table plus a
+`.wasm` file rather than a change to the mechanism.
+
+A fourth thing is worth stating as a limitation rather than a deviation:
+the repository-wide stages of the ladder read at most four thousand
+source files per check. Past that ceiling a move out of the indexed
+prefix reads as `lost`. That loses recall on very large repositories; it
+never invents a match.
 
 ## Phase 5 — MCP server
 

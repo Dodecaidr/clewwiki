@@ -47,6 +47,31 @@ export function getAgentRateLimitWindowSeconds(): number {
   return optionalNumber('AGENT_TOKEN_RATE_LIMIT_WINDOW', 60);
 }
 
+/**
+ * Where the server keeps its mirror of each workspace's source repository.
+ *
+ * One directory per workspace, holding a bare clone: the anchor checker reads
+ * blobs out of it with `git show` and never creates a working tree, so nothing
+ * from the repository is ever laid out on disk in a form something could
+ * execute.
+ */
+export function getReposDir(): string {
+  const configured = process.env.REPOS_DIR;
+  return configured && configured.trim() !== '' ? configured : '/data/repos';
+}
+
+/**
+ * Reads the access token for a repository out of the environment.
+ *
+ * The workspace setting names the variable; the value never enters the
+ * database, an API response or a log line.
+ */
+export function getRepositoryToken(variableName: string | undefined | null): string | null {
+  if (!variableName) return null;
+  const value = process.env[variableName];
+  return value && value.trim() !== '' ? value : null;
+}
+
 export function isProduction(): boolean {
   return process.env.NODE_ENV === 'production';
 }

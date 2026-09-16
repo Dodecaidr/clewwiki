@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { apiError, apiJson, readJsonBody, serviceErrorResponse, validationError } from '@/lib/api-response';
 import { requireWorkspace } from '@/lib/api-auth';
+import { listAnchorsForPage } from '@/lib/anchors/service';
 import { authorizePagesRequest, READ_SCOPES, WRITE_SCOPES } from '@/lib/pages-api';
 import { getActiveClaimsForPage } from '@/lib/claims/service';
 import { CONTENT_HASH_PATTERN } from '@/lib/pages/content';
@@ -53,9 +54,13 @@ export async function GET(request: Request, context: RouteContext) {
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
 
-    const [linked, activeClaims] = await Promise.all([
+    const [linked, activeClaims, pageAnchors] = await Promise.all([
       page.linkedPageId ? getPageById(auth.workspaceId, page.linkedPageId) : Promise.resolve(null),
       getActiveClaimsForPage(auth.workspaceId, page.id),
+      // The state stored by the last check, not a fresh one: recomputing costs
+      // a repository fetch, and a read of a page must not depend on the
+      // network. `GET …/anchors/check` is where that is asked for explicitly.
+      listAnchorsForPage(auth.workspaceId, page.id),
     ]);
 
     // A page-level claim outranks a section claim in this slot: it is the
@@ -63,7 +68,10 @@ export async function GET(request: Request, context: RouteContext) {
     const claim =
       activeClaims.find((candidate) => candidate.sectionId === null) ?? activeClaims[0] ?? null;
 
-    return apiJson(toPageResource(page, { linkedPage: linked, claim }), auth.headers);
+    return apiJson(
+      toPageResource(page, { linkedPage: linked, claim, anchors: pageAnchors }),
+      auth.headers,
+    );
   } catch (error) {
     return serviceErrorResponse(error);
   }

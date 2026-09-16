@@ -13,7 +13,8 @@ export type PageErrorCode =
   | 'not_found'
   | 'conflict'
   | 'stale_base'
-  | 'forbidden';
+  | 'forbidden'
+  | 'repository_unavailable';
 
 const STATUS_BY_CODE: Record<PageErrorCode, number> = {
   validation: 400,
@@ -21,6 +22,10 @@ const STATUS_BY_CODE: Record<PageErrorCode, number> = {
   conflict: 409,
   stale_base: 409,
   forbidden: 403,
+  // The workspace's source repository could not be reached or read. It is the
+  // instance's dependency that failed, not the caller's request, so it is a
+  // 502 rather than a 4xx: retrying the same call unchanged is the right move.
+  repository_unavailable: 502,
 };
 
 export class PageServiceError extends Error {

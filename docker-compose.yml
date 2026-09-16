@@ -43,7 +43,12 @@ services:
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       AGENT_TOKEN_RATE_LIMIT_MAX: ${AGENT_TOKEN_RATE_LIMIT_MAX:-60}
       AGENT_TOKEN_RATE_LIMIT_WINDOW: ${AGENT_TOKEN_RATE_LIMIT_WINDOW:-60}
+      REPOS_DIR: /data/repos
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      # Read-only mirrors of the repositories anchors are checked against. On a
+      # named volume so a restart does not re-clone every workspace's history.
+      - repos-data:/data/repos
     ports:
       # Bound to the loopback interface by default. Change this to 3000:3000
       # only once something in front of it is terminating TLS.
@@ -63,3 +68,4 @@ services:
 
 volumes:
   postgres-data:
+  repos-data:

@@ -43,6 +43,16 @@ export const claimReleaseReason = pgEnum('claim_release_reason', [
 ]);
 
 /**
+ * How an anchor stood at its last check.
+ *
+ * Four values rather than one boolean, because the three failure modes ask
+ * different things of a reader: `stale` is a diff to read, `moved-renamed` is a
+ * re-anchor, and `lost` is a decision about whether the documentation still
+ * describes anything.
+ */
+export const anchorState = pgEnum('anchor_state', ['fresh', 'stale', 'moved-renamed', 'lost']);
+
+/**
  * PostgreSQL `tsvector`. Drizzle has no built-in mapping for it, and the
  * column is never read back into TypeScript — it exists for the index and for
  * the ranking expression — so the driver type is a plain string.
@@ -68,6 +78,26 @@ export interface WorkspaceSettings {
    * within the bounds the claim service enforces.
    */
   claim_ttl_seconds?: number;
+  /** The source repository this workspace's anchors are checked against. */
+  repository?: WorkspaceRepositorySettings;
+}
+
+/**
+ * Where the code an anchor points at lives.
+ *
+ * `auth_token_env` names an environment variable, never a token: a credential
+ * written into a settings row would be readable by anything that can read the
+ * workspace, would survive in database backups, and would have to be redacted
+ * from every API response that carries settings. The operator sets the variable
+ * on the process; the application only ever learns its name.
+ */
+export interface WorkspaceRepositorySettings {
+  /** `https://…`, `ssh://…` or `file://…` for a local or test repository. */
+  url: string;
+  /** The ref checked by default: a branch name, a tag, or a commit. */
+  default_ref: string;
+  /** Name of the environment variable holding the access token, if any. */
+  auth_token_env?: string;
 }
 
 /**
@@ -400,6 +430,89 @@ export const claimNotes = pgTable(
   ],
 );
 
+/**
+ * Anchors: the tie between a documentation section and a declaration in the
+ * workspace's source repository.
+ *
+ * The identity of an anchor is `{kind, qualified_name}`, not a location.
+ * `file_hint` is where the resolver looks first and nothing more — a
+ * declaration moved to another file is the same anchor, found by a
+ * repository-wide search for the same identity, and reported as
+ * `moved-renamed` rather than as a change to the documentation.
+ *
+ * `token_hash` is a hash of the parser's token sequence for the declaration,
+ * never of its text: a formatter run rewrites text hashes wholesale while
+ * changing nothing a reader cares about. For a `fallback` anchor — a block
+ * with no resolvable declaration, such as a configuration stanza — the same
+ * column holds the hash of the normalised line range instead, and
+ * `line_start`/`line_end` are the anchor rather than display metadata.
+ *
+ * Nothing here is ever rewritten automatically. A state other than `fresh` is
+ * shown to a human or an agent, who reviews it and confirms.
+ */
+export const anchors = pgTable(
+  'anchors',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    pageId: uuid('page_id')
+      .notNull()
+      .references(() => pages.id, { onDelete: 'cascade' }),
+    /** The section of the page this anchor belongs to, or null for the page. */
+    sectionId: text('section_id'),
+    /**
+     * Grammar the declaration was read with. Plain text rather than an enum:
+     * supporting one more language is a table in `@clewwiki/anchors`, and it
+     * must not also be a migration.
+     */
+    language: text('language').notNull(),
+    /** Declaration kind as the grammar names it: `func`, `class`, `method`. */
+    kind: text('kind').notNull(),
+    qualifiedName: text('qualified_name').notNull(),
+    /** Enclosing declaration, used by the rename stage of the resolver. */
+    container: text('container'),
+    /** Repository-relative path where the declaration was last seen. */
+    fileHint: text('file_hint').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    /** Hash of the body tokens alone; what survives a rename. */
+    bodyHash: text('body_hash'),
+    bodyTokenCount: integer('body_token_count').notNull().default(0),
+    lineStart: integer('line_start'),
+    lineEnd: integer('line_end'),
+    /** True when this anchor is a line range rather than a declaration. */
+    fallback: boolean('fallback').notNull().default(false),
+    state: anchorState('state').notNull().default('fresh'),
+    /** What the last check found: the file it resolved to, a new name, a diff. */
+    detail: jsonb('detail').$type<Record<string, unknown>>(),
+    /** The ref the last check ran against, and when. */
+    lastCheckedRef: text('last_checked_ref'),
+    lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+    createdByType: actorType('created_by_type').notNull(),
+    createdById: text('created_by_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('anchors_page_idx').on(table.pageId),
+    index('anchors_workspace_state_idx').on(table.workspaceId, table.state),
+    index('anchors_workspace_file_idx').on(table.workspaceId, table.fileHint),
+    // One anchor per target per section: re-anchoring the same declaration on
+    // the same section is an update, not a second row to check twice.
+    // Two partial indexes rather than one over a nullable column: in
+    // PostgreSQL every null is distinct from every other, so a single index
+    // including `section_id` would happily accept the same page-level target
+    // twice. Same shape as the claims indexes, for the same reason.
+    uniqueIndex('anchors_page_target_key')
+      .on(table.pageId, table.kind, table.qualifiedName, table.fileHint)
+      .where(isNull(table.sectionId)),
+    uniqueIndex('anchors_section_target_key')
+      .on(table.pageId, table.sectionId, table.kind, table.qualifiedName, table.fileHint)
+      .where(sql`${table.sectionId} is not null`),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
@@ -415,3 +528,6 @@ export type Claim = typeof claims.$inferSelect;
 export type NewClaim = typeof claims.$inferInsert;
 export type ClaimReleaseReason = (typeof claimReleaseReason.enumValues)[number];
 export type ClaimNote = typeof claimNotes.$inferSelect;
+export type Anchor = typeof anchors.$inferSelect;
+export type NewAnchor = typeof anchors.$inferInsert;
+export type AnchorStateValue = (typeof anchorState.enumValues)[number];

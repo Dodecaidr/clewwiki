@@ -23,6 +23,9 @@ export interface PageTreeItem {
    * to carry one.
    */
   claimLabel?: string | null;
+  /** How many anchors on this page are not fresh, and a label for the badge. */
+  staleAnchorCount?: number;
+  staleAnchorLabel?: string | null;
   children: PageTreeItem[];
 }
 
@@ -51,6 +54,17 @@ function TreeLevel({
             )}
           >
             <span className="truncate">{node.title}</span>
+            {node.staleAnchorCount ? (
+              // The count, not a dot: "3 anchors out of date" is a different
+              // thing to walk into than "something here changed".
+              <span
+                aria-label={node.staleAnchorLabel ?? undefined}
+                title={node.staleAnchorLabel ?? undefined}
+                className="ml-1 inline-flex shrink-0 items-center rounded-(--radius-base) border border-destructive/40 bg-destructive/10 px-1 text-[10px] font-medium leading-4"
+              >
+                {node.staleAnchorCount}
+              </span>
+            ) : null}
             {node.claimLabel ? (
               // A held page is marked where the reader already is, rather than
               // only on the presence board: the point of the badge is to be

@@ -486,6 +486,81 @@ file is a standalone document that opens from disk with nothing to load;
 Mermaid blocks are kept as `<pre class="mermaid">` holding their source, since
 drawing them would mean shipping a renderer inside every exported file.
 
+### Anchoring a page to code
+
+An anchor ties a page, or one named section of it, to a declaration in your
+source repository. When the code changes, the page is flagged — it is never
+rewritten, and nothing is trusted silently.
+
+**Link a repository once, as an administrator.** Open **Repository** in the
+header and fill in three fields:
+
+| Field | What it takes |
+|---|---|
+| Repository URL | `https://…`, `ssh://…`, or `file:///srv/checkouts/api` for a repository on the same machine. |
+| Default ref | The branch, tag or commit anchors are checked against unless a caller names another. Usually `main`. |
+| Access token variable | The **name** of an environment variable holding the token — for example `GIT_ACCESS_TOKEN`. Leave it empty for a public or local repository. |
+
+The token itself is never typed into the form and never stored: the setting
+records the variable's name, and the server reads the value out of its own
+environment when it talks to git. **Test connection** checks the URL, the ref
+and the token without cloning anything.
+
+The server keeps a read-only bare mirror per workspace under `REPOS_DIR`,
+fetches it on demand, and reads files with `git show`. It never creates a
+working tree, never runs a build, an install script or a hook, and never
+executes anything it finds in your repository.
+
+**Add an anchor** from the *Anchored code* panel on any page — a file path plus
+either a symbol (`Mixer.blend(first:second:)`) or a line range (`42-58`) — or
+over the API:
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"file":"Sources/Audio/Mixer.swift","qualified_name":"Mixer.blend(first:second:)"}' \
+     "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/anchors"
+```
+
+The declaration is resolved against the repository before the anchor is stored,
+so a misspelled symbol is refused there and then rather than reported as `lost`
+a week later. Swift, TypeScript and TSX have declaration tables today; any other
+file can still be anchored by line range.
+
+**Check** recomputes every anchor on a page against the repository:
+
+```sh
+curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/anchors/check?ref=main"
+```
+
+Each anchor comes back in one of four states, and they mean different things:
+
+| State | What happened | What to do |
+|---|---|---|
+| `fresh` | The declaration is there and unchanged. | Nothing. |
+| `stale` | Same declaration, changed body. | Read the diff, update the page, confirm. |
+| `moved-renamed` | The declaration was found elsewhere, or under another name. The response says where and what it is called now. | Confirm, which re-points the anchor. |
+| `lost` | Nothing resolvable. | A decision, not an edit: fix the page, or delete the anchor. |
+
+A formatting change does not flag anything. The hash covers the parser's token
+sequence rather than the file's text, so re-indenting a function, wrapping its
+arguments or rewriting its comments changes nothing the checker looks at; a
+change to what the code *does* changes the hash.
+
+**Confirm** is the only thing that clears a flag, and it is a deliberate,
+audited act by a person or an agent:
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     "$CLEWWIKI_URL/api/v1/anchors/$ANCHOR_ID/confirm"
+```
+
+The check response also carries `fallback_share` — the share of the workspace's
+anchors sitting on the line-range path. Line ranges do not survive an edit above
+them, so a rising number is the early warning that the badges are turning into
+noise.
+
 ### REST endpoints in this phase
 
 | Endpoint | Auth | Scope | Purpose |
@@ -507,6 +582,11 @@ drawing them would mean shipping a renderer inside every exported file.
 | `GET /api/v1/claims` | session or token | `pages:read` | The presence board: every claim held in the workspace, with its notes. |
 | `POST /api/v1/pages/{id}/notes` | session or token | `pages:write` | Leave an ephemeral note on a claim the caller holds. |
 | `GET /api/v1/pages/{id}/notes` | session or token | `pages:read` | The active notes on a page. |
+| `POST /api/v1/pages/{id}/anchors` | session or token | `pages:write` | Anchor the page, or one of its sections, to a declaration or a line range. Resolves it against the repository first. |
+| `GET /api/v1/pages/{id}/anchors` | session or token | `pages:read` | The anchors on one page, plus the workspace's `fallback_share`. |
+| `GET /api/v1/pages/{id}/anchors/check` | session or token | `pages:read` | Recompute every anchor on the page against the repository. Takes `ref`. |
+| `POST /api/v1/anchors/{anchorId}/confirm` | session or token | `pages:write` | Clear a flag after review, re-baselining the anchor onto what is there now. |
+| `DELETE /api/v1/anchors/{anchorId}` | session or token | `pages:write` | Remove an anchor. |
 | `GET /api/v1/audit` | admin session or token | `audit:read` | The audit log, newest first. Takes `action`, `target`, `since`, `limit`. |
 | `GET /api/v1/search` | session or token | `pages:read` | Full-text search. Takes `q`, `limit`, `kind`. |
 | `GET /api/v1/export/{id}` | session or token | `pages:read` | Export a page. Takes `format=md` or `format=html`. |
@@ -522,11 +602,14 @@ when there is more than one. Errors share one envelope:
 ```
 
 The codes are `validation`, `not_found`, `conflict`, `stale_base`,
-`forbidden`, `insufficient_scope`, `unauthenticated`, `invalid_token` and
-`rate_limited`. On the write path they mean particular things: `conflict` is
+`forbidden`, `insufficient_scope`, `unauthenticated`, `invalid_token`,
+`rate_limited` and `repository_unavailable`. On the write path they mean
+particular things: `conflict` is
 "you have no claim here", `not_found` on a write is "your claim has expired or
 been released", `forbidden` is "that claim belongs to someone else", and
-`stale_base` is "the page moved under you".
+`stale_base` is "the page moved under you". `repository_unavailable` is a `502`:
+the workspace's source repository could not be reached or read, which is this
+instance's dependency failing rather than anything wrong with the request.
 
 ### Reverse proxy
 
@@ -727,6 +810,8 @@ and there is no configuration file to edit inside the container.
 | `RUN_MIGRATIONS_ON_START` | no | unset (migrations run) | Set to `false` to manage the schema yourself. |
 | `CLAIM_SWEEP_INTERVAL_SECONDS` | no | `60` | How often lapsed claims are released in the background. `0` disables the sweep; expiry is still applied whenever a claim is read or written. |
 | `CLEWWIKI_MIGRATIONS_DIR` | no | set by the image | Where the app looks for migration SQL. |
+| `REPOS_DIR` | no | `/data/repos` | Where read-only mirrors of workspace repositories are kept. Compose backs it with a named volume. |
+| `CLEWWIKI_GRAMMARS_DIR` | no | set by the image | Where the app looks for the tree-sitter grammar `.wasm` files. |
 | `LOG_LEVEL` | no | `info` | One of `error`, `warn`, `info`, `debug`. |
 
 Browser sessions are not rate limited; the two `AGENT_TOKEN_RATE_LIMIT_*`
@@ -817,7 +902,8 @@ No calendar dates — phases are ordered by dependency, not by schedule.
 - **Phase 2** — Wiki core: pages, page tree, full-text search, REST API.
   *Complete.*
 - **Phase 3** — Claims and leases, presence board, ephemeral agent notes.
-- **Phase 4** — Doc↔code anchoring, conditional on the Phase 0 spike result.
+  *Complete.*
+- **Phase 4** — Doc↔code anchoring with staleness detection. *Complete.*
 - **Phase 5** — MCP server (stdio and streamable HTTP transports).
 - **Phase 6** — Export (Markdown/HTML, PDF conditional on a spike), Docker
   image and compose, full README and license text.
