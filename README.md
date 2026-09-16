@@ -54,10 +54,12 @@ code↔doc drift also watches drift between the two linked bodies.
 
 ## Deploy
 
-Phase 1 ships the parts everything else stands on: the database schema,
-credential login, scoped agent tokens, and a container that builds. The wiki
-itself — pages, search, claims — is not here yet. What follows works today,
-verbatim, on a clean machine.
+What is here today: the database schema, credential login, scoped agent tokens,
+a container that builds, and the wiki core — pages, a page tree, Markdown and
+Mermaid rendering, full-text search, revision history, and Markdown/HTML
+export, over both the web UI and the REST API. Claims, anchoring and the MCP
+server are not here yet. What follows works today, verbatim, on a clean
+machine.
 
 ### Prerequisites
 
@@ -163,8 +165,8 @@ should live, and grant only the scopes the agent actually needs:
 | Scope | What it permits |
 |---|---|
 | `identity:read` | Call `GET /api/v1/me`. Needed by anything that wants to confirm who it is. |
-| `pages:read` | Read wiki content. Reserved for Phase 2. |
-| `pages:write` | Create and change wiki content. Reserved for Phase 2. |
+| `pages:read` | Read wiki pages, the page tree, search results and exports. |
+| `pages:write` | Create, change, move, delete and link wiki pages. |
 | `audit:read` | Read the audit log. Reserved for a later phase. |
 
 Press **Issue token**. The token appears once:
@@ -214,16 +216,140 @@ WWW-Authenticate: Bearer realm="clewwiki"
 Expiry behaves identically: a token past `expires_at` is refused at the same
 point, not at write time.
 
+## Writing pages
+
+A page can be written from the browser or over the REST API, and both go
+through the same code — there is no "API version" of a page that behaves
+differently from the one the UI produces.
+
+### From the UI
+
+Sign in and open **Pages**. **New page** asks for a title, where the page sits
+in the tree, its kind, and the body:
+
+- **Kind** is `technical` or `human`. The two are the linked document pair:
+  one written for agents, one written for people. A page of each kind can be
+  paired so that a reader of either lands on the other.
+- **Path** is derived from the title and the parent if you leave it empty —
+  a page called "Auth service" under `/backend` becomes `/backend/auth-service`.
+  Moving a page later moves everything below it.
+- **Body** is Markdown. A fenced block marked `mermaid` is rendered as a
+  diagram in the browser:
+
+  ````markdown
+  ```mermaid
+  flowchart LR
+      Agent -->|writes| Page
+      Page -->|revision| History
+  ```
+  ````
+
+**Show preview** renders the body through the same pipeline the stored page and
+the HTML export use, so the preview cannot show you something the page will not.
+
+### From an agent token
+
+Issue a token with `pages:read` and `pages:write` (see above), then:
+
+```sh
+export CLEWWIKI_TOKEN=cww_…
+export CLEWWIKI_URL=http://localhost:3000
+
+# Create a page.
+curl -sS -X POST "$CLEWWIKI_URL/api/v1/pages" \
+     -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{
+           "title": "Auth service",
+           "path": "/backend/auth",
+           "kind": "technical",
+           "summary": "How bearer tokens are verified.",
+           "body": "# Auth service\n\nTokens are verified before any handler runs.\n"
+         }'
+```
+
+```json
+{
+  "page_id": "3f0c…",
+  "path": "/backend/auth",
+  "title": "Auth service",
+  "kind": "technical",
+  "version": 1,
+  "content_hash": "9f2b…",
+  "updated_by": { "type": "agent", "id": "1ced…" },
+  "anchors": []
+}
+```
+
+`content_hash` comes back on every read. Send it as `base_content_hash` on a
+write and the write is refused with `409 stale_base` if someone changed the
+page in between, instead of silently overwriting them:
+
+```sh
+curl -sS -X PATCH "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID" \
+     -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d "{\"body\": \"# Auth service\n\nRewritten.\n\", \"base_content_hash\": \"$HASH\"}"
+```
+
+Search, history and the tree:
+
+```sh
+curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     "$CLEWWIKI_URL/api/v1/search?q=bearer&limit=5"
+curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/versions"
+curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/tree"
+```
+
+### Export
+
+Every page exports to Markdown or HTML, from the **Export** menu on the page or
+straight from the API. Both are rendered from the page itself with nothing
+fetched at export time, so an export keeps working when everything around it
+does not:
+
+```sh
+curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     "$CLEWWIKI_URL/api/v1/export/$PAGE_ID?format=md" -o auth.md
+
+curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     "$CLEWWIKI_URL/api/v1/export/$PAGE_ID?format=html" -o auth.html
+```
+
+The Markdown file is the body exactly as stored, under front matter carrying
+the title, path, kind, version, content hash and modification time. The HTML
+file is a standalone document that opens from disk with nothing to load;
+Mermaid blocks are kept as `<pre class="mermaid">` holding their source, since
+drawing them would mean shipping a renderer inside every exported file.
+
 ### REST endpoints in this phase
 
-| Endpoint | Auth | Purpose |
-|---|---|---|
-| `GET /api/v1/health` | none | Liveness and database reachability. Used by the compose healthcheck. |
-| `GET /api/v1/me` | session cookie or bearer token | Who the caller is, what it may do, and which workspace it is bound to. |
+| Endpoint | Auth | Scope | Purpose |
+|---|---|---|---|
+| `GET /api/v1/health` | none | — | Liveness and database reachability. Used by the compose healthcheck. |
+| `GET /api/v1/me` | session or token | `identity:read` | Who the caller is, what it may do, and which workspace it is bound to. |
+| `GET /api/v1/pages` | session or token | `pages:read` | The page tree, without bodies. Takes `parent_id`, `path`, `kind`, `depth`. |
+| `POST /api/v1/pages` | session or token | `pages:write` | Create a page. |
+| `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |
+| `PATCH /api/v1/pages/{id}` | session or token | `pages:write` | Update or move a page. Writes a revision and bumps the version. |
+| `DELETE /api/v1/pages/{id}` | session or token | `pages:write` | Soft-delete a page and everything below it. |
+| `GET /api/v1/pages/{id}/tree` | session or token | `pages:read` | The subtree rooted at a page, nested. |
+| `GET /api/v1/pages/{id}/versions` | session or token | `pages:read` | Revision history: version, author, content hash, timestamp. |
+| `POST /api/v1/pages/{id}/link` | session or token | `pages:write` | Pair a technical page with a human one, or unpair them. |
+| `GET /api/v1/search` | session or token | `pages:read` | Full-text search. Takes `q`, `limit`, `kind`. |
+| `GET /api/v1/export/{id}` | session or token | `pages:read` | Export a page. Takes `format=md` or `format=html`. |
 
-Both refuse to answer for a workspace other than the caller's own. That check is
-written explicitly in the handler rather than inferred from there being one
-workspace, so it does not have to be retrofitted when there is more than one.
+All of them refuse to answer for a workspace other than the caller's own, with
+`404` rather than `403` so the response does not confirm that a page exists
+somewhere else. That check is written explicitly in each handler rather than
+inferred from there being one workspace, so it does not have to be retrofitted
+when there is more than one. Errors share one envelope:
+
+```json
+{ "error": { "code": "stale_base", "message": "…", "details": { } } }
+```
 
 ### Reverse proxy
 
@@ -509,7 +635,9 @@ No calendar dates — phases are ordered by dependency, not by schedule.
 - **Phase 0** — Anchor mechanism spike, project bootstrap, CI skeleton with
   dependency and secret scanning.
 - **Phase 1** — Data model and auth: workspace, users, roles, agent tokens.
+  *Complete.*
 - **Phase 2** — Wiki core: pages, page tree, full-text search, REST API.
+  *Complete.*
 - **Phase 3** — Claims and leases, presence board, ephemeral agent notes.
 - **Phase 4** — Doc↔code anchoring, conditional on the Phase 0 spike result.
 - **Phase 5** — MCP server (stdio and streamable HTTP transports).

@@ -120,7 +120,6 @@ lives in the implementation, not here):
 - `claims`
 - `agent_notes`
 - `anchors`
-- `page_links`
 - `agent_write_audit`
 
 `page_revisions` is an append-only version history; ephemeral agent notes
@@ -128,3 +127,22 @@ are explicitly excluded from it and expire with the claim they are bound
 to. `agent_write_audit` is written in the same transaction as the write
 attempt it records, including failed and conflicting attempts, so it
 serves as a forensic log rather than best-effort telemetry.
+
+A page belongs to one of the two document types through its `kind`
+(`technical` or `human`) and points at its counterpart through a nullable
+`linked_page_id` on the same row, rather than through a separate link
+table. v1 pairs exactly one technical page with one human page, which a
+column states precisely and a join table would only permit; the pair's
+staleness flag arrives with the anchor mechanism, and adding it does not
+move the pairing.
+
+The page tree is stored twice on purpose. `parent_id` is the edge a move
+rewrites; a materialised `path` (`/backend/auth`) makes "everything below
+this page" a single prefix scan instead of a recursive walk. A move
+updates the moved page and every descendant's path in one transaction, so
+the two representations cannot drift apart.
+
+Full-text search is a generated `tsvector` column on `pages`, weighted
+title over summary over body, with a GIN index — inside the same
+PostgreSQL instance as everything else, because a workspace at v1 scale
+does not justify a second system to keep in sync.

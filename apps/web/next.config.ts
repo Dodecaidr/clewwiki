@@ -9,6 +9,11 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const nextConfig: NextConfig = {
+  // The dev server otherwise writes agent-context files of its own into this
+  // directory on every start. This repository keeps exactly one such file, at
+  // the root, written and reviewed like any other content — so the generator
+  // is turned off rather than its output repeatedly deleted.
+  agentRules: false,
   // Required by the Docker image: emits a self-contained server bundle.
   output: 'standalone',
   // The app lives in a workspace, so tracing has to start at the repo root or

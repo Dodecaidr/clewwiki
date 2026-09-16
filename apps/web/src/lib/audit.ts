@@ -1,9 +1,9 @@
 import 'server-only';
 
 import { auditLog } from '@clewwiki/db';
-import type { Database } from '@clewwiki/db';
 
 import { getDatabase } from './db';
+import type { DbExecutor } from './db';
 
 export type AuditActorType = 'user' | 'agent';
 
@@ -26,7 +26,7 @@ export interface AuditEntry {
  * `tx` the row is written on its own connection, which is the right shape for
  * authentication outcomes, where there is no surrounding write to join.
  */
-export async function recordAudit(entry: AuditEntry, tx?: Database): Promise<void> {
+export async function recordAudit(entry: AuditEntry, tx?: DbExecutor): Promise<void> {
   const db = tx ?? getDatabase();
   await db.insert(auditLog).values({
     workspaceId: entry.workspaceId,

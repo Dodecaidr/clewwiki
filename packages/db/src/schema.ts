@@ -1,6 +1,9 @@
+import { isNull, sql } from 'drizzle-orm';
 import {
   boolean,
+  customType,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -9,6 +12,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 
 /**
  * Account roles inside a workspace. Agent tokens are not users and carry
@@ -18,6 +22,23 @@ export const membershipRole = pgEnum('membership_role', ['admin', 'editor']);
 
 /** Who performed an audited action. */
 export const actorType = pgEnum('actor_type', ['user', 'agent']);
+
+/**
+ * The two linked document types. A page is written either for a person or for
+ * an agent; the pair is joined through `pages.linked_page_id`.
+ */
+export const pageKind = pgEnum('page_kind', ['technical', 'human']);
+
+/**
+ * PostgreSQL `tsvector`. Drizzle has no built-in mapping for it, and the
+ * column is never read back into TypeScript — it exists for the index and for
+ * the ranking expression — so the driver type is a plain string.
+ */
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return 'tsvector';
+  },
+});
 
 /**
  * Workspaces. v1 seeds exactly one row during first-run setup, but every
@@ -161,9 +182,103 @@ export const auditLog = pgTable(
   ],
 );
 
+/**
+ * Wiki pages.
+ *
+ * The tree is stored twice on purpose: `parent_id` is the edge a move has to
+ * update, and `path` is the materialised path (`/backend/auth`) that makes a
+ * subtree query a single prefix scan instead of a recursive walk. The two are
+ * kept in step inside one transaction — a move rewrites the descendants' paths
+ * with the parent's.
+ *
+ * Deletion is a soft delete: `deleted_at` is set and the row stays, so its
+ * revision history survives. The uniqueness of `path` is therefore scoped to
+ * live rows, which is what lets a path be reused after its page is deleted.
+ */
+export const pages = pgTable(
+  'pages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    parentId: uuid('parent_id').references((): AnyPgColumn => pages.id, {
+      onDelete: 'set null',
+    }),
+    /** Materialised path, always absolute and lowercase: `/backend/auth`. */
+    path: text('path').notNull(),
+    title: text('title').notNull(),
+    kind: pageKind('kind').notNull().default('technical'),
+    /** The counterpart of the technical/human pair, when one exists. */
+    linkedPageId: uuid('linked_page_id').references((): AnyPgColumn => pages.id, {
+      onDelete: 'set null',
+    }),
+    body: text('body').notNull().default(''),
+    summary: text('summary'),
+    /** SHA-256 of `body`. Callers echo it back to detect a lost update. */
+    contentHash: text('content_hash').notNull(),
+    /** Bumped on every write; matches the newest `page_revisions.version`. */
+    version: integer('version').notNull().default(1),
+    /**
+     * Maintained by PostgreSQL, not by the application, so a row written by
+     * any path — handler, migration, psql — is searchable. The weights rank a
+     * title hit above a summary hit above a body hit.
+     */
+    searchVector: tsvector('search_vector').generatedAlwaysAs(
+      sql`setweight(to_tsvector('english', coalesce("title", '')), 'A') || setweight(to_tsvector('english', coalesce("summary", '')), 'B') || setweight(to_tsvector('english', coalesce("body", '')), 'C')`,
+    ),
+    createdByType: actorType('created_by_type').notNull(),
+    createdById: text('created_by_id').notNull(),
+    updatedByType: actorType('updated_by_type').notNull(),
+    updatedById: text('updated_by_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('pages_workspace_path_key')
+      .on(table.workspaceId, table.path)
+      .where(isNull(table.deletedAt)),
+    index('pages_workspace_parent_idx').on(table.workspaceId, table.parentId),
+    index('pages_workspace_path_idx').on(table.workspaceId, table.path),
+    index('pages_search_idx').using('gin', table.searchVector),
+  ],
+);
+
+/**
+ * Append-only history. One row per write, including the first, so version 1 of
+ * a page is recoverable from the same table as every later one.
+ */
+export const pageRevisions = pgTable(
+  'page_revisions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    pageId: uuid('page_id')
+      .notNull()
+      .references(() => pages.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    summary: text('summary'),
+    contentHash: text('content_hash').notNull(),
+    authorType: actorType('author_type').notNull(),
+    authorId: text('author_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('page_revisions_page_version_key').on(table.pageId, table.version),
+    index('page_revisions_page_created_idx').on(table.pageId, table.createdAt),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
 export type MembershipRole = (typeof membershipRole.enumValues)[number];
 export type AgentToken = typeof agentTokens.$inferSelect;
 export type AuditLogRow = typeof auditLog.$inferSelect;
+export type Page = typeof pages.$inferSelect;
+export type NewPage = typeof pages.$inferInsert;
+export type PageKind = (typeof pageKind.enumValues)[number];
+export type PageRevision = typeof pageRevisions.$inferSelect;
+export type ActorKind = (typeof actorType.enumValues)[number];

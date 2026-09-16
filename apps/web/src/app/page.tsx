@@ -41,7 +41,13 @@ export default async function HomePage() {
                 <dd className="font-medium">{session.role}</dd>
               </div>
             </dl>
-            <div>
+            <div className="flex flex-wrap gap-4">
+              <Link
+                href="/pages"
+                className="text-sm underline underline-offset-2 hover:text-foreground"
+              >
+                {t('browsePages')}
+              </Link>
               <Link
                 href="/tokens"
                 className="text-sm underline underline-offset-2 hover:text-foreground"
@@ -78,6 +84,14 @@ export default async function HomePage() {
             <div>
               <dt className="font-mono text-xs">GET /api/v1/me</dt>
               <dd className="text-muted-foreground">{t('apiMe')}</dd>
+            </div>
+            <div>
+              <dt className="font-mono text-xs">GET, POST /api/v1/pages</dt>
+              <dd className="text-muted-foreground">{t('apiPages')}</dd>
+            </div>
+            <div>
+              <dt className="font-mono text-xs">GET /api/v1/search?q=</dt>
+              <dd className="text-muted-foreground">{t('apiSearch')}</dd>
             </div>
           </dl>
         </CardBody>

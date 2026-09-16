@@ -54,6 +54,13 @@ All tools take and return JSON objects. Errors use a single envelope:
 Error codes: `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`,
 `STALE_BASE`, `RATE_LIMITED`, `VALIDATION`.
 
+The REST API answers with the same envelope and the same vocabulary in
+lowercase — `not_found`, `conflict`, `stale_base`, `validation`,
+`rate_limited`, plus `unauthenticated` / `invalid_token` and
+`insufficient_scope` where the condition is specific enough to name. The
+MCP server uppercases them at its boundary, so a tool result carries the
+codes listed above regardless of which REST condition produced it.
+
 ### wiki.search
 
 Full-text search across the workspace (technical and human documents).

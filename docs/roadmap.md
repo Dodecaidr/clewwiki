@@ -52,7 +52,7 @@ carries no workspace column, no revocation timestamp and no issuing user —
 all three of which the threat model in `docs/security.md` depends on.
 Credential login and sessions are still library-managed.
 
-## Phase 2 — Wiki core
+## Phase 2 — Wiki core — **complete**
 
 Pages, page tree, Markdown + Mermaid rendering, full-text search, and the
 core REST endpoints for pages and search.
@@ -60,6 +60,44 @@ core REST endpoints for pages and search.
 **Exit criteria**: a page can be created, read, updated, and deleted over
 REST; search finds a created page by substring; a Mermaid block renders
 client-side.
+
+**Status**: met.
+
+- `pages` and `page_revisions` ship in migration `0001_pages`. A page
+  carries a body, a kind (`technical` or `human`), a nullable link to its
+  counterpart of the other kind, a SHA-256 content hash, and a version.
+  Deletion is a soft delete, so a page's history outlives it.
+- The tree is stored as both `parent_id` and a materialised path
+  (`/backend/auth`). Moving a page rewrites its descendants' paths inside
+  the same transaction as the move, so the two never disagree.
+- `GET/POST /api/v1/pages`, `GET/PATCH/DELETE /api/v1/pages/{id}`,
+  `GET /api/v1/pages/{id}/tree`, `GET /api/v1/pages/{id}/versions`,
+  `POST /api/v1/pages/{id}/link`, `GET /api/v1/search` and
+  `GET /api/v1/export/{id}?format=md|html` are served by the same service
+  layer the web UI renders from — the layer the MCP server wraps in
+  Phase 5.
+- Search is a PostgreSQL `tsvector` generated column over title, summary
+  and body, with a GIN index, `ts_headline` snippets and rank ordering. A
+  query that matches no whole word is retried as a prefix query, so a
+  partial word still finds its page.
+- Every read returns the page's content hash, and `PATCH` refuses a write
+  whose `base_content_hash` no longer matches. That is the half of the
+  Phase 3 write protocol that does not need claims, available now.
+- Every handler is workspace-scoped in its SQL predicate, scope-checked
+  (`pages:read` / `pages:write`) for agent tokens, and every write appends
+  its audit row in the same transaction as the write itself.
+- The UI serves a page tree, a Markdown view with client-rendered Mermaid
+  diagrams, a plain-Markdown editor with a preview that goes through the
+  same server-side renderer, search results, and Markdown/HTML export.
+
+Two deviations from the plan as written. Pages carry `linked_page_id`
+rather than a separate `page_links` table: v1 pairs one technical page with
+one human page, which a column expresses exactly and a join table only
+expresses loosely. The link's staleness flag, which is what would justify
+its own row, arrives with the anchor mechanism in Phase 4 and can be added
+then without moving the pairing. Authorship columns are stored as an actor
+type plus an id (`created_by_type`/`created_by_id`), because a page may be
+written by an agent token, whose id is not a row in `user`.
 
 ## Phase 3 — Claims and presence
 

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 
 import { signOutAction } from '@/app/actions';
+import { SearchBox } from '@/components/search-box';
 import { Button } from '@/components/ui/button';
 import { getSessionContext } from '@/lib/session';
 
@@ -18,14 +19,20 @@ export async function SiteHeader() {
         </Link>
         <div className="flex flex-1 flex-wrap items-center gap-x-5 gap-y-2 text-sm">
           {session ? (
-            <Link href="/tokens" className="text-muted-foreground hover:text-foreground">
-              {t('tokens')}
-            </Link>
+            <>
+              <Link href="/pages" className="text-muted-foreground hover:text-foreground">
+                {t('pages')}
+              </Link>
+              <Link href="/tokens" className="text-muted-foreground hover:text-foreground">
+                {t('tokens')}
+              </Link>
+            </>
           ) : null}
           <Link href="/about" className="text-muted-foreground hover:text-foreground">
             {t('about')}
           </Link>
         </div>
+        {session ? <SearchBox /> : null}
         {session ? (
           <form action={signOutAction}>
             <Button type="submit" variant="outline" size="sm">
