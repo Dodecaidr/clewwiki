@@ -180,7 +180,7 @@ one.
 **8. Use it.**
 
 ```sh
-curl -H "Authorization: Bearer cww_7Kq2mXpa.n4Tb9vZs1Lw0eRfHj6YcU3dQoAiKmP8gNxVtEr2sBl" \
+curl -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
      http://localhost:3000/api/v1/me
 ```
 
