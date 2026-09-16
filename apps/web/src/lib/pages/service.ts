@@ -6,7 +6,7 @@ import type { SQL } from 'drizzle-orm';
 import type { ActorKind, PageKind } from '@clewwiki/db';
 
 import { computeContentHash } from './content';
-import { PageServiceError } from './errors';
+import { PageServiceError, isPageServiceError } from './errors';
 import {
   InvalidPathError,
   isDescendantPath,
@@ -18,6 +18,11 @@ import {
   slugifySegment,
 } from './paths';
 import { recordAudit } from '../audit';
+import {
+  advanceClaimBaseHash,
+  releaseClaimsForPages,
+  requireClaimForWrite,
+} from '../claims/service';
 import { getDatabase } from '../db';
 import type { DbExecutor } from '../db';
 
@@ -440,14 +445,56 @@ export interface UpdatePageInput {
   parentId?: string | null;
   path?: string;
   /**
-   * The hash the caller last read. When supplied it must still match, so a
-   * write built on content someone else has since replaced is refused rather
-   * than silently winning. Phase 3 makes it mandatory alongside a claim.
+   * The claim the caller writes under. Mandatory: a write to a page nobody
+   * holds is the lost update this product exists to prevent, so there is no
+   * path through this function without a lease.
    */
-  baseContentHash?: string;
+  claimId: string;
+  /**
+   * The hash the caller last read. It must still match, so a write built on
+   * content someone else has since replaced is refused rather than silently
+   * winning — the claim says nobody else may write, the hash says nobody did.
+   */
+  baseContentHash: string;
 }
 
+/**
+ * Writes a page under a claim.
+ *
+ * Both halves of the protocol are checked inside the transaction that holds the
+ * page row locked: the lease (held by this caller, not expired, covering this
+ * page) and the base hash. A failed attempt is audited too — on its own
+ * connection, since the transaction that would have carried the row is the one
+ * being rolled back.
+ */
 export async function updatePage(input: UpdatePageInput): Promise<PageRecord> {
+  try {
+    return await runUpdatePage(input);
+  } catch (error) {
+    if (isPageServiceError(error)) {
+      try {
+        await recordAudit({
+          workspaceId: input.workspaceId,
+          actorType: input.actor.type,
+          actorId: input.actor.id,
+          action: 'page.write_rejected',
+          target: input.pageId,
+          metadata: {
+            result: 'rejected',
+            reason: error.code,
+            claimId: input.claimId,
+            ...(error.details ?? {}),
+          },
+        });
+      } catch (auditError) {
+        console.error('[pages] rejected write could not be audited', auditError);
+      }
+    }
+    throw error;
+  }
+}
+
+async function runUpdatePage(input: UpdatePageInput): Promise<PageRecord> {
   const db = getDatabase();
 
   return db.transaction(async (tx) => {
@@ -470,7 +517,19 @@ export async function updatePage(input: UpdatePageInput): Promise<PageRecord> {
       throw new PageServiceError('not_found', 'Page not found');
     }
 
-    if (input.baseContentHash !== undefined && input.baseContentHash !== current.contentHash) {
+    // The lease is checked before the hash, and both before anything is
+    // written: a caller with no claim is told that first, rather than being
+    // told its content is stale when its real problem is that it never had
+    // permission to write at all.
+    const claim = await requireClaimForWrite({
+      tx,
+      workspaceId: input.workspaceId,
+      pageId: current.id,
+      claimId: input.claimId,
+      actor: input.actor,
+    });
+
+    if (input.baseContentHash !== current.contentHash) {
       throw new PageServiceError('stale_base', 'Page has changed since it was read', {
         current_content_hash: current.contentHash,
         your_base_hash: input.baseContentHash,
@@ -546,6 +605,11 @@ export async function updatePage(input: UpdatePageInput): Promise<PageRecord> {
       authorId: input.actor.id,
     });
 
+    // The holder's own write is not an intervening edit, so the lease moves to
+    // the hash it just produced: a second write under the same claim would
+    // otherwise be refused as stale against the first.
+    await advanceClaimBaseHash(tx, claim.id, updated.contentHash);
+
     await recordAudit(
       {
         workspaceId: input.workspaceId,
@@ -557,6 +621,9 @@ export async function updatePage(input: UpdatePageInput): Promise<PageRecord> {
           version,
           path: updated.path,
           moved,
+          result: 'success',
+          claimId: claim.id,
+          sectionId: claim.sectionId,
           previousPath: moved ? current.path : undefined,
           previousContentHash: current.contentHash,
         },
@@ -699,6 +766,16 @@ export async function deletePage(input: DeletePageInput): Promise<{ deleted: num
         );
     }
 
+    // A claim on a page that no longer exists would sit in the presence board
+    // until its TTL ran out, naming a page nobody can open.
+    const releasedClaims = await releaseClaimsForPages(
+      tx,
+      input.workspaceId,
+      removedIds,
+      input.actor,
+      now,
+    );
+
     await recordAudit(
       {
         workspaceId: input.workspaceId,
@@ -706,7 +783,11 @@ export async function deletePage(input: DeletePageInput): Promise<{ deleted: num
         actorId: input.actor.id,
         action: 'page.deleted',
         target: current.id,
-        metadata: { path: current.path, descendants: removedIds.length - 1 },
+        metadata: {
+          path: current.path,
+          descendants: removedIds.length - 1,
+          claimsReleased: releasedClaims,
+        },
       },
       tx,
     );

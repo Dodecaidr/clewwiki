@@ -16,10 +16,25 @@ export interface PageTreeItem {
   id: string;
   title: string;
   path: string;
+  /**
+   * "Held by Dana since …", ready to display, when somebody holds this page.
+   * The sentence is built on the server: a client component cannot be handed a
+   * translation function across the boundary, and the tree has no other reason
+   * to carry one.
+   */
+  claimLabel?: string | null;
   children: PageTreeItem[];
 }
 
-function TreeLevel({ nodes, activeId, depth }: { nodes: PageTreeItem[]; activeId: string | null; depth: number }) {
+function TreeLevel({
+  nodes,
+  activeId,
+  depth,
+}: {
+  nodes: PageTreeItem[];
+  activeId: string | null;
+  depth: number;
+}) {
   return (
     <ul className={cn('grid gap-0.5', depth > 0 && 'ml-2 border-l border-border pl-2')}>
       {nodes.map((node) => (
@@ -29,13 +44,23 @@ function TreeLevel({ nodes, activeId, depth }: { nodes: PageTreeItem[]; activeId
             aria-current={node.id === activeId ? 'page' : undefined}
             title={node.path}
             className={cn(
-              'block truncate rounded-(--radius-base) px-2 py-1 text-sm hover:bg-secondary',
+              'flex items-center rounded-(--radius-base) px-2 py-1 text-sm hover:bg-secondary',
               node.id === activeId
                 ? 'bg-secondary font-medium text-foreground'
                 : 'text-muted-foreground',
             )}
           >
-            {node.title}
+            <span className="truncate">{node.title}</span>
+            {node.claimLabel ? (
+              // A held page is marked where the reader already is, rather than
+              // only on the presence board: the point of the badge is to be
+              // seen before the edit button is clicked.
+              <span
+                aria-label={node.claimLabel}
+                title={node.claimLabel}
+                className="ml-1 inline-block size-1.5 shrink-0 rounded-full bg-primary align-middle"
+              />
+            ) : null}
           </Link>
           {node.children.length > 0 ? (
             <TreeLevel nodes={node.children} activeId={activeId} depth={depth + 1} />

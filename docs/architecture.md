@@ -69,6 +69,52 @@ the whole page; a caller may instead claim a named section, so one writer
 can hold a section while another edits a different section of the same
 page concurrently.
 
+Three decisions make that picture hold up under concurrency.
+
+- **The lock is taken on the page row, not on the claims table.** A
+  page-level claim and a section claim on the same page exclude each
+  other, and no unique index can express a comparison between "this whole
+  page" and "one section of it". Both callers meet on the page row
+  instead: the transaction that decides whether a target is free and the
+  insert that takes it run under one `select … for update` on it, so the
+  second caller reads the first one's committed claim rather than an empty
+  table. Two partial unique indexes — at most one active claim per page
+  when no section is named, at most one per (page, section) otherwise —
+  sit underneath as the net, and a violation of either is answered as a
+  conflict rather than as a server error.
+- **Expiry is a release, not a filter.** A lease past its deadline is
+  written back as released with reason `expired`, both by whichever
+  transaction next needs the answer and by a background sweep for the ones
+  nobody asks about. If expiry were only a `where expires_at > now()`
+  predicate, the unique indexes would still be occupied by leases the
+  service considers dead, and the page would stay unclaimable until the
+  sweep caught up.
+- **A refused attempt is audited outside the transaction it describes.**
+  Successful writes commit their audit row with the write. A refusal
+  cannot: the transaction carrying it is the one being rolled back. So the
+  rejection is recorded immediately afterwards on its own connection,
+  which is as close to "same transaction" as a refused attempt allows.
+
+Notes hang on a claim rather than on a page. They carry the claim's
+deadline, they are deleted when it ends — by release, by expiry or by an
+administrator — and they never reach `page_revisions`: a note is intent
+while an edit is in flight, not a version of the document.
+
+One limitation is worth stating plainly while it lasts. A section claim is
+enforced as exclusion — it keeps a page-level claim and a competing claim
+on the same section out — but the write it authorises is still a write of
+the whole page body, because the server has no section boundaries to check
+against until anchors arrive in Phase 4. Two holders of different sections
+writing at the same time are therefore separated by the content hash
+rather than by the section: the second write is refused as `stale_base`
+and the caller re-reads and merges. Nothing is lost, and the check that
+closes the gap is additive.
+
+A claim that outlives the client holding it can be force-released by a
+workspace administrator. That is a human role check, not a scope: an agent
+token carries scopes but no role, so it cannot take a claim away from
+anyone however broadly it is scoped.
+
 ## Anchor model
 
 An anchor ties a page section to a declaration in a source repository:
@@ -118,15 +164,25 @@ lives in the implementation, not here):
 - `pages`
 - `page_revisions`
 - `claims`
-- `agent_notes`
+- `claim_notes`
 - `anchors`
 - `agent_write_audit`
 
-`page_revisions` is an append-only version history; ephemeral agent notes
-are explicitly excluded from it and expire with the claim they are bound
-to. `agent_write_audit` is written in the same transaction as the write
-attempt it records, including failed and conflicting attempts, so it
-serves as a forensic log rather than best-effort telemetry.
+`page_revisions` is an append-only version history; ephemeral notes are
+explicitly excluded from it and expire with the claim they are bound to.
+They are called `claim_notes` rather than `agent_notes` because what binds
+them is the claim, and people leave them as well as agents. The write
+audit is written in the same transaction as the write attempt it records
+wherever that transaction commits, so it serves as a forensic log rather
+than best-effort telemetry; the one case it cannot join is a refused
+attempt, whose transaction rolls back, and there the row follows
+immediately on its own connection.
+
+Per-workspace policy that is neither structure nor a foreign key — the
+default claim TTL, today — lives in a `settings` JSON column on
+`workspaces`. It is read with the workspace row, queried on its own by
+nothing, and a new knob must not be a migration. A value that ever needs
+an index or a reference graduates to a column of its own.
 
 A page belongs to one of the two document types through its `kind`
 (`technical` or `human`) and points at its counterpart through a nullable

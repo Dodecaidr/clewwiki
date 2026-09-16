@@ -7,6 +7,7 @@ import { DeletePageButton } from './delete-button';
 import { PageBody } from '@/components/page-body';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
+import { getActiveClaimsForPage, getActiveNotesForPage } from '@/lib/claims/service';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { getPageById, listRevisions } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
@@ -54,11 +55,17 @@ export default async function PageView({ params }: Props) {
   const { page } = loaded;
   const t = await getTranslations('pages');
 
-  const [html, linked, revisions] = await Promise.all([
+  const [html, linked, revisions, activeClaims, notes] = await Promise.all([
     renderMarkdown(page.body),
     page.linkedPageId ? getPageById(session.workspace.id, page.linkedPageId) : Promise.resolve(null),
     listRevisions(session.workspace.id, page.id, 5),
+    getActiveClaimsForPage(session.workspace.id, page.id),
+    getActiveNotesForPage(session.workspace.id, page.id),
   ]);
+
+  // A page-level claim outranks a section claim in the header: it is the
+  // stronger statement about who may write to this page right now.
+  const claim = activeClaims.find((entry) => entry.sectionId === null) ?? activeClaims[0] ?? null;
 
   return (
     <article className="grid gap-6">
@@ -142,6 +149,46 @@ export default async function PageView({ params }: Props) {
             </dd>
           </div>
         </dl>
+
+        {claim ? (
+          <p className="rounded-(--radius-base) border border-border bg-muted px-3 py-2 text-xs">
+            <span className="font-medium">
+              {t('claimHeldBy', {
+                name: claim.holderLabel,
+                since: formatDateTime(claim.createdAt) ?? '—',
+              })}
+            </span>{' '}
+            <span className="text-muted-foreground">
+              {claim.sectionId
+                ? t('claimSection', { section: claim.sectionId })
+                : t('claimWholePage')}
+              {' · '}
+              {t('claimExpires', { until: formatDateTime(claim.expiresAt) ?? '—' })}
+            </span>
+          </p>
+        ) : null}
+
+        {notes.length > 0 ? (
+          <ul className="grid gap-2">
+            {notes.map((note) => (
+              <li
+                key={note.id}
+                className="rounded-(--radius-base) border border-border bg-card px-3 py-2 text-sm"
+              >
+                {/* A note is text somebody wrote while holding the page. It is
+                    shown as their words, with their name on it, and is never
+                    folded into the page body. */}
+                <p className="whitespace-pre-wrap">{note.text}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t('noteBy', {
+                    name: note.authorLabel,
+                    at: formatDateTime(note.createdAt) ?? '—',
+                  })}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : null}
 
         {page.summary ? <p className="text-sm text-muted-foreground">{page.summary}</p> : null}
       </header>

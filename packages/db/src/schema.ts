@@ -1,6 +1,7 @@
 import { isNull, sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -30,6 +31,18 @@ export const actorType = pgEnum('actor_type', ['user', 'agent']);
 export const pageKind = pgEnum('page_kind', ['technical', 'human']);
 
 /**
+ * Why an active claim stopped being active. `released` is the holder letting
+ * go, `expired` is the TTL running out, `forced` is an administrator taking it
+ * away — the three are kept apart because they mean different things when the
+ * audit log is read back.
+ */
+export const claimReleaseReason = pgEnum('claim_release_reason', [
+  'released',
+  'expired',
+  'forced',
+]);
+
+/**
  * PostgreSQL `tsvector`. Drizzle has no built-in mapping for it, and the
  * column is never read back into TypeScript — it exists for the index and for
  * the ranking expression — so the driver type is a plain string.
@@ -41,6 +54,23 @@ const tsvector = customType<{ data: string; driverData: string }>({
 });
 
 /**
+ * Per-workspace knobs that are policy rather than structure.
+ *
+ * They live in one JSON column instead of a settings table: every one of them
+ * is read as a whole with the workspace row, none is queried on its own, and a
+ * new knob must not be a migration. A value that ever needs an index or a
+ * foreign key graduates to a column of its own.
+ */
+export interface WorkspaceSettings {
+  /**
+   * Default lease length for a claim, in seconds. Absent means the server
+   * default (10 minutes); a caller may still ask for a shorter or longer TTL
+   * within the bounds the claim service enforces.
+   */
+  claim_ttl_seconds?: number;
+}
+
+/**
  * Workspaces. v1 seeds exactly one row during first-run setup, but every
  * handler still checks workspace membership explicitly so that adding more
  * rows later is not a refactor.
@@ -49,6 +79,7 @@ export const workspaces = pgTable('workspaces', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  settings: jsonb('settings').$type<WorkspaceSettings>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -271,6 +302,104 @@ export const pageRevisions = pgTable(
   ],
 );
 
+/**
+ * Claims: time-boxed leases on a page, or on a named section of one.
+ *
+ * A claim is the product's conflict-safe write primitive, so it is a row in
+ * PostgreSQL rather than anything held in the application process: the row is
+ * what two concurrent writers contend for, and it survives a restart the way an
+ * in-memory lock does not.
+ *
+ * Two partial unique indexes are the safety net under the check the service
+ * performs while holding a row lock on the page: at most one active page-level
+ * claim per page, and at most one active claim per (page, section). The rule
+ * they cannot express — a page-level claim excludes every section claim on that
+ * page and the other way round — is enforced inside the same transaction, under
+ * `select … for update` on the page row, which is what serialises the
+ * check-then-insert. The indexes still catch anything that reaches the insert
+ * by another path.
+ *
+ * "Active" means `released_at is null`. A claim past its TTL is released with
+ * reason `expired` rather than merely ignored, so the indexes above describe
+ * the same set of rows the service treats as live.
+ */
+export const claims = pgTable(
+  'claims',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    pageId: uuid('page_id')
+      .notNull()
+      .references(() => pages.id, { onDelete: 'cascade' }),
+    /** A named section of the page, or null for the whole page. */
+    sectionId: text('section_id'),
+    holderType: actorType('holder_type').notNull(),
+    holderId: text('holder_id').notNull(),
+    /**
+     * The holder's display name as it stood when the claim was taken. Presence
+     * has to name a holder even after the account is renamed or the token is
+     * revoked, and neither id resolves to a name once that happens.
+     */
+    holderLabel: text('holder_label').notNull(),
+    /** The page's content hash when the lease was granted. */
+    baseContentHash: text('base_content_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    releasedAt: timestamp('released_at', { withTimezone: true }),
+    /** Who ended it: the holder, the sweep (`system`), or an administrator. */
+    releasedBy: text('released_by'),
+    releaseReason: claimReleaseReason('release_reason'),
+  },
+  (table) => [
+    uniqueIndex('claims_active_page_key')
+      .on(table.pageId)
+      .where(sql`${table.releasedAt} is null and ${table.sectionId} is null`),
+    uniqueIndex('claims_active_section_key')
+      .on(table.pageId, table.sectionId)
+      .where(sql`${table.releasedAt} is null and ${table.sectionId} is not null`),
+    index('claims_workspace_active_idx')
+      .on(table.workspaceId, table.expiresAt)
+      .where(isNull(table.releasedAt)),
+    index('claims_holder_idx').on(table.holderType, table.holderId),
+  ],
+);
+
+/**
+ * Short-lived notes bound to a claim: "rewriting the auth section, leave
+ * Overview alone".
+ *
+ * They are deliberately not revisions. A note is intent while an edit is in
+ * flight, not a version of the document, so it never reaches `page_revisions`
+ * and it is deleted when the claim it hangs on ends — by release, by expiry or
+ * by an administrator.
+ */
+export const claimNotes = pgTable(
+  'claim_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    claimId: uuid('claim_id')
+      .notNull()
+      .references(() => claims.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    authorType: actorType('author_type').notNull(),
+    authorId: text('author_id').notNull(),
+    authorLabel: text('author_label').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Mirrors the claim's expiry, so a stale note is invisible even unswept. */
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index('claim_notes_claim_idx').on(table.claimId),
+    index('claim_notes_workspace_expires_idx').on(table.workspaceId, table.expiresAt),
+    check('claim_notes_text_length', sql`char_length(${table.text}) <= 2000`),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
@@ -282,3 +411,7 @@ export type NewPage = typeof pages.$inferInsert;
 export type PageKind = (typeof pageKind.enumValues)[number];
 export type PageRevision = typeof pageRevisions.$inferSelect;
 export type ActorKind = (typeof actorType.enumValues)[number];
+export type Claim = typeof claims.$inferSelect;
+export type NewClaim = typeof claims.$inferInsert;
+export type ClaimReleaseReason = (typeof claimReleaseReason.enumValues)[number];
+export type ClaimNote = typeof claimNotes.$inferSelect;

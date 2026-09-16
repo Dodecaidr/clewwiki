@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { apiError, apiJson, serviceErrorResponse } from '@/lib/api-response';
+import { getActiveClaimsByPage } from '@/lib/claims/service';
 import { authorizePagesRequest, READ_SCOPES } from '@/lib/pages-api';
 import { getPageTree } from '@/lib/pages/service';
 import { toTreeResource } from '@/lib/pages/serialize';
@@ -24,7 +25,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   try {
     const nodes = await getPageTree(auth.workspaceId, parsed.data.id);
-    return apiJson({ nodes: nodes.map(toTreeResource) }, auth.headers);
+    const claimed = new Set((await getActiveClaimsByPage(auth.workspaceId)).keys());
+    return apiJson({ nodes: nodes.map((node) => toTreeResource(node, claimed)) }, auth.headers);
   } catch (error) {
     return serviceErrorResponse(error);
   }

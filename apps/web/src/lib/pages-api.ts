@@ -4,6 +4,7 @@ import type { NextResponse } from 'next/server';
 
 import { authenticateRequest, requireScopes } from './api-auth';
 import type { ApiIdentity } from './api-auth';
+import type { ClaimActor } from './claims/service';
 import type { PageActor } from './pages/service';
 
 /**
@@ -57,4 +58,26 @@ export function actorOf(identity: ApiIdentity): PageActor {
   return identity.type === 'user'
     ? { type: 'user', id: identity.userId }
     : { type: 'agent', id: identity.tokenId };
+}
+
+/**
+ * The same identity, plus the display name a claim snapshots.
+ *
+ * Presence has to be able to say "held by Dana" or "held by ci-writer" long
+ * after the account is renamed or the token revoked, so the name is copied onto
+ * the claim rather than resolved when the board is rendered.
+ */
+export function claimActorOf(identity: ApiIdentity): ClaimActor {
+  return { ...actorOf(identity), label: identity.name };
+}
+
+/**
+ * True only for a human administrator of the workspace.
+ *
+ * Force-releasing someone else's claim is an administrative act; an agent token
+ * carries scopes but no role, so it can never take a claim away from a holder
+ * no matter how broad its scopes are.
+ */
+export function isWorkspaceAdmin(identity: ApiIdentity): boolean {
+  return identity.type === 'user' && identity.role === 'admin';
 }

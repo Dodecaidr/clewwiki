@@ -90,6 +90,14 @@ export default async function HomePage() {
               <dd className="text-muted-foreground">{t('apiPages')}</dd>
             </div>
             <div>
+              <dt className="font-mono text-xs">POST /api/v1/pages/&#123;id&#125;/claims</dt>
+              <dd className="text-muted-foreground">{t('apiClaims')}</dd>
+            </div>
+            <div>
+              <dt className="font-mono text-xs">GET /api/v1/claims</dt>
+              <dd className="text-muted-foreground">{t('apiPresence')}</dd>
+            </div>
+            <div>
               <dt className="font-mono text-xs">GET /api/v1/search?q=</dt>
               <dd className="text-muted-foreground">{t('apiSearch')}</dd>
             </div>

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { apiError, apiJson, readJsonBody, serviceErrorResponse, validationError } from '@/lib/api-response';
 import { requireWorkspace } from '@/lib/api-auth';
 import { authorizePagesRequest, READ_SCOPES, WRITE_SCOPES } from '@/lib/pages-api';
+import { getActiveClaimsForPage } from '@/lib/claims/service';
 import { CONTENT_HASH_PATTERN } from '@/lib/pages/content';
 import { deletePage, getPageById, updatePage } from '@/lib/pages/service';
 import { toPageResource } from '@/lib/pages/serialize';
@@ -19,9 +20,13 @@ const patchBodySchema = z
     kind: z.enum(['technical', 'human']).optional(),
     parent_id: z.uuid().nullish(),
     path: z.string().min(1).max(512).optional(),
-    base_content_hash: z.string().regex(CONTENT_HASH_PATTERN).optional(),
-  })
-  .refine((value) => Object.keys(value).length > 0, { message: 'No fields to update' });
+    // Both halves of the write protocol. `claim_id` is deliberately not
+    // required by the schema: a write with no claim is a protocol violation
+    // rather than a malformed request, and the service answers it with the
+    // `conflict` the contract names, holder details included.
+    claim_id: z.uuid().optional(),
+    base_content_hash: z.string().regex(CONTENT_HASH_PATTERN),
+  });
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -48,17 +53,30 @@ export async function GET(request: Request, context: RouteContext) {
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
 
-    const linked = page.linkedPageId
-      ? await getPageById(auth.workspaceId, page.linkedPageId)
-      : null;
+    const [linked, activeClaims] = await Promise.all([
+      page.linkedPageId ? getPageById(auth.workspaceId, page.linkedPageId) : Promise.resolve(null),
+      getActiveClaimsForPage(auth.workspaceId, page.id),
+    ]);
 
-    return apiJson(toPageResource(page, { linkedPage: linked }), auth.headers);
+    // A page-level claim outranks a section claim in this slot: it is the
+    // stronger statement about who may write to the page right now.
+    const claim =
+      activeClaims.find((candidate) => candidate.sectionId === null) ?? activeClaims[0] ?? null;
+
+    return apiJson(toPageResource(page, { linkedPage: linked, claim }), auth.headers);
   } catch (error) {
     return serviceErrorResponse(error);
   }
 }
 
-/** Updates a page: writes a revision, bumps the version, recomputes the hash. */
+/**
+ * Updates a page: writes a revision, bumps the version, recomputes the hash.
+ *
+ * Since Phase 3 this needs a claim. `claim_id` must name a lease the caller
+ * holds on this page (page-level, or a section of it), and `base_content_hash`
+ * must still match what is stored — the lease says nobody else may write, the
+ * hash proves nobody did.
+ */
 export async function PATCH(request: Request, context: RouteContext) {
   const auth = await authorizePagesRequest(request, WRITE_SCOPES);
   if (!auth.ok) return auth.response;
@@ -93,6 +111,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       kind: parsed.data.kind,
       parentId: parsed.data.parent_id,
       path: parsed.data.path,
+      claimId: parsed.data.claim_id ?? '',
       baseContentHash: parsed.data.base_content_hash,
     });
 

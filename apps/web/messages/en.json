@@ -12,7 +12,8 @@
     "pages": "Pages",
     "tokens": "Agent tokens",
     "about": "About",
-    "signIn": "Sign in"
+    "signIn": "Sign in",
+    "presence": "Presence"
   },
   "home": {
     "title": "clewwiki",
@@ -26,6 +27,8 @@
     "apiHealth": "Liveness probe. No authentication.",
     "apiMe": "Identity of the caller. Accepts a browser session or an agent bearer token.",
     "apiPages": "Read and write wiki pages. Requires the pages:read or pages:write scope.",
+    "apiClaims": "Take, renew and release a claim on a page before writing to it. Requires the pages:write scope.",
+    "apiPresence": "Every claim held in this workspace right now, with its notes. Requires the pages:read scope.",
     "apiSearch": "Full-text search across the workspace.",
     "browsePages": "Browse pages"
   },
@@ -54,7 +57,32 @@
     "linkedLabel": "Linked page",
     "linkedNone": "None",
     "emptyBody": "This page has no content yet.",
-    "historyHeading": "Recent versions"
+    "historyHeading": "Recent versions",
+    "claimHeldBy": "Held by {name} since {since}",
+    "claimWholePage": "Whole page",
+    "claimSection": "Section: {section}",
+    "claimExpires": "Lease ends {until}",
+    "noteBy": "{name} · {at}"
+  },
+  "presence": {
+    "title": "Presence",
+    "intro": "Every claim held in this workspace right now — by people and by agent tokens alike. A claim is a lease on a page or one of its sections: while it is held, nobody else can write there, and it ends on its own if its holder stops renewing it.",
+    "empty": "Nobody is holding a page right now.",
+    "activeHeading": "{count, plural, one {# active claim} other {# active claims}}",
+    "columnTarget": "Page",
+    "columnHolder": "Held by",
+    "columnSince": "Since",
+    "columnExpires": "Lease ends",
+    "columnNotes": "Notes",
+    "pageTarget": "Whole page",
+    "sectionTarget": "Section: {section}",
+    "holderUser": "A person",
+    "holderAgent": "An agent token",
+    "expiresIn": "{seconds, plural, one {# second left} other {# seconds left}}",
+    "noNotes": "No notes",
+    "forceRelease": "Force release",
+    "forceReleaseConfirm": "Release the claim held by {name}? Their unsaved work will be refused when they try to save.",
+    "refreshHint": "This board refreshes every 10 seconds."
   },
   "editor": {
     "newTitle": "New page",
@@ -83,7 +111,15 @@
     "errorConflict": "A page already exists at that path.",
     "errorStaleBase": "Someone else changed this page while you were editing it. Open it again and reapply your changes.",
     "errorNotFound": "That page no longer exists.",
-    "errorGeneric": "The page could not be saved. Check the server logs for details."
+    "errorGeneric": "The page could not be saved. Check the server logs for details.",
+    "claimAcquiring": "Taking a claim on this page…",
+    "claimHeld": "You hold this page. It is released when you save or leave this form.",
+    "claimHeldByOther": "{name} has held this page since {since}.",
+    "claimSomeoneElse": "Someone else",
+    "claimReadOnly": "Open it read-only",
+    "claimBlockedHint": "Editing is blocked while someone else holds the page. Their claim ends on its own if they stop working on it.",
+    "claimLost": "Your claim on this page has ended. Reopen the editor to take it again; saving now will be refused.",
+    "claimError": "The claim could not be taken. Reload the page and try again."
   },
   "search": {
     "title": "Search",

@@ -6,11 +6,12 @@ import { useTranslations } from 'next-intl';
 
 import { createPageAction, renderPreviewAction, updatePageAction } from './actions';
 import type { PageFormState } from './actions';
+import { useEditLease } from './use-edit-lease';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/card';
 import { Field, Input, Label, Select } from '@/components/ui/field';
 import { PageBody } from '@/components/page-body';
-import { cn } from '@/lib/utils';
+import { cn, formatDateTime } from '@/lib/utils';
 
 export interface PageFormParent {
   id: string;
@@ -51,6 +52,12 @@ export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) 
   const action = mode === 'create' ? createPageAction : updatePageAction;
   const [state, formAction, pending] = useActionState(action, initialState);
 
+  // Editing a page means holding it. The lease is taken when this form mounts
+  // and returned when it goes away, so two people cannot both be told they are
+  // editing the same page.
+  const lease = useEditLease(mode === 'edit' ? initial.pageId : undefined);
+  const blocked = mode === 'edit' && (lease.status === 'conflict' || lease.status === 'lost');
+
   const [body, setBody] = useState(initial.body);
   const [showPreview, setShowPreview] = useState(false);
   const [preview, setPreview] = useState('');
@@ -76,11 +83,38 @@ export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) 
       {state.error === 'not_found' ? <Alert tone="error">{t('errorNotFound')}</Alert> : null}
       {state.error === 'generic' ? <Alert tone="error">{t('errorGeneric')}</Alert> : null}
 
+      {mode === 'edit' && lease.status === 'acquiring' ? (
+        <Alert>{t('claimAcquiring')}</Alert>
+      ) : null}
+      {mode === 'edit' && lease.status === 'held' ? (
+        <Alert tone="success">{t('claimHeld')}</Alert>
+      ) : null}
+      {mode === 'edit' && lease.status === 'conflict' ? (
+        <Alert tone="error">
+          {t('claimHeldByOther', {
+            name: lease.heldBy ?? t('claimSomeoneElse'),
+            since: formatDateTime(lease.heldSince) ?? '—',
+          })}{' '}
+          <Link href={cancelHref} className="underline underline-offset-2">
+            {t('claimReadOnly')}
+          </Link>
+        </Alert>
+      ) : null}
+      {mode === 'edit' && lease.status === 'lost' ? (
+        <Alert tone="error">{t('claimLost')}</Alert>
+      ) : null}
+      {mode === 'edit' && lease.status === 'error' ? (
+        <Alert tone="error">{t('claimError')}</Alert>
+      ) : null}
+
       <form action={formAction} className="grid gap-5">
         {initial.pageId ? <input type="hidden" name="pageId" value={initial.pageId} /> : null}
         {initial.baseContentHash ? (
           <input type="hidden" name="baseContentHash" value={initial.baseContentHash} />
         ) : null}
+        {/* Carries the lease into the save. Empty when the browser could not
+            take one, in which case the action takes one of its own. */}
+        {mode === 'edit' ? <input type="hidden" name="claimId" value={lease.claimId ?? ''} /> : null}
 
         <Field label={t('title')} htmlFor="title">
           <Input id="title" name="title" defaultValue={initial.title} required maxLength={300} />
@@ -160,7 +194,7 @@ export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) 
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" disabled={pending}>
+          <Button type="submit" disabled={pending || blocked}>
             {pending ? tc('loading') : mode === 'create' ? t('create') : t('save')}
           </Button>
           <Link

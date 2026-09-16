@@ -99,7 +99,7 @@ then without moving the pairing. Authorship columns are stored as an actor
 type plus an id (`created_by_type`/`created_by_id`), because a page may be
 written by an agent token, whose id is not a row in `user`.
 
-## Phase 3 — Claims and presence
+## Phase 3 — Claims and presence — **complete**
 
 Claims implemented as row-level locks, a presence endpoint, ephemeral
 agent notes, and the write audit log covering both successful and
@@ -109,6 +109,78 @@ conflicting attempts.
 to exactly one success and one conflict; TTL expiry is covered by a test;
 the presence board reflects an active claim live; the audit endpoint
 returns both outcomes of a conflict test.
+
+**Status**: met.
+
+- `claims` and `claim_notes` ship in migration `0002_claims`. A claim is a
+  lease on a page or on a named section of it, carrying its holder, a
+  snapshot of the holder's display name, the page's content hash at the
+  moment it was granted, and a deadline.
+- Acquiring one runs inside a transaction that holds `select … for update`
+  on the *page* row. That is what makes the overlap rule enforceable: a
+  page-level claim excludes every section claim on that page and the other
+  way round, which two partial unique indexes cannot compare on their own.
+  The indexes — one active claim per page when no section is named, one per
+  (page, section) otherwise — are the net under the check, not the
+  mechanism. An integration test fires two claim requests at one page
+  concurrently, twenty times over, and asserts one `201` and one `409`
+  every round; a second test does the same for a page claim racing a
+  section claim on the same page. Removing the row lock makes the second
+  test fail and leaves the first one passing, which is the reason both
+  exist.
+- A lease past its deadline is *released*, not merely ignored: expiry is
+  applied lazily inside whichever transaction needs the answer, and by a
+  background sweep (`CLAIM_SWEEP_INTERVAL_SECONDS`, 60 s by default) for
+  the leases nobody asked about. So "active" means one thing to the
+  service, to the unique indexes and to the presence board alike. TTL
+  defaults to ten minutes, is bounded to between one second and one hour,
+  and can be set per workspace.
+- `PATCH /api/v1/pages/{id}` now requires both halves of the protocol: a
+  `claim_id` the caller holds on that page, and a `base_content_hash` that
+  still matches. The claim says nobody else may write; the hash proves
+  nobody did. Both are checked inside the transaction that holds the page
+  row locked.
+- `POST /api/v1/pages/{id}/claims`, `PATCH`/`DELETE /api/v1/claims/{id}`,
+  `GET /api/v1/claims`, `POST`/`GET /api/v1/pages/{id}/notes` and
+  `GET /api/v1/audit` are served by the same service layer the UI renders
+  from. `GET /api/v1/pages/{id}` carries the claim and tree nodes carry
+  `claimed`.
+- The presence board at `/presence` lists every live claim with its holder,
+  target, timestamps and notes, refreshed every ten seconds; badges appear
+  in the page tree and in the page header. An administrator can
+  force-release a claim from there, which is audited under its own action.
+- The editor takes a claim when it opens, heartbeats three times per lease
+  while the form is open, and releases on save or on leaving. A page held
+  by someone else is offered read-only with the holder's name and the time
+  they took it.
+- Every claim action is workspace-scoped in its SQL predicate,
+  scope-checked (`pages:read` for presence and notes, `pages:write` for
+  claims, notes and writes) and audited — refusals included, so a conflict
+  leaves both a `claim.acquired` and a `claim.rejected` row.
+
+Four deviations from the plan as written. The notes table is
+`claim_notes` rather than `agent_notes`: notes are bound to a claim and die
+with it, and humans leave them too, so naming them after the claim says
+what they are. The per-workspace claim TTL lives in a `settings` JSON
+column on `workspaces` rather than in a settings table — it is read with
+the workspace row, queried on its own by nothing, and a second knob must
+not be a migration; anything that ever needs an index graduates to a
+column. And a rejected attempt's audit row is written on its own
+connection immediately after the failure rather than inside the
+transaction it describes: that transaction is being rolled back, and a row
+written inside it would roll back with it. Finally, a section claim
+controls who may write rather than which bytes they may write — the server
+has no section boundaries to check a body against until anchors land in
+Phase 4, so two holders of different sections writing at once are
+separated by the content hash, and the second is refused as `stale_base`.
+`docs/architecture.md` states that limitation where a reader will meet it.
+
+One behaviour was added rather than deviated from: claiming a target you
+already hold extends your lease and returns the same claim instead of
+conflicting with yourself. Without it an agent restarted mid-edit could
+not get back to its own lease until the TTL ran out. `docs/mcp.md` records
+it, along with the one REST condition the MCP tool cannot produce — a
+write arriving with no claim at all, answered as `conflict`.
 
 ## Phase 4 — Anchoring
 

@@ -15,6 +15,13 @@
       "when": 1789593917147,
       "tag": "0001_pages",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789595848274,
+      "tag": "0002_claims",
+      "breakpoints": true
     }
   ]
 }

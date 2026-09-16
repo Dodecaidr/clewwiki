@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { apiCreated, apiError, apiJson, readJsonBody, serviceErrorResponse, validationError } from '@/lib/api-response';
+import { getActiveClaimsByPage } from '@/lib/claims/service';
 import { authorizePagesRequest, READ_SCOPES, WRITE_SCOPES } from '@/lib/pages-api';
 import { createPage, getPageByPath, getPageTree } from '@/lib/pages/service';
 import type { PageTreeNode } from '@/lib/pages/service';
@@ -76,8 +77,12 @@ export async function GET(request: Request) {
       nodes = tree;
     }
 
+    const claimed = new Set((await getActiveClaimsByPage(auth.workspaceId)).keys());
     const pruned = prune(nodes, depth).filter((node) => !kind || node.kind === kind);
-    return apiJson({ nodes: pruned.map(toTreeResource) }, auth.headers);
+    return apiJson(
+      { nodes: pruned.map((node) => toTreeResource(node, claimed)) },
+      auth.headers,
+    );
   } catch (error) {
     return serviceErrorResponse(error);
   }
@@ -109,7 +114,7 @@ export async function POST(request: Request) {
       body: parsed.data.body,
       summary: parsed.data.summary ?? null,
     });
-    return apiCreated(toPageResource(page, { linkedPage: null }), auth.headers);
+    return apiCreated(toPageResource(page, { linkedPage: null, claim: null }), auth.headers);
   } catch (error) {
     return serviceErrorResponse(error);
   }

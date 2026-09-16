@@ -30,9 +30,20 @@ case, not an edge case.
   explicitly in code rather than assumed from a single-workspace
   deployment.
 - **Write audit log.** Every write attempt — success, claim conflict, or
-  content-hash conflict — is recorded in the same database transaction as
-  the attempt itself, so failed attempts are forensic signal too, not
-  silently dropped.
+  content-hash conflict — is recorded, so failed attempts are forensic
+  signal too, not silently dropped. A successful write commits its audit
+  row in the same transaction as the write itself. A refused one cannot:
+  the transaction that would carry the row is the one being rolled back,
+  so the record follows immediately on its own connection instead. Both
+  outcomes of a conflict are therefore in the log, which is what the
+  claim-conflict tests assert.
+- **Claims are administrator-recoverable, not agent-recoverable.** A lease
+  that outlives the client holding it expires on its own, and until then
+  only a workspace administrator can take it away. Force-release is a role
+  check rather than a scope: an agent token carries scopes but no role, so
+  no token can release another actor's claim however broadly it is scoped.
+  Each force-release is audited under its own action, with the holder it
+  was taken from.
 - **Rate limiting.** Agent tokens are rate-limited per token (not per IP,
   since an agent may sit behind a shared address); human use through the
   browser is unlimited or materially higher.

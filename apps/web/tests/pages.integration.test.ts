@@ -10,6 +10,7 @@ import { databaseUrl, prepareTestDatabase } from './helpers/database';
 // before the environment is set up.
 import type * as PagesRoute from '@/app/api/v1/pages/route';
 import type * as PageRoute from '@/app/api/v1/pages/[id]/route';
+import type * as ClaimsRoute from '@/app/api/v1/pages/[id]/claims/route';
 import type * as TreeRoute from '@/app/api/v1/pages/[id]/tree/route';
 import type * as VersionsRoute from '@/app/api/v1/pages/[id]/versions/route';
 import type * as LinkRoute from '@/app/api/v1/pages/[id]/link/route';
@@ -37,6 +38,7 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
 
   let pagesRoute: typeof PagesRoute;
   let pageRoute: typeof PageRoute;
+  let claimsRoute: typeof ClaimsRoute;
   let treeRoute: typeof TreeRoute;
   let versionsRoute: typeof VersionsRoute;
   let linkRoute: typeof LinkRoute;
@@ -96,12 +98,28 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
     return { status: response.status, json: await response.json() };
   }
 
+  /**
+   * Since Phase 3 a write needs a lease. These tests are about pages rather
+   * than about claims, so they take one the short way and let it expire or be
+   * released as the case may be; `claims.integration.test.ts` is where the
+   * lease rules themselves are exercised.
+   */
+  async function claimPage(token: string, pageId: string): Promise<string> {
+    const response = await claimsRoute.POST(
+      request(token, `/api/v1/pages/${pageId}/claims`, { method: 'POST', body: '{}' }),
+      params(pageId),
+    );
+    const body = await response.json();
+    return body.claim_id as string;
+  }
+
   beforeAll(async () => {
     schema = await import('@clewwiki/db');
     db = schema.getDatabase();
 
     pagesRoute = await import('@/app/api/v1/pages/route');
     pageRoute = await import('@/app/api/v1/pages/[id]/route');
+    claimsRoute = await import('@/app/api/v1/pages/[id]/claims/route');
     treeRoute = await import('@/app/api/v1/pages/[id]/tree/route');
     versionsRoute = await import('@/app/api/v1/pages/[id]/versions/route');
     linkRoute = await import('@/app/api/v1/pages/[id]/link/route');
@@ -177,12 +195,14 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
       // Every read carries the hash a later write echoes back.
       expect(read.content_hash).toBe(created.json.content_hash);
 
+      const claimId = await claimPage(readWrite, pageId);
       const updateResponse = await pageRoute.PATCH(
         request(readWrite, `/api/v1/pages/${pageId}`, {
           method: 'PATCH',
           body: JSON.stringify({
             body: '# Auth service\n\nBearer tokens are verified here, then rate limited.\n',
             title: 'Auth service (v2)',
+            claim_id: claimId,
             base_content_hash: read.content_hash,
           }),
         }),
@@ -228,11 +248,16 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
       });
       const pageId = created.json.page_id as string;
       const staleHash = created.json.content_hash as string;
+      const claimId = await claimPage(readWrite, pageId);
 
       await pageRoute.PATCH(
         request(readWrite, `/api/v1/pages/${pageId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ body: 'second' }),
+          body: JSON.stringify({
+            body: 'second',
+            claim_id: claimId,
+            base_content_hash: staleHash,
+          }),
         }),
         params(pageId),
       );
@@ -240,7 +265,11 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
       const conflict = await pageRoute.PATCH(
         request(readWrite, `/api/v1/pages/${pageId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ body: 'third', base_content_hash: staleHash }),
+          body: JSON.stringify({
+            body: 'third',
+            claim_id: claimId,
+            base_content_hash: staleHash,
+          }),
         }),
         params(pageId),
       );
@@ -315,10 +344,15 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
       expect(tree.nodes[0].children[0].children[0].title).toBe('Tokens');
 
       // Renaming the middle page must carry its descendants with it.
+      const moveClaim = await claimPage(readWrite, childId);
       const moved = await pageRoute.PATCH(
         request(readWrite, `/api/v1/pages/${childId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ path: `/${root}/identity` }),
+          body: JSON.stringify({
+            path: `/${root}/identity`,
+            claim_id: moveClaim,
+            base_content_hash: child.json.content_hash,
+          }),
         }),
         params(childId),
       );
@@ -340,10 +374,15 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
       const parentId = parent.json.page_id as string;
       const child = await createPage(readWrite, { title: 'Child', parent_id: parentId });
 
+      const cycleClaim = await claimPage(readWrite, parentId);
       const response = await pageRoute.PATCH(
         request(readWrite, `/api/v1/pages/${parentId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ parent_id: child.json.page_id }),
+          body: JSON.stringify({
+            parent_id: child.json.page_id,
+            claim_id: cycleClaim,
+            base_content_hash: parent.json.content_hash,
+          }),
         }),
         params(parentId),
       );
@@ -633,7 +672,10 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
       const patched = await pageRoute.PATCH(
         request(foreignToken, `/api/v1/pages/${pageId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ body: 'overwritten' }),
+          body: JSON.stringify({
+            body: 'overwritten',
+            base_content_hash: 'f'.repeat(64),
+          }),
         }),
         params(pageId),
       );
@@ -715,7 +757,7 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
           pageRoute.PATCH(
             request(readOnly, `/api/v1/pages/${pageId}`, {
               method: 'PATCH',
-              body: JSON.stringify({ body: 'nope' }),
+              body: JSON.stringify({ body: 'nope', base_content_hash: 'f'.repeat(64) }),
             }),
             params(pageId),
           ),

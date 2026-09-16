@@ -55,11 +55,13 @@ code↔doc drift also watches drift between the two linked bodies.
 ## Deploy
 
 What is here today: the database schema, credential login, scoped agent tokens,
-a container that builds, and the wiki core — pages, a page tree, Markdown and
+a container that builds, the wiki core — pages, a page tree, Markdown and
 Mermaid rendering, full-text search, revision history, and Markdown/HTML
-export, over both the web UI and the REST API. Claims, anchoring and the MCP
-server are not here yet. What follows works today, verbatim, on a clean
-machine.
+export — and the conflict-safe write protocol: claims on a page or a section,
+a presence board, ephemeral notes, and an audit log that records refused
+attempts as well as successful ones. All of it over both the web UI and the
+REST API. Anchoring and the MCP server are not here yet. What follows works
+today, verbatim, on a clean machine.
 
 ### Prerequisites
 
@@ -247,6 +249,14 @@ in the tree, its kind, and the body:
 **Show preview** renders the body through the same pipeline the stored page and
 the HTML export use, so the preview cannot show you something the page will not.
 
+Opening the editor takes a claim on the page and holds it — the editor
+heartbeats while the form is open and gives the claim back when you save or
+leave. If somebody else, or an agent, is already holding the page, the editor
+says who and since when and offers the page read-only instead. It is the same
+lease an agent takes over REST, through the same service: a person and an agent
+contend for a page the same way rather than through two mechanisms that have to
+be kept in agreement.
+
 ### From an agent token
 
 Issue a token with `pages:read` and `pages:write` (see above), then:
@@ -281,16 +291,168 @@ curl -sS -X POST "$CLEWWIKI_URL/api/v1/pages" \
 }
 ```
 
-`content_hash` comes back on every read. Send it as `base_content_hash` on a
-write and the write is refused with `409 stale_base` if someone changed the
-page in between, instead of silently overwriting them:
+### Claim, write, release
+
+A write needs two things: a **claim** — a lease on the page, or on a named
+section of it — and the **content hash** the caller last read. The claim means
+nobody else may write there; the hash proves nobody did. Neither is optional,
+and both are checked inside the same database transaction that performs the
+write.
 
 ```sh
+# 1. Take the lease. 201 means it is yours.
+curl -sS -X POST "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/claims" \
+     -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"ttl_seconds": 600}'
+```
+
+```json
+{
+  "claim_id": "8b41…",
+  "page_id": "3f0c…",
+  "held_by": "ci-writer",
+  "actor_type": "agent",
+  "since": "2026-05-04T09:12:11.004Z",
+  "expires_at": "2026-05-04T09:22:11.004Z",
+  "base_content_hash": "9f2b…"
+}
+```
+
+If somebody else already holds the page, the answer is `409` and it names
+them, so a second agent can wait instead of guessing:
+
+```json
+{
+  "error": {
+    "code": "conflict",
+    "message": "This page is claimed by someone else",
+    "details": {
+      "claim_id": "0d7a…",
+      "held_by": "Dana",
+      "actor_type": "user",
+      "since": "2026-05-04T09:10:02.881Z",
+      "expires_at": "2026-05-04T09:20:02.881Z"
+    }
+  }
+}
+```
+
+```sh
+# 2. Write under the lease. The hash is the one the claim (or the last read)
+#    handed back.
 curl -sS -X PATCH "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID" \
      -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
      -H 'Content-Type: application/json' \
-     -d "{\"body\": \"# Auth service\n\nRewritten.\n\", \"base_content_hash\": \"$HASH\"}"
+     -d "{\"body\": \"# Auth service\n\nRewritten.\n\",
+          \"claim_id\": \"$CLAIM_ID\",
+          \"base_content_hash\": \"$HASH\"}"
+
+# 3. Heartbeat while the work is still going — a lease that stops being
+#    renewed lapses, so a crashed client cannot hold a page forever.
+curl -sS -X PATCH "$CLEWWIKI_URL/api/v1/claims/$CLAIM_ID" \
+     -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     -H 'Content-Type: application/json' -d '{}'
+
+# 4. Give it back.
+curl -sS -X DELETE "$CLEWWIKI_URL/api/v1/claims/$CLAIM_ID" \
+     -H "Authorization: Bearer $CLEWWIKI_TOKEN"
 ```
+
+A write whose `base_content_hash` no longer matches is refused with
+`409 stale_base`, carrying both hashes, even when the claim itself is
+perfectly valid — someone with a section claim, or an administrator, may have
+written in between. The caller re-reads, merges, and writes again; the server
+never merges on anyone's behalf:
+
+```json
+{
+  "error": {
+    "code": "stale_base",
+    "message": "Page has changed since it was read",
+    "details": { "current_content_hash": "c41e…", "your_base_hash": "9f2b…" }
+  }
+}
+```
+
+A claim can cover one named section instead of the whole page, which is what
+lets two writers work on one document at the same time:
+
+```sh
+curl -sS -X POST "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/claims" \
+     -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"section_id": "api-reference"}'
+```
+
+Two section claims coexist while they name different sections. A page-level
+claim excludes every section claim on that page, and every section claim
+excludes a page-level one.
+
+Until anchors arrive, a section claim controls *who may write*, not *which
+bytes they may write*: the server has no section boundaries to check a body
+against yet, so a write under a section claim still replaces the whole body.
+Two holders of different sections writing at once are separated by the content
+hash instead — the second one is refused with `stale_base`, re-reads, and
+writes again. Nothing is lost either way.
+
+### Presence and notes
+
+`GET /api/v1/claims` answers with every claim held in the workspace right now.
+The same data is on the **Presence** page in the UI, refreshed every ten
+seconds, with a badge in the page tree and in the page header so a reader sees
+that a page is spoken for before opening the editor.
+
+```sh
+curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" "$CLEWWIKI_URL/api/v1/claims"
+```
+
+```json
+{
+  "claims": [
+    {
+      "claim_id": "8b41…",
+      "page_id": "3f0c…",
+      "path": "/backend/auth",
+      "section_id": "api-reference",
+      "held_by": "ci-writer",
+      "actor_type": "agent",
+      "since": "2026-05-04T09:12:11.004Z",
+      "expires_at": "2026-05-04T09:22:11.004Z",
+      "notes": [
+        {
+          "note_id": "af02…",
+          "text": "Rewriting the API reference, leave Overview alone.",
+          "author": "ci-writer",
+          "created_at": "2026-05-04T09:12:40.119Z"
+        }
+      ]
+    }
+  ]
+}
+```
+
+A note says what its author is doing while an edit is in flight. It hangs on a
+claim, it is never part of the page's history, and it is deleted the moment the
+claim ends — by release, by expiry, or by an administrator:
+
+```sh
+curl -sS -X POST "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/notes" \
+     -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d "{\"claim_id\": \"$CLAIM_ID\", \"text\": \"Rewriting the API reference.\"}"
+```
+
+Notes are text somebody wrote, shown with their name and timestamp. Like page
+bodies, they are data — nothing that reads them treats them as instructions.
+
+**When a lease outlives its holder.** Claims expire on their own: the TTL
+defaults to ten minutes, a caller may ask for anything between one second and
+one hour, and a workspace can set its own default. Until then a stuck claim can
+be taken away by a workspace administrator, from the presence board or with
+`DELETE /api/v1/claims/{claimId}?force=true`. That is an administrator-only
+action and it is written to the audit log under its own name. Agent tokens
+cannot force-release anything, whatever scopes they carry.
 
 Search, history and the tree:
 
@@ -333,11 +495,19 @@ drawing them would mean shipping a renderer inside every exported file.
 | `GET /api/v1/pages` | session or token | `pages:read` | The page tree, without bodies. Takes `parent_id`, `path`, `kind`, `depth`. |
 | `POST /api/v1/pages` | session or token | `pages:write` | Create a page. |
 | `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |
-| `PATCH /api/v1/pages/{id}` | session or token | `pages:write` | Update or move a page. Writes a revision and bumps the version. |
+| `PATCH /api/v1/pages/{id}` | session or token | `pages:write` | Update or move a page under a claim. Requires `claim_id` and `base_content_hash`. Writes a revision and bumps the version. |
 | `DELETE /api/v1/pages/{id}` | session or token | `pages:write` | Soft-delete a page and everything below it. |
 | `GET /api/v1/pages/{id}/tree` | session or token | `pages:read` | The subtree rooted at a page, nested. |
 | `GET /api/v1/pages/{id}/versions` | session or token | `pages:read` | Revision history: version, author, content hash, timestamp. |
 | `POST /api/v1/pages/{id}/link` | session or token | `pages:write` | Pair a technical page with a human one, or unpair them. |
+| `POST /api/v1/pages/{id}/claims` | session or token | `pages:write` | Take a claim on the page, or on a section of it. `201` when granted, `200` when it extends a lease the caller already held, `409` when someone else holds it. |
+| `GET /api/v1/pages/{id}/claims` | session or token | `pages:read` | The live claims on one page. |
+| `PATCH /api/v1/claims/{claimId}` | session or token | `pages:write` | Heartbeat: extends a lease the caller holds. |
+| `DELETE /api/v1/claims/{claimId}` | session or token | `pages:write` | Release a claim and delete its notes. Idempotent. `?force=true` is administrator-only. |
+| `GET /api/v1/claims` | session or token | `pages:read` | The presence board: every claim held in the workspace, with its notes. |
+| `POST /api/v1/pages/{id}/notes` | session or token | `pages:write` | Leave an ephemeral note on a claim the caller holds. |
+| `GET /api/v1/pages/{id}/notes` | session or token | `pages:read` | The active notes on a page. |
+| `GET /api/v1/audit` | admin session or token | `audit:read` | The audit log, newest first. Takes `action`, `target`, `since`, `limit`. |
 | `GET /api/v1/search` | session or token | `pages:read` | Full-text search. Takes `q`, `limit`, `kind`. |
 | `GET /api/v1/export/{id}` | session or token | `pages:read` | Export a page. Takes `format=md` or `format=html`. |
 
@@ -350,6 +520,13 @@ when there is more than one. Errors share one envelope:
 ```json
 { "error": { "code": "stale_base", "message": "…", "details": { } } }
 ```
+
+The codes are `validation`, `not_found`, `conflict`, `stale_base`,
+`forbidden`, `insufficient_scope`, `unauthenticated`, `invalid_token` and
+`rate_limited`. On the write path they mean particular things: `conflict` is
+"you have no claim here", `not_found` on a write is "your claim has expired or
+been released", `forbidden` is "that claim belongs to someone else", and
+`stale_base` is "the page moved under you".
 
 ### Reverse proxy
 
@@ -548,6 +725,7 @@ and there is no configuration file to edit inside the container.
 | `WEB_BIND_ADDRESS` | no | `127.0.0.1` | Host interface compose publishes on. `0.0.0.0` exposes the app to the network — only with TLS in front. |
 | `WEB_PORT` | no | `3000` | Host port compose publishes on. |
 | `RUN_MIGRATIONS_ON_START` | no | unset (migrations run) | Set to `false` to manage the schema yourself. |
+| `CLAIM_SWEEP_INTERVAL_SECONDS` | no | `60` | How often lapsed claims are released in the background. `0` disables the sweep; expiry is still applied whenever a claim is read or written. |
 | `CLEWWIKI_MIGRATIONS_DIR` | no | set by the image | Where the app looks for migration SQL. |
 | `LOG_LEVEL` | no | `info` | One of `error`, `warn`, `info`, `debug`. |
 

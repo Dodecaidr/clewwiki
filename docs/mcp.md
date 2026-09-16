@@ -110,6 +110,13 @@ row lock; two concurrent claims on the same target resolve to exactly one
 success and one `CONFLICT`. A page-level claim conflicts with any section
 claim on that page and vice versa.
 
+Claiming a target you already hold is a heartbeat rather than a conflict:
+it extends the lease and returns the same `claim_id`. Without that, an
+agent restarted mid-edit could not get back to its own lease until the TTL
+ran out. The REST endpoint distinguishes the two with its status code —
+`201` for a lease granted, `200` for one extended — and the tool result is
+the same shape either way.
+
 ### wiki.renew_claim
 
 Heartbeat that extends an active claim.
@@ -134,7 +141,15 @@ errors: STALE_BASE { current_content_hash, your_base_hash },
 
 On `STALE_BASE` the caller re-reads the page with `wiki.get_page`, merges,
 and writes again with the new hash. The server never merges on the
-caller's behalf.
+caller's behalf. A holder's own write moves its claim's base hash forward,
+so a second write under the same lease is not stale against the first.
+
+`claim_id` is a required input here, so the tool cannot produce the one
+REST condition that has no tool equivalent: `PATCH /api/v1/pages/{id}`
+answers `conflict` when it is called with no claim at all. That is a
+protocol violation rather than a malformed request — the request is
+well-formed, it just has no lease behind it — and the details name the
+current holder when there is one.
 
 ### wiki.release_claim
 
@@ -162,6 +177,8 @@ output: { claims: [ { claim_id, page_id, path, section_id?, held_by, actor_type,
 Leave a short ephemeral note on an active claim so that other agents and
 humans can see intent ("rewriting the auth section, do not touch
 Overview"). Notes are not part of page history and expire with the claim.
+Only the claim's holder may write one: a note says what the holder is
+doing, and it dies with the lease.
 
 ```
 input:  { claim_id: string, text: string (max 2000 chars) }
@@ -217,6 +234,20 @@ sequenceDiagram
     end
     A->>M: wiki.release_claim {claim_id}
 ```
+
+## The REST surface beneath these tools
+
+Every tool above maps to one REST call. Three REST endpoints have no tool
+of their own, because an agent reaches the same data through the tools it
+already has: `GET /api/v1/pages/{id}/claims` and
+`GET /api/v1/pages/{id}/notes` narrow `wiki.get_presence` to one page, and
+`DELETE /api/v1/claims/{claimId}?force=true` takes a claim away from its
+holder — an administrator's act, not an agent's, so no token can perform
+it whatever its scopes.
+
+Responses carry the fields listed above and may carry more: a claim
+resource also names the holder's id and the base content hash, and a note
+also names its author. Nothing listed is ever dropped.
 
 ## Rate limits and audit
 
