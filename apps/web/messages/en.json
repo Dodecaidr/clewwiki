@@ -1,0 +1,97 @@
+{
+  "common": {
+    "appName": "clewwiki",
+    "attribution": "clewwiki — created by Dodecaidr (https://dodecaidr.pro.site)",
+    "authorSite": "https://dodecaidr.pro.site",
+    "signOut": "Sign out",
+    "cancel": "Cancel",
+    "loading": "Working…"
+  },
+  "nav": {
+    "home": "Home",
+    "tokens": "Agent tokens",
+    "about": "About",
+    "signIn": "Sign in"
+  },
+  "home": {
+    "title": "clewwiki",
+    "tagline": "A self-hosted knowledge base that humans and coding agents can write in together.",
+    "signedOutHint": "Sign in to manage this workspace.",
+    "workspaceLabel": "Workspace",
+    "roleLabel": "Your role",
+    "manageTokens": "Manage agent tokens",
+    "apiHeading": "REST API",
+    "apiIntro": "Two endpoints are available in this phase.",
+    "apiHealth": "Liveness probe. No authentication.",
+    "apiMe": "Identity of the caller. Accepts a browser session or an agent bearer token."
+  },
+  "setup": {
+    "title": "Create the administrator account",
+    "intro": "This instance has no accounts yet. The account you create here becomes the administrator of the workspace. There are no default credentials, and this page stops existing once an account exists.",
+    "workspaceName": "Workspace name",
+    "workspaceNameHint": "Shown in the interface. You can use your team or project name.",
+    "name": "Your name",
+    "email": "Email",
+    "password": "Password",
+    "passwordHint": "At least 12 characters. Nothing is emailed; store it in a password manager.",
+    "submit": "Create administrator account",
+    "errorGeneric": "Setup could not be completed. Check the server logs for details.",
+    "errorAlreadyDone": "Setup has already been completed on this instance."
+  },
+  "login": {
+    "title": "Sign in",
+    "intro": "Sign in with the account created during setup.",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign in",
+    "error": "Email or password is incorrect."
+  },
+  "tokens": {
+    "title": "Agent tokens",
+    "intro": "Tokens let an agent authenticate against the REST API without a browser session. A token is bound to this workspace, carries a fixed set of scopes, and can be revoked at any time.",
+    "adminOnly": "Only administrators can issue or revoke agent tokens.",
+    "createHeading": "Issue a token",
+    "name": "Token name",
+    "nameHint": "How you will recognise this token later, for example the machine or agent using it.",
+    "expiry": "Expires in",
+    "expiryHint": "A token with no expiry stays valid until it is revoked.",
+    "expiryNever": "No expiry",
+    "expiryDays": "{days} days",
+    "scopes": "Scopes",
+    "scopesHint": "Grant the narrowest set the agent actually needs.",
+    "submit": "Issue token",
+    "secretHeading": "Copy this token now",
+    "secretWarning": "This is the only time the token is shown. It is stored as a hash and cannot be recovered.",
+    "listHeading": "Issued tokens",
+    "listEmpty": "No tokens have been issued yet.",
+    "columnName": "Name",
+    "columnScopes": "Scopes",
+    "columnCreated": "Created",
+    "columnExpires": "Expires",
+    "columnLastUsed": "Last used",
+    "columnStatus": "Status",
+    "statusActive": "Active",
+    "statusRevoked": "Revoked",
+    "statusExpired": "Expired",
+    "never": "Never",
+    "revoke": "Revoke",
+    "revoked": "Token revoked.",
+    "errorName": "Give the token a name.",
+    "errorScopes": "Select at least one scope.",
+    "errorGeneric": "The token could not be issued."
+  },
+  "about": {
+    "title": "About clewwiki",
+    "what": "clewwiki is a self-hosted knowledge base for humans and coding agents to write in together. Conflict-safe claims replace silent overwrites, documentation pages carry a staleness flag anchored to the code they describe, and each page comes in two linked forms — one written for people, one written for agents.",
+    "licenseHeading": "License",
+    "license": "clewwiki is licensed under AGPL-3.0, with additional terms permitted under AGPL-3.0 Section 7 covering author attribution and the marking of modified versions.",
+    "authorHeading": "Author"
+  },
+  "errors": {
+    "notFoundTitle": "Page not found",
+    "notFoundBody": "The page you requested does not exist.",
+    "genericTitle": "Something went wrong",
+    "genericBody": "The request could not be completed. Try again, and check the server logs if it keeps failing.",
+    "retry": "Try again"
+  }
+}

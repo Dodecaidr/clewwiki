@@ -1,0 +1,33 @@
+# Never copy dependency trees or build output into the build context: they are
+# rebuilt inside the image, and a host-built tree can carry the wrong platform's
+# native binaries.
+node_modules
+**/node_modules
+.next
+**/.next
+out
+**/out
+dist
+**/dist
+coverage
+**/coverage
+
+# Secrets must never reach the build context, let alone a layer.
+.env
+.env.*
+!.env.example
+
+.git
+.github
+.gitignore
+.vscode
+.idea
+*.log
+.DS_Store
+
+# Documentation and local-only material have no bearing on the image.
+docs
+README.md
+AGENTS.md
+NOTICE
+LICENSE-ADDITIONAL-TERMS.md

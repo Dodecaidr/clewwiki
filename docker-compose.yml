@@ -1,0 +1,65 @@
+# clewwiki ships without a reverse proxy on purpose.
+#
+# This file brings up the application and its database and nothing else. TLS is
+# the operator's responsibility: put Caddy, Traefik or nginx in front of the
+# published port before exposing this to a network you do not control. The
+# README has a complete worked example for each of the three.
+
+services:
+  postgres:
+    image: public.ecr.aws/docker/library/postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-clewwiki}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-clewwiki}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # `web` waits for this, so the first boot never races the database.
+      test:
+        ['CMD-SHELL', 'pg_isready -U "${POSTGRES_USER:-clewwiki}" -d "${POSTGRES_DB:-clewwiki}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Not published to the host: only the application needs to reach it.
+    expose:
+      - '5432'
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Secrets come from the environment only; nothing is baked into the image.
+      DATABASE_URL: postgres://${POSTGRES_USER:-clewwiki}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-clewwiki}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      AGENT_TOKEN_RATE_LIMIT_MAX: ${AGENT_TOKEN_RATE_LIMIT_MAX:-60}
+      AGENT_TOKEN_RATE_LIMIT_WINDOW: ${AGENT_TOKEN_RATE_LIMIT_WINDOW:-60}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      # Bound to the loopback interface by default. Change this to 3000:3000
+      # only once something in front of it is terminating TLS.
+      - '${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres-data:

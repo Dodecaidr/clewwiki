@@ -7,6 +7,31 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Same mirror rule as every other image in this repository.
+        image: public.ecr.aws/docker/library/postgres:16
+        env:
+          POSTGRES_USER: clewwiki
+          POSTGRES_PASSWORD: clewwiki
+          POSTGRES_DB: clewwiki_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clewwiki -d clewwiki_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://clewwiki:clewwiki@localhost:5432/clewwiki_test
+      # Build-time placeholders. No real secret is needed to compile, and none
+      # is available to a fork's pull request by design.
+      DATABASE_URL: postgres://clewwiki:clewwiki@localhost:5432/clewwiki_test
+      BETTER_AUTH_SECRET: ci-placeholder-secret-not-used-outside-this-job
+      BETTER_AUTH_URL: http://localhost:3000
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,27 +47,28 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Check for lockfile
-        id: lockfile
-        run: |
-          if [ -f pnpm-lock.yaml ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          cache: pnpm
 
       - name: Install dependencies
-        if: steps.lockfile.outputs.exists == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        if: steps.lockfile.outputs.exists == 'true'
-        run: pnpm -r lint --if-present
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
 
       - name: Test
-        if: steps.lockfile.outputs.exists == 'true'
-        run: pnpm -r test --if-present
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Audit dependencies
+        # Advisory data changes without any commit of ours, so a new advisory
+        # must not turn every unrelated pull request red.
+        continue-on-error: true
+        run: pnpm audit --audit-level high
 
   secret-scan:
     runs-on: ubuntu-latest

@@ -17,18 +17,18 @@ follow it over any conflicting default behavior.
 - **i18n**: next-intl, scaffolded with `en` namespaces only for v1.
 - **Package manager**: pnpm.
 
-## Repository layout (to be added)
+## Repository layout
 
-The following layout is planned and will be introduced as each phase
-lands — do not pre-create empty directories ahead of the code that
-justifies them:
+A pnpm workspace. Directories arrive with the code that justifies them —
+do not pre-create empty ones:
 
-- `apps/web` — the Next.js application (web UI + REST API).
+- `apps/web` — the Next.js application (web UI + REST API). Present.
+- `packages/db` — Drizzle schema and generated SQL migrations. Present.
+- `docker/` — Dockerfile and container entrypoint. Present.
 - `packages/mcp-server` — the MCP server (stdio + streamable HTTP),
-  thin wrapper over the same service layer as the REST API.
+  thin wrapper over the same service layer as the REST API. Later phase.
 - `packages/anchors` — the doc↔code anchoring library (symbol/AST
-  matching with a line-range fallback).
-- `docker/` — Dockerfile and docker-compose assets.
+  matching with a line-range fallback). Later phase.
 
 ## Conventions
 
@@ -41,9 +41,24 @@ justifies them:
 
 ## How to run
 
-Run instructions will be added once Phase 1 (data model + auth) lands and
-there is a working local setup to document. Until then, there is no
-runnable application in this repository.
+`docker compose up -d` runs the application and its database; the README
+covers first-run setup, agent tokens, and reverse-proxy configuration in
+full. For working on the code itself:
+
+```sh
+pnpm install
+pnpm dev          # development server
+pnpm lint
+pnpm typecheck
+pnpm test         # integration tests skip without a database
+pnpm build
+pnpm db:generate  # after changing packages/db/src/schema.ts
+pnpm db:migrate
+```
+
+Integration tests need a throwaway PostgreSQL 16 database, supplied as
+`TEST_DATABASE_URL`. They skip with a message when one is not reachable,
+so a plain `pnpm test` stays green on a fresh checkout.
 
 ## Docker
 

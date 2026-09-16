@@ -2,8 +2,21 @@
   "name": "clewwiki",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@10",
+  "packageManager": "pnpm@10.28.2",
   "engines": {
     "node": ">=22"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@parcel/watcher", "@swc/core", "esbuild", "unrs-resolver"]
+  },
+  "scripts": {
+    "dev": "pnpm --filter @clewwiki/web dev",
+    "build": "pnpm --filter @clewwiki/web build",
+    "start": "pnpm --filter @clewwiki/web start",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "db:generate": "pnpm --filter @clewwiki/db db:generate",
+    "db:migrate": "pnpm --filter @clewwiki/db db:migrate"
   }
 }

@@ -15,14 +15,42 @@ with dependency and secret scanning.
 recorded against a fixed threshold; the CI workflow passes on the empty
 repository skeleton.
 
-## Phase 1 — Data and auth
+## Phase 1 — Data and auth — **complete**
 
-PostgreSQL schema for workspaces, users, and agent tokens; better-auth
-wired up with TTL and rate limiting; a Docker skeleton that builds.
+PostgreSQL schema for workspaces, users, memberships, agent tokens, and the
+audit log; credential login wired up; agent tokens with scopes, TTL,
+revocation and per-token rate limiting; a Docker image and compose stack
+that build and run.
 
 **Exit criteria**: `docker compose up` brings up an empty service; an
 admin account can be created through the UI; an agent token can be
 issued with a TTL, used once, and is rejected after expiry.
+
+**Status**: met.
+
+- `docker compose up` starts PostgreSQL 16 and the application; the app
+  applies its own migrations before serving, and `GET /api/v1/health`
+  reports both.
+- The first visit to a fresh instance creates the administrator account
+  and the single workspace at `/setup`. No credentials ship in any
+  migration or fixture, and `/setup` answers 404 once an account exists.
+- An admin issues agent tokens from `/tokens`. The secret is displayed
+  once and stored only as a SHA-256 digest, compared in constant time.
+- Expiry, revocation and scope are all decided at the authentication
+  layer, before handler logic runs. Every agent-token request writes an
+  audit row, rejections included.
+- Workspace scoping is an explicit check in each handler, not an
+  assumption about there being one workspace.
+- `GET /api/v1/me` and `GET /api/v1/health` are covered by unit and
+  integration tests, the latter skipping cleanly with no database.
+
+One deviation from the original plan: agent tokens live in a first-party
+`agent_tokens` table with their own bearer verifier, rather than in an
+authentication-library plugin. The plugin that was expected to cover this
+has since moved out of the auth library's core package, and its table
+carries no workspace column, no revocation timestamp and no issuing user —
+all three of which the threat model in `docs/security.md` depends on.
+Credential login and sessions are still library-managed.
 
 ## Phase 2 — Wiki core
 
