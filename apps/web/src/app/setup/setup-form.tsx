@@ -20,6 +20,19 @@ export function SetupForm() {
     <form action={action} className="grid gap-5">
       {state.error === 'alreadyDone' ? <Alert tone="error">{t('errorAlreadyDone')}</Alert> : null}
       {state.error === 'generic' ? <Alert tone="error">{t('errorGeneric')}</Alert> : null}
+      {state.error === 'setupToken' ? <Alert tone="error">{t('errorSetupToken')}</Alert> : null}
+
+      <Field label={t('setupToken')} htmlFor="setupToken" hint={t('setupTokenHint')}>
+        <Input
+          id="setupToken"
+          name="setupToken"
+          type="password"
+          required
+          maxLength={512}
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </Field>
 
       <Field label={t('workspaceName')} htmlFor="workspaceName" hint={t('workspaceNameHint')}>
         <Input

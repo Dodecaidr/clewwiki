@@ -21,10 +21,11 @@ export function DeletePageButton({
   label: string;
   confirm: string;
 }) {
-  const [, action, pending] = useActionState(deletePageAction, initialState);
+  const [state, action, pending] = useActionState(deletePageAction, initialState);
 
   return (
     <form
+      className="grid justify-items-start gap-2"
       action={action}
       onSubmit={(event) => {
         if (!window.confirm(confirm)) {
@@ -36,6 +37,11 @@ export function DeletePageButton({
       <Button type="submit" variant="outline" size="sm" disabled={pending}>
         {label}
       </Button>
+      {state.error && state.message ? (
+        <p role="alert" className="text-xs text-destructive">
+          {state.message}
+        </p>
+      ) : null}
     </form>
   );
 }

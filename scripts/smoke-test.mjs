@@ -6,7 +6,9 @@
  * through the same requests a browser and an agent send:
  *
  *   1. waits for /api/v1/health to report the database up;
- *   2. submits the first-run /setup form, then checks /setup has become a 404;
+ *   2. checks the public sign-up route is closed, submits the first-run /setup
+ *      form with a wrong setup token (refused) and then the right one, and
+ *      checks /setup has become a 404;
  *   3. signs in through the /login form and issues an agent token through the
  *      /tokens form, reading the one-time secret out of the rendered page;
  *   4. with that token: /api/v1/me, create a page, claim it, write it under the
@@ -23,10 +25,16 @@
  * It needs Node 22 and nothing else. It must run against an instance with no
  * accounts yet, and it leaves one behind: point it at a throwaway instance.
  *
- *   SMOKE_BASE_URL=http://127.0.0.1:3000 node scripts/smoke-test.mjs
+ *   SMOKE_BASE_URL=http://127.0.0.1:3000 SMOKE_SETUP_TOKEN=… node scripts/smoke-test.mjs
+ *
+ * The setup token is the instance's CLEWWIKI_SETUP_TOKEN. When neither
+ * SMOKE_SETUP_TOKEN nor CLEWWIKI_SETUP_TOKEN is set, the script reads the
+ * generated token out of `docker compose logs web`, the way the README tells
+ * an operator to.
  *
  * Exit status is 0 when every step passed and 1 at the first failure.
  */
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 
 const BASE_URL = (process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
@@ -186,8 +194,50 @@ async function waitForHealth() {
   fail(`health did not report ok within ${HEALTH_TIMEOUT_MS / 1000}s (last: ${last})`);
 }
 
+/** The one-time setup token: from the environment, or from the container log. */
+function readSetupToken() {
+  const configured = (process.env.SMOKE_SETUP_TOKEN ?? process.env.CLEWWIKI_SETUP_TOKEN ?? '').trim();
+  if (configured !== '') return configured;
+  let logs = '';
+  try {
+    logs = execFileSync('docker', ['compose', 'logs', '--no-color', 'web'], { encoding: 'utf8' });
+  } catch (error) {
+    fail(`no SMOKE_SETUP_TOKEN given and the container log could not be read: ${error.message}`);
+  }
+  const lines = logs.split('\n').filter((line) => line.includes('setup token:'));
+  const match = /setup token: (\S+)/.exec(lines.at(-1) ?? '');
+  expect(match, 'no SMOKE_SETUP_TOKEN given and no "setup token" line in docker compose logs web');
+  return match[1];
+}
+
+async function signUpIsClosed() {
+  const response = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: ORIGIN },
+    body: JSON.stringify({ email: `self-${admin.email}`, password: randomBytes(18).toString('base64url'), name: 'Self' }),
+  });
+  expect(response.status === 404, `POST /api/auth/sign-up/email answered ${response.status}, expected 404`);
+  pass('the public sign-up route is closed');
+}
+
 async function firstRunSetup() {
+  const refused = await submitForm('/setup', 'workspaceName', [
+    ['setupToken', `wrong-${randomBytes(8).toString('hex')}`],
+    ['workspaceName', admin.workspaceName],
+    ['name', admin.name],
+    ['email', admin.email],
+    ['password', admin.password],
+  ]);
+  expect(
+    !(refused.status >= 300 && refused.status < 400),
+    `setup with a wrong token answered ${refused.status} (location "${refused.headers.get('location')}"), expected no redirect`,
+  );
+  const stillOpen = await browserFetch('/setup');
+  expect(stillOpen.status === 200, `/setup answered ${stillOpen.status} after a refused attempt, expected 200`);
+  pass('setup refuses a wrong setup token');
+
   const response = await submitForm('/setup', 'workspaceName', [
+    ['setupToken', readSetupToken()],
     ['workspaceName', admin.workspaceName],
     ['name', admin.name],
     ['email', admin.email],
@@ -348,6 +398,7 @@ async function mcpOverHttp(token) {
 async function main() {
   log(`target ${BASE_URL}`);
   await waitForHealth();
+  await signUpIsClosed();
   await firstRunSetup();
   await signIn();
   const token = await issueToken();

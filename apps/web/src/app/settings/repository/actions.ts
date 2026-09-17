@@ -91,5 +91,22 @@ export async function testRepositoryAction(
   }
 
   const probe = await probeRepository(parsed.data);
+
+  // Testing reaches out to the URL with the named credential, which is as much
+  // an act as saving the setting is, so it leaves the same kind of record.
+  await recordAudit({
+    workspaceId: session.workspace.id,
+    actorType: 'user',
+    actorId: session.userId,
+    action: 'workspace.repository_tested',
+    target: session.workspace.id,
+    metadata: {
+      url: parsed.data.url,
+      default_ref: parsed.data.default_ref,
+      auth_token_env: parsed.data.auth_token_env ?? null,
+      ok: probe.ok,
+    },
+  });
+
   return { probe };
 }

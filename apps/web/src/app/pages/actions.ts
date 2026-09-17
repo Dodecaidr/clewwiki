@@ -222,6 +222,7 @@ export async function deletePageAction(
       workspaceId: session.workspace.id,
       pageId: parsed.data.pageId,
       actor: { type: 'user', id: session.userId },
+      overrideClaims: session.role === 'admin',
     });
   } catch (error) {
     return toFormState(error);

@@ -52,6 +52,7 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
   let otherWorkspaceId: string;
   let readWrite = '';
   let readOnly = '';
+  let writeNoDelete = '';
   let noPageScope = '';
   let foreignToken = '';
 
@@ -142,6 +143,11 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
     readWrite = await seedToken({
       workspaceId,
       name: 'rw',
+      scopes: ['pages:read', 'pages:write', 'pages:delete'],
+    });
+    writeNoDelete = await seedToken({
+      workspaceId,
+      name: 'rw-no-delete',
       scopes: ['pages:read', 'pages:write'],
     });
     readOnly = await seedToken({ workspaceId, name: 'ro', scopes: ['pages:read'] });
@@ -149,7 +155,7 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
     foreignToken = await seedToken({
       workspaceId: otherWorkspaceId,
       name: 'foreign',
-      scopes: ['pages:read', 'pages:write'],
+      scopes: ['pages:read', 'pages:write', 'pages:delete'],
     });
   });
 
@@ -779,6 +785,23 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
         expect(response.status).toBe(403);
         expect((await response.json()).error.code).toBe('insufficient_scope');
       }
+    });
+
+    it('refuses a delete from a token with pages:write but not pages:delete', async () => {
+      const response = await pageRoute.DELETE(
+        request(writeNoDelete, `/api/v1/pages/${pageId}`, { method: 'DELETE' }),
+        params(pageId),
+      );
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.error.code).toBe('insufficient_scope');
+      expect(body.error.message).toContain('pages:delete');
+
+      const stillThere = await pageRoute.GET(
+        request(readOnly, `/api/v1/pages/${pageId}`),
+        params(pageId),
+      );
+      expect(stillThere.status).toBe(200);
     });
 
     it('refuses search and export without pages:read', async () => {

@@ -53,10 +53,19 @@ services:
       CLAIM_SWEEP_INTERVAL_SECONDS: ${CLAIM_SWEEP_INTERVAL_SECONDS:-60}
       MCP_HTTP_ENABLED: ${MCP_HTTP_ENABLED:-false}
       MCP_HTTP_ALLOWED_ORIGINS: ${MCP_HTTP_ALLOWED_ORIGINS:-}
+      # First-run setup requires a one-time token. Leave it empty and the app
+      # prints a generated one to its log: docker compose logs web | grep "setup token"
+      CLEWWIKI_SETUP_TOKEN: ${CLEWWIKI_SETUP_TOKEN:-}
+      # The header your reverse proxy sets to the client's address; login rate
+      # limits key on it. The README shows the line each proxy needs.
+      TRUSTED_CLIENT_IP_HEADER: ${TRUSTED_CLIENT_IP_HEADER:-x-real-ip}
       REPOS_DIR: /data/repos
-      # A private repository's access token is passed through by name. Add the
-      # variable your workspace's repository setting names, for example:
-      # GIT_ACCESS_TOKEN: ${GIT_ACCESS_TOKEN:-}
+      ALLOW_FILE_REPOSITORIES: ${ALLOW_FILE_REPOSITORIES:-false}
+      # Access tokens for private repositories. A workspace's repository setting
+      # can name only CLEWWIKI_GIT_TOKEN or CLEWWIKI_GIT_TOKEN_<NAME>; add a line
+      # like the second one for each extra token you define in .env.
+      CLEWWIKI_GIT_TOKEN: ${CLEWWIKI_GIT_TOKEN:-}
+      # CLEWWIKI_GIT_TOKEN_DOCS: ${CLEWWIKI_GIT_TOKEN_DOCS:-}
     volumes:
       # Read-only mirrors of the repositories anchors are checked against. On a
       # named volume so a restart does not re-clone every workspace's history.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
-import { ClewwikiRestClient } from './rest-client.ts';
+import { assertSecureBaseUrl, ClewwikiRestClient } from './rest-client.ts';
 import { createClewwikiMcpServer } from './server.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
 
@@ -28,7 +28,10 @@ agent host and give it two environment variables:
 
 Optional:
 
-  CLEWWIKI_TIMEOUT_MS   Per-request timeout in milliseconds (default 30000)
+  CLEWWIKI_TIMEOUT_MS          Per-request timeout in milliseconds (default 30000)
+  CLEWWIKI_ALLOW_INSECURE_URL  Set to true to allow an http:// URL that is not
+                               localhost or 127.0.0.1 (the token is then sent
+                               unencrypted)
 
 The token's scopes decide what the tools can do: pages:read for reading and
 searching, pages:write for claims, writes and notes.
@@ -78,6 +81,7 @@ async function main(): Promise<void> {
 
   let client: ClewwikiRestClient;
   try {
+    assertSecureBaseUrl(baseUrl, process.env.CLEWWIKI_ALLOW_INSECURE_URL === 'true');
     client = new ClewwikiRestClient({ baseUrl, token, timeoutMs: readTimeout() });
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));

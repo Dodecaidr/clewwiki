@@ -159,8 +159,21 @@ network can reach the instance. Keep it that way until step 5 is done.
 **5. Create the administrator account — before anyone else can.**
 
 A fresh instance has no accounts, and its `/setup` page creates the first one,
-the administrator, for whoever submits it first. So do it while the instance is
-still reachable only by you.
+the administrator. The form asks for a one-time **setup token**, so only
+someone who can read the server's configuration or its log can submit it. If
+you did not set `CLEWWIKI_SETUP_TOKEN` in `.env`, the application generated one
+at start-up and printed it once:
+
+```sh
+docker compose logs web | grep "setup token"
+```
+
+```
+web-1  | [setup] one-time setup token: 3yJb0t4r2m… (no account exists yet; enter it on /setup to create the administrator)
+```
+
+The generated token lives only in the running process: a restart before setup
+prints a new one. Do this while the instance is still reachable only by you.
 
 - **On your own machine**, open <http://localhost:3000>. It sends you to
   `/setup`.
@@ -171,10 +184,12 @@ still reachable only by you.
   ssh -N -L 3000:127.0.0.1:3000 you@your-server
   ```
 
-The form asks for a workspace name, your name, your email and a password of at
-least 12 characters. There are no default credentials and no seeded account in
+The form asks for the setup token, a workspace name, your name, your email and
+a password of at least 12 characters. There are no default credentials and no seeded account in
 any migration or fixture: this account is the first one that exists. Once it
-does, `/setup` answers 404 and the form cannot be reached again.
+does, `/setup` answers 404 and the form cannot be reached again. There is no
+self-registration either: the authentication library's public sign-up route is
+switched off, so `/setup` is the only way an account comes into existence.
 
 Store the password in a password manager. No mail transport is configured, so
 there is no reset email to fall back on.
@@ -194,7 +209,8 @@ grant only the scopes the agent needs:
 |---|---|
 | `identity:read` | Call `GET /api/v1/me`. Needed by anything that wants to confirm who it is. |
 | `pages:read` | Read pages, the page tree, search results, exports, claims, notes and anchors. |
-| `pages:write` | Create, change, move, delete and link pages; take and release claims; leave notes; manage anchors. |
+| `pages:write` | Create, change, move and link pages; take and release claims; leave notes; manage and re-check anchors. |
+| `pages:delete` | Soft-delete a page and everything below it. Needs `pages:write` as well. Kept separate because one call removes a whole subtree. |
 | `audit:read` | Read the audit log. |
 
 Press **Issue token**. The token appears once:
@@ -305,7 +321,10 @@ shell and let the host expand it where it supports that.
 
 **4. Check it.** `node packages/mcp-server/dist/bin.js --help` prints the
 variables it needs. A missing or malformed `CLEWWIKI_URL` or
-`CLEWWIKI_TOKEN` stops it at start-up with a message naming the variable.
+`CLEWWIKI_TOKEN` stops it at start-up with a message naming the variable. So
+does a plain `http://` URL for anything other than `localhost` or `127.0.0.1`,
+because the token would travel unencrypted; set
+`CLEWWIKI_ALLOW_INSECURE_URL=true` only for a private network you trust.
 
 #### Remote agents over HTTP
 
@@ -322,7 +341,8 @@ It is then served at `https://<your host>/mcp`, behind the same reverse
 proxy and TLS as the web UI. Only `Authorization: Bearer <agent token>`
 gets in; a signed-in browser session does not. Browser origins are refused
 unless listed in `MCP_HTTP_ALLOWED_ORIGINS`. Leave that empty unless you
-know which web client needs it.
+know which web client needs it. One request may carry at most ten JSON-RPC
+messages; a larger batch is refused before any tool runs.
 
 ### Reverse proxy
 
@@ -344,7 +364,14 @@ second one. Three worked examples follow. In all of them:
 3. Make sure the proxy sends `X-Forwarded-Proto: https`. The app enables HSTS
    only when it sees that header, which is what keeps a plain-HTTP local run
    from locking your browser out of the instance.
-4. Run `docker compose up -d` again after editing `.env`.
+4. Make sure the proxy **overwrites** `X-Real-IP` with the address it accepted
+   the connection from (or set `TRUSTED_CLIENT_IP_HEADER` to the header it
+   does overwrite). Sign-in attempts are rate limited per account and per
+   client address, and this header is the only place the address is read
+   from — `X-Forwarded-For` is never trusted, because its first entry is
+   whatever the client sent. Without the header every client shares one
+   login bucket, so a stranger's failed guesses slow down your own sign-in.
+5. Run `docker compose up -d` again after editing `.env`.
 
 #### Caddy
 
@@ -359,6 +386,7 @@ wiki.example.com {
 
 	reverse_proxy 127.0.0.1:3000 {
 		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
 	}
 }
 ```
@@ -401,7 +429,8 @@ networks:
     external: true
 ```
 
-Traefik sets `X-Forwarded-Proto` itself. Confirm your entrypoint has a
+Traefik sets `X-Forwarded-Proto` and `X-Real-Ip` itself, overwriting whatever the
+client sent. Confirm your entrypoint has a
 certificate resolver configured and that the `traefik` network exists
 (`docker network create traefik`).
 
@@ -445,6 +474,7 @@ server {
         proxy_http_version 1.1;
 
         proxy_set_header Host              $host;
+        # Overwritten, never passed through: login rate limits key on it.
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         # Without this the app will not enable secure-cookie or HSTS behaviour.
@@ -479,7 +509,12 @@ Each line is pass or fail, not a matter of judgement.
       shows `127.0.0.1:3000->3000/tcp` (or a private address), never
       `0.0.0.0:3000`. Check any override file you added.
 - [ ] **`/setup` returns 404.** Check it. A 200 means the instance has no
-      accounts and anyone reaching it can claim the administrator account.
+      accounts yet: anyone holding the setup token can still claim the
+      administrator account, so finish setup and keep the token to yourself.
+- [ ] **The proxy overwrites `X-Real-IP`** (or the header named in
+      `TRUSTED_CLIENT_IP_HEADER`). Sign in once with a wrong password while
+      sending a forged `X-Real-IP` through the proxy, and confirm the
+      `auth.login_failed` audit row (`client`) records your real address.
 - [ ] **`BETTER_AUTH_SECRET` is a generated value.** `openssl rand -base64 48`,
       not a word you chose. The container refuses to start on an obvious
       placeholder, but it cannot detect a weak one.
@@ -493,7 +528,12 @@ Each line is pass or fail, not a matter of judgement.
 - [ ] **Agent tokens carry an expiry.** Prefer a fixed TTL and rotation over a
       token that never expires.
 - [ ] **Agent tokens carry the narrowest scopes that work.** A token that only
-      reads should not hold `pages:write`.
+      reads should not hold `pages:write`, and only a token that must remove
+      subtrees should hold `pages:delete`.
+- [ ] **Repository tokens live in `CLEWWIKI_GIT_TOKEN`** (or
+      `CLEWWIKI_GIT_TOKEN_<NAME>`), the repository URL is `https://`, and
+      `ALLOW_FILE_REPOSITORIES` is `false` unless a workspace really links a
+      checkout on the host.
 - [ ] **Leaked tokens are revoked, not just rotated.** Revocation takes effect
       on the next request, at the authentication layer.
 - [ ] **MCP over HTTP is off unless an agent needs it.** `MCP_HTTP_ENABLED` is
@@ -504,9 +544,12 @@ Each line is pass or fail, not a matter of judgement.
 - [ ] **The rate limit suits your agents.** The default is 60 requests per
       minute per token. It is enforced per application process, so running more
       than one replica multiplies the effective ceiling.
-- [ ] **The audit log is being read.** Every agent-token request writes a row,
-      including rejected ones. A burst of `auth.rejected` from a token that is
-      normally quiet is the signal that a token has leaked.
+- [ ] **The audit log is being read.** Every accepted agent-token request writes
+      a row. Refusals of a known token (`auth.rejected` for a revoked or expired
+      one, `auth.rate_limited`) are written at most once per token per ten
+      seconds, with a `suppressed` count of the rest; a burst from a token that
+      is normally quiet is the signal that a token has leaked. Failed sign-ins
+      are `auth.login_failed`, throttled ones `auth.login_rate_limited`.
 - [ ] **Backups run and have been restored once.** The `postgres-data` volume
       holds every account, page, token digest and audit row, and
       `docker compose down -v` deletes it permanently. See [Backups](#backups).
@@ -528,7 +571,9 @@ container.
 | `POSTGRES_DB` | no | `clewwiki` | Database name. |
 | `DATABASE_URL` | **yes** | built by compose | Connection string. Set it by hand only when running the app outside compose. |
 | `BETTER_AUTH_SECRET` | **yes** | none — required | Signs session cookies. Generate with `openssl rand -base64 48`. Changing it signs everyone out. |
-| `BETTER_AUTH_URL` | no | none — required | Public base URL as the browser sees it. Enables secure cookies when it starts with `https://`. |
+| `BETTER_AUTH_URL` | no | none — required | Public base URL as the browser sees it. Enables secure cookies when it starts with `https://`, and is the origin cookie-authenticated API writes must come from. |
+| `CLEWWIKI_SETUP_TOKEN` | **yes**, until setup | generated at start-up | One-time token `/setup` requires. Empty: a random one is printed to the log (`docker compose logs web \| grep "setup token"`). |
+| `TRUSTED_CLIENT_IP_HEADER` | no | `x-real-ip` | Header the reverse proxy overwrites with the client address. Login rate limits key on it; without it all clients share one bucket. |
 | `AGENT_TOKEN_RATE_LIMIT_MAX` | no | `60` | Requests allowed per token per window. |
 | `AGENT_TOKEN_RATE_LIMIT_WINDOW` | no | `60` | Window length in seconds. |
 | `WEB_BIND_ADDRESS` | no | `127.0.0.1` | Host interface compose publishes the app on. Change it only for a proxy on another machine, and then to a private address. |
@@ -539,18 +584,29 @@ container.
 | `RUN_MIGRATIONS_ON_START` | no | `true` | Set to `false` to manage the schema yourself. |
 | `CLAIM_SWEEP_INTERVAL_SECONDS` | no | `60` | How often lapsed claims are released in the background. `0` disables the sweep; expiry is still applied whenever a claim is read or written. |
 | `REPOS_DIR` | no | `/data/repos` | Where read-only mirrors of workspace repositories are kept. Compose backs it with the `repos-data` volume. |
+| `CLEWWIKI_GIT_TOKEN`, `CLEWWIKI_GIT_TOKEN_<NAME>` | **yes** | empty | Access tokens for private repositories. The only variables a workspace's repository setting may name; sent only to `https://` URLs. |
+| `ALLOW_FILE_REPOSITORIES` | no | `false` | Allows `file://` repository URLs (a repository on the host or mounted into the container). |
 | `CLEWWIKI_MIGRATIONS_DIR` | no | set by the image | Where the app looks for migration SQL. Outside a container only. |
 | `CLEWWIKI_GRAMMARS_DIR` | no | set by the image | Where the app looks for the tree-sitter grammar `.wasm` files. Outside a container only. |
 
 Browser sessions are not rate limited; the two `AGENT_TOKEN_RATE_LIMIT_*`
-settings apply to bearer-token requests only.
+settings apply to bearer-token requests only. Sign-in is: ten attempts per
+account and thirty per client address per fifteen minutes, answered exactly
+like a wrong password once exceeded. Like the agent limit, it is counted per
+application process.
 
-A private repository's access token is configured by name, not by value: the
-workspace's repository setting names an environment variable (say
-`GIT_ACCESS_TOKEN`), you add that variable to `.env`, and uncomment the matching
-line under `web.environment` in `docker-compose.yml` — or, to keep that file
-untouched, set it in a `docker-compose.override.yml`. The token never enters the
-database.
+A private repository's access token is configured by name, not by value: put it
+in `.env` as `CLEWWIKI_GIT_TOKEN` (compose passes that one through) and enter
+`CLEWWIKI_GIT_TOKEN` as the workspace's access token variable. A second token
+goes in `CLEWWIKI_GIT_TOKEN_<NAME>`, with a matching line under
+`web.environment` in a `docker-compose.override.yml`. No other variable name is
+accepted — the setting cannot point at `BETTER_AUTH_SECRET` or `DATABASE_URL` —
+and the token is sent only to `https://` repository URLs, never over plain
+HTTP. It never enters the database.
+
+The stdio MCP server, on the developer's machine, also reads
+`CLEWWIKI_ALLOW_INSECURE_URL`: `true` lets it use a plain `http://`
+`CLEWWIKI_URL` that is not `localhost` or `127.0.0.1`.
 
 ### Backups
 
@@ -921,14 +977,16 @@ header and fill in three fields:
 
 | Field | What it takes |
 |---|---|
-| Repository URL | `https://…`, or `file:///srv/checkouts/api` for a checkout mounted into the container. The container image ships no SSH client, so use `https://` with an access token rather than `ssh://`. |
+| Repository URL | `https://…`, without a user name or token in it. `file:///srv/checkouts/api` for a checkout mounted into the container works only with `ALLOW_FILE_REPOSITORIES=true`. `git://`, `ext::` and anything starting with `-` are refused. The container image ships no SSH client, so use `https://` with an access token rather than `ssh://`. |
 | Default ref | The branch, tag or commit anchors are checked against unless a caller names another. Usually `main`. |
-| Access token variable | The **name** of an environment variable holding the token — for example `GIT_ACCESS_TOKEN`. Leave it empty for a public or local repository. |
+| Access token variable | The **name** of the environment variable holding the token: `CLEWWIKI_GIT_TOKEN`, or `CLEWWIKI_GIT_TOKEN_<NAME>`. No other name is accepted. Leave it empty for a public or local repository. |
 
 The token itself is never typed into the form and never stored: the setting
 records the variable's name, and the server reads the value out of its own
-environment when it talks to git. **Test connection** checks the URL, the ref
-and the token without cloning anything.
+environment when it talks to git, and sends it only to the `https://` origin of
+the repository. **Test connection** checks the URL, the ref and the token
+without cloning anything, and is recorded in the audit log as
+`workspace.repository_tested`.
 
 The server keeps a read-only bare mirror per workspace under `REPOS_DIR`,
 fetches it on demand, and reads files with `git show`. It never creates a
@@ -951,12 +1009,21 @@ so a misspelled symbol is refused there and then rather than reported as `lost`
 a week later. Swift, TypeScript and TSX have declaration tables today; any other
 file can still be anchored by line range.
 
-**Check** recomputes every anchor on a page against the repository:
+**Check** recomputes every anchor on a page against the repository and stores
+the result, so it is a `POST` and needs `pages:write`:
 
 ```sh
-curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
-     "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/anchors/check?ref=main"
+curl -sS -X POST -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"ref":"main"}' \
+     "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/anchors/check"
 ```
+
+A `GET` on the same path, with `pages:read`, returns the states the last check
+stored without touching the repository. A check reads at most 2 000 files and
+32 MB of source in 30 seconds; when it runs out, the response says
+`"complete": false`, names the limit in `budget.limit`, and lists the anchors it
+could not place in `unchecked_anchor_ids` — those keep their previous state
+rather than being marked `lost`.
 
 Each anchor comes back in one of four states, and they mean different things:
 
@@ -995,7 +1062,8 @@ noise.
 | `POST /api/v1/pages` | session or token | `pages:write` | Create a page. |
 | `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |
 | `PATCH /api/v1/pages/{id}` | session or token | `pages:write` | Update or move a page under a claim. Requires `claim_id` and `base_content_hash`. Writes a revision and bumps the version. |
-| `DELETE /api/v1/pages/{id}` | session or token | `pages:write` | Soft-delete a page and everything below it. |
+| `DELETE /api/v1/pages/{id}` | session or token | `pages:write` + `pages:delete` | Soft-delete a page and everything below it. `409 conflict` while another actor holds a live claim in the subtree, unless the caller is an administrator. |
+| `POST /api/v1/pages/{id}/restore` | admin session | — | Restore a soft-deleted page and the subtree deleted with it. `409 conflict` when a live page has taken one of its paths or its parent is gone or moved. |
 | `GET /api/v1/pages/{id}/tree` | session or token | `pages:read` | The subtree rooted at a page, nested. |
 | `GET /api/v1/pages/{id}/versions` | session or token | `pages:read` | Revision history: version, author, content hash, timestamp. |
 | `POST /api/v1/pages/{id}/link` | session or token | `pages:write` | Pair a technical page with a human one, or unpair them. |
@@ -1008,12 +1076,19 @@ noise.
 | `GET /api/v1/pages/{id}/notes` | session or token | `pages:read` | The active notes on a page. |
 | `POST /api/v1/pages/{id}/anchors` | session or token | `pages:write` | Anchor the page, or one of its sections, to a declaration or a line range. Resolves it against the repository first. |
 | `GET /api/v1/pages/{id}/anchors` | session or token | `pages:read` | The anchors on one page, plus the workspace's `fallback_share`. |
-| `GET /api/v1/pages/{id}/anchors/check` | session or token | `pages:read` | Recompute every anchor on the page against the repository. Takes `ref`. |
+| `GET /api/v1/pages/{id}/anchors/check` | session or token | `pages:read` | The anchor states the last check stored, without touching the repository. |
+| `POST /api/v1/pages/{id}/anchors/check` | session or token | `pages:write` | Recompute every anchor on the page against the repository, within a read budget. Takes `ref`. |
 | `POST /api/v1/anchors/{anchorId}/confirm` | session or token | `pages:write` | Clear a flag after review, re-baselining the anchor onto what is there now. |
 | `DELETE /api/v1/anchors/{anchorId}` | session or token | `pages:write` | Remove an anchor. |
 | `GET /api/v1/audit` | admin session or token | `audit:read` | The audit log, newest first. Takes `action`, `target`, `since`, `limit`. |
 | `GET /api/v1/search` | session or token | `pages:read` | Full-text search. Takes `q`, `limit`, `kind`. |
 | `GET /api/v1/export/{id}` | session or token | `pages:read` | Export a page. Takes `format=md` or `format=html`. |
+
+A browser session can call these endpoints too, but a request that changes
+state must then come from the instance's own origin (`Origin` equal to
+`BETTER_AUTH_URL`, or `Sec-Fetch-Site: same-origin`) and carry
+`Content-Type: application/json`; anything else is `403 forbidden`. Requests
+with an agent token are not affected.
 
 All of them refuse to answer for a workspace other than the caller's own, with
 `404` rather than `403` so the response does not confirm that a page exists
@@ -1027,7 +1102,9 @@ when there is more than one. Errors share one envelope:
 
 The codes are `validation`, `not_found`, `conflict`, `stale_base`,
 `forbidden`, `insufficient_scope`, `unauthenticated`, `invalid_token`,
-`rate_limited` and `repository_unavailable`. On the write path they mean
+`rate_limited` and `repository_unavailable`. A `repository_unavailable` carries
+a fixed message only; git's own output, which the remote server writes, goes to
+the server log. On the write path they mean
 particular things: `conflict` is
 "you have no claim here", `not_found` on a write is "your claim has expired or
 been released", `forbidden` is "that claim belongs to someone else", and
@@ -1077,7 +1154,9 @@ an edge case. The security model includes:
 - A write audit log: every write attempt (success, claim conflict, or hash
   conflict) is recorded in the same transaction as the attempt itself.
 - Claims are time-boxed leases (TTL with renewal), not indefinite locks.
-- Rate limiting per agent token, to contain a runaway or buggy client.
+- Rate limiting per agent token, to contain a runaway or buggy client, and
+  per account and client address on password sign-in.
+- A one-time setup token for first-run setup, and no self-registration.
 - Workspace-scoped access checks on every request, written explicitly in
   code rather than assumed from a single-workspace deployment.
 - Document content is always treated as data, never as instructions, in

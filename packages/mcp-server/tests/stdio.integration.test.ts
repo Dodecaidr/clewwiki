@@ -143,6 +143,8 @@ describe('stdio transport', () => {
     const failed = await call('wiki.check_anchors', { page_id: rest.page.page_id });
     expect(failed.isError).toBe(true);
     expect(failed.data).toMatchObject({ error: { code: 'REPOSITORY_UNAVAILABLE' } });
+    // The remote's own error text stays out of what the agent reads.
+    expect(JSON.stringify(failed.data)).not.toContain('fatal:');
   });
 
   it('refuses a page id that is not one before any REST call is made', async () => {

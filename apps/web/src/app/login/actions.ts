@@ -1,9 +1,10 @@
 'use server';
 
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
-import { auth } from '@/lib/auth';
+import { attemptLogin } from '@/lib/login';
 
 export interface LoginFormState {
   error?: 'invalid';
@@ -23,20 +24,19 @@ export async function signInAction(
     password: formData.get('password'),
   });
 
-  // A malformed address and a wrong password get the same answer: the form
-  // must not let a caller distinguish "no such account" from "wrong password".
+  // A malformed address, a wrong password and an attempt refused by the login
+  // rate limit all get the same answer: the form must not let a caller
+  // distinguish "no such account" from "wrong password" from "slow down".
   if (!parsed.success) {
     return { error: 'invalid' };
   }
 
-  try {
-    const result = await auth.api.signInEmail({
-      body: { email: parsed.data.email, password: parsed.data.password },
-    });
-    if (!result?.user) {
-      return { error: 'invalid' };
-    }
-  } catch {
+  const result = await attemptLogin({
+    email: parsed.data.email,
+    password: parsed.data.password,
+    headers: new Headers(await headers()),
+  });
+  if (!result.ok) {
     return { error: 'invalid' };
   }
 

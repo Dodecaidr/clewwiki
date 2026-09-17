@@ -17,10 +17,51 @@ import { createClewwikiMcpServer } from './server.ts';
  * stays a dependency of one place, and so the transport can be exercised
  * without a Next server around it.
  */
+/**
+ * Most JSON-RPC messages one HTTP request may carry.
+ *
+ * The transport dispatches the messages of a batch concurrently, and each tool
+ * call is at least one REST request with its own token lookup and audit row.
+ * Unbounded, one POST of a few megabytes would fan out into tens of thousands
+ * of concurrent calls against the instance — past the per-token rate limit,
+ * which is only consulted once per HTTP request here. Ten is more than any
+ * client batches in practice.
+ */
+export const MAX_BATCH_MESSAGES = 10;
+
+function batchTooLarge(): Response {
+  return Response.json(
+    {
+      jsonrpc: '2.0',
+      error: { code: -32600, message: `A batch may carry at most ${MAX_BATCH_MESSAGES} messages` },
+      id: null,
+    },
+    { status: 400, headers: { 'Cache-Control': 'no-store' } },
+  );
+}
+
+/** The number of messages in a JSON-RPC body, or null when it is not a batch. */
+async function batchSize(request: Request): Promise<number | null> {
+  const text = await request.clone().text();
+  if (!text.trimStart().startsWith('[')) return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed.length : null;
+  } catch {
+    // Not JSON at all: the transport answers that with its own parse error.
+    return null;
+  }
+}
+
 export async function handleMcpHttpRequest(options: {
   client: ClewwikiRestClient;
   request: Request;
 }): Promise<Response> {
+  if (options.request.method === 'POST') {
+    const size = await batchSize(options.request);
+    if (size !== null && size > MAX_BATCH_MESSAGES) return batchTooLarge();
+  }
+
   const server = createClewwikiMcpServer({ client: options.client });
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,

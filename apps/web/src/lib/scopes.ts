@@ -11,6 +11,9 @@ export const AGENT_SCOPES = [
   'identity:read',
   'pages:read',
   'pages:write',
+  // Separate from `pages:write` on purpose: one DELETE removes a whole subtree,
+  // and an agent that edits pages rarely needs to be able to do that.
+  'pages:delete',
   'audit:read',
 ] as const;
 

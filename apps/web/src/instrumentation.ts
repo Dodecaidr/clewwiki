@@ -20,7 +20,34 @@ export async function register(): Promise<void> {
     await runMigrations(connectionString);
   }
 
+  await announceSetupToken();
   startClaimSweep();
+}
+
+/**
+ * On an instance with no accounts yet, makes sure the one-time setup token
+ * exists and has been printed to the log — so the operator can read it with
+ * `docker compose logs web | grep "setup token"` before opening `/setup`.
+ *
+ * Only when no account exists: a running instance has nothing to set up, and a
+ * token printed on every restart would teach operators to ignore the line. A
+ * database that cannot be reached here is not fatal; `/setup` generates and
+ * prints the token itself when it is first rendered.
+ */
+async function announceSetupToken(): Promise<void> {
+  try {
+    const { hasAnyUser } = await import('./lib/workspace');
+    if (await hasAnyUser()) return;
+    const { getConfiguredSetupToken } = await import('./lib/env');
+    if (getConfiguredSetupToken() !== null) {
+      console.log('[setup] no account exists yet; /setup requires the value of CLEWWIKI_SETUP_TOKEN');
+      return;
+    }
+    const { ensureSetupToken } = await import('./lib/setup-token');
+    ensureSetupToken();
+  } catch (error) {
+    console.error('[setup] could not check for existing accounts at start-up', error);
+  }
 }
 
 /**

@@ -270,8 +270,10 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
         });
       }
 
-      if (method === 'GET' && path === `/api/v1/pages/${page.page_id}/anchors/check`) {
-        if (!needs('pages:read')) return;
+      if (method === 'POST' && path === `/api/v1/pages/${page.page_id}/anchors/check`) {
+        if (!needs('pages:write')) return;
+        // An older instance still quoted the remote's stderr here; the MCP
+        // boundary must not pass it on.
         return fail(502, 'repository_unavailable', 'The repository could not be reached', {
           git: 'fatal: could not read from remote repository',
         });

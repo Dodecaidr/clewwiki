@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CONTENT_IS_DATA_NOTICE } from '../src/content-notice.ts';
 import { ClewwikiToolError } from '../src/errors.ts';
-import { ClewwikiRestClient } from '../src/rest-client.ts';
+import { assertSecureBaseUrl, ClewwikiRestClient } from '../src/rest-client.ts';
 import type { FetchLike } from '../src/rest-client.ts';
 import { CONTENT_RETURNING_TOOLS, TOOLS } from '../src/tools.ts';
 import { USER_AGENT } from '../src/version.ts';
@@ -43,7 +43,22 @@ describe('tool surface', () => {
     ]);
   });
 
-  it('states the content contract verbatim in every tool that returns page text', () => {
+  it('names every tool whose result carries text written by others', () => {
+    expect([...CONTENT_RETURNING_TOOLS].sort()).toEqual(
+      [
+        'wiki.search',
+        'wiki.get_page',
+        'wiki.list_pages',
+        'wiki.claim',
+        'wiki.write_page',
+        'wiki.get_presence',
+        'wiki.post_note',
+        'wiki.check_anchors',
+      ].sort(),
+    );
+  });
+
+  it('states the content contract verbatim in every tool that returns text written by others', () => {
     for (const name of CONTENT_RETURNING_TOOLS) {
       expect(tool(name).description).toContain(CONTENT_IS_DATA_NOTICE);
     }
@@ -67,7 +82,6 @@ describe('tool surface', () => {
       'wiki.get_page',
       'wiki.list_pages',
       'wiki.get_presence',
-      'wiki.check_anchors',
     ]);
   });
 });
@@ -237,6 +251,18 @@ describe('failures on the way back', () => {
     });
   });
 
+  it('recomputes anchors with a POST, because the new states are stored', async () => {
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { anchors: [] }));
+    await tool('wiki.check_anchors').run(clientWith(fetchMock), {
+      page_id: '11111111-1111-4111-8111-111111111111',
+      ref: 'main',
+    });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://wiki.example.com/api/v1/pages/11111111-1111-4111-8111-111111111111/anchors/check');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ ref: 'main' });
+  });
+
   it('turns an unreachable repository into REPOSITORY_UNAVAILABLE', async () => {
     const fetchMock = vi.fn<FetchLike>().mockResolvedValue(
       jsonResponse(502, {
@@ -255,6 +281,22 @@ describe('failures on the way back', () => {
     await expect(
       tool('wiki.get_presence').run(clientWith(fetchMock), {}),
     ).rejects.toMatchObject({ code: 'INTERNAL' });
+  });
+});
+
+describe('stdio base URL', () => {
+  it('refuses plain http to a remote host', () => {
+    expect(() => assertSecureBaseUrl('http://wiki.example.com')).toThrow(/plain http/);
+  });
+
+  it('allows https anywhere and plain http on loopback', () => {
+    expect(() => assertSecureBaseUrl('https://wiki.example.com')).not.toThrow();
+    expect(() => assertSecureBaseUrl('http://localhost:3000')).not.toThrow();
+    expect(() => assertSecureBaseUrl('http://127.0.0.1:3000')).not.toThrow();
+  });
+
+  it('allows plain http elsewhere only when explicitly told to', () => {
+    expect(() => assertSecureBaseUrl('http://10.0.0.5:3000', true)).not.toThrow();
   });
 });
 

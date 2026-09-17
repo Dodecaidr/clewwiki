@@ -1,7 +1,7 @@
 import 'server-only';
 
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { pageRevisions, pages } from '@clewwiki/db';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { claims, pageRevisions, pages } from '@clewwiki/db';
 import type { SQL } from 'drizzle-orm';
 import type { ActorKind, PageKind } from '@clewwiki/db';
 
@@ -709,6 +709,11 @@ export interface DeletePageInput {
   workspaceId: string;
   pageId: string;
   actor: PageActor;
+  /**
+   * True only for a human workspace administrator. It is what lets a delete go
+   * ahead over other actors' live claims in the subtree, releasing them.
+   */
+  overrideClaims?: boolean;
 }
 
 /**
@@ -718,82 +723,271 @@ export interface DeletePageInput {
  * which is also what frees the path for reuse, because the uniqueness index
  * covers live rows only. The paired counterpart is unlinked in the same
  * transaction so the pair never points at a deleted page from one side.
+ *
+ * Someone else's live claim anywhere in the subtree refuses the delete with
+ * `conflict`, naming the claims: a lease means somebody is in the middle of
+ * writing there, and removing the page under them is the lost update claims
+ * exist to prevent. The caller's own claims do not count. A human
+ * administrator may override, which releases those claims as `forced`. A
+ * refusal is audited as `page.delete_rejected`.
  */
 export async function deletePage(input: DeletePageInput): Promise<{ deleted: number }> {
   const db = getDatabase();
 
-  return db.transaction(async (tx) => {
-    const [current] = await tx
-      .select(pageColumns)
-      .from(pages)
-      .where(
-        and(
-          eq(pages.id, input.pageId),
-          eq(pages.workspaceId, input.workspaceId),
-          isNull(pages.deletedAt),
-        ),
-      )
-      .limit(1)
-      .for('update');
+  try {
+    return await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select(pageColumns)
+        .from(pages)
+        .where(
+          and(
+            eq(pages.id, input.pageId),
+            eq(pages.workspaceId, input.workspaceId),
+            isNull(pages.deletedAt),
+          ),
+        )
+        .limit(1)
+        .for('update');
 
-    if (!current) {
-      throw new PageServiceError('not_found', 'Page not found');
-    }
+      if (!current) {
+        throw new PageServiceError('not_found', 'Page not found');
+      }
 
-    const now = new Date();
-    const removed = await tx
-      .update(pages)
-      .set({ deletedAt: now, linkedPageId: null, updatedAt: now })
-      .where(
-        and(
-          eq(pages.workspaceId, input.workspaceId),
-          isNull(pages.deletedAt),
-          sql`(${pages.id} = ${current.id} or ${pages.path} like ${likePrefixPattern(current.path)} escape '\\')`,
-        ),
-      )
-      .returning({ id: pages.id });
+      const now = new Date();
+      const subtree = sql`(${pages.id} = ${current.id} or ${pages.path} like ${likePrefixPattern(current.path)} escape '\\')`;
 
-    const removedIds = removed.map((row) => row.id);
-    if (removedIds.length > 0) {
-      await tx
+      if (!input.overrideClaims) {
+        const held = await tx
+          .select({
+            claimId: claims.id,
+            pageId: claims.pageId,
+            holderType: claims.holderType,
+            holderId: claims.holderId,
+            holderLabel: claims.holderLabel,
+            expiresAt: claims.expiresAt,
+          })
+          .from(claims)
+          .innerJoin(pages, eq(pages.id, claims.pageId))
+          .where(
+            and(
+              eq(claims.workspaceId, input.workspaceId),
+              eq(pages.workspaceId, input.workspaceId),
+              isNull(pages.deletedAt),
+              isNull(claims.releasedAt),
+              gt(claims.expiresAt, now),
+              subtree,
+            ),
+          );
+
+        const others = held.filter(
+          (claim) => claim.holderType !== input.actor.type || claim.holderId !== input.actor.id,
+        );
+        if (others.length > 0) {
+          throw new PageServiceError(
+            'conflict',
+            'Another actor holds a claim on this page or below it; only an administrator can delete it now',
+            {
+              claims: others.map((claim) => ({
+                claim_id: claim.claimId,
+                page_id: claim.pageId,
+                held_by: claim.holderLabel,
+                actor_type: claim.holderType,
+                expires_at: claim.expiresAt.toISOString(),
+              })),
+            },
+          );
+        }
+      }
+
+      const removed = await tx
         .update(pages)
-        .set({ linkedPageId: null, updatedAt: now })
+        .set({ deletedAt: now, linkedPageId: null, updatedAt: now })
+        .where(and(eq(pages.workspaceId, input.workspaceId), isNull(pages.deletedAt), subtree))
+        .returning({ id: pages.id });
+
+      const removedIds = removed.map((row) => row.id);
+      if (removedIds.length > 0) {
+        await tx
+          .update(pages)
+          .set({ linkedPageId: null, updatedAt: now })
+          .where(
+            and(
+              eq(pages.workspaceId, input.workspaceId),
+              inArray(pages.linkedPageId, removedIds),
+            ),
+          );
+      }
+
+      // A claim on a page that no longer exists would sit in the presence board
+      // until its TTL ran out, naming a page nobody can open.
+      const releasedClaims = await releaseClaimsForPages(
+        tx,
+        input.workspaceId,
+        removedIds,
+        input.actor,
+        now,
+      );
+
+      await recordAudit(
+        {
+          workspaceId: input.workspaceId,
+          actorType: input.actor.type,
+          actorId: input.actor.id,
+          action: 'page.deleted',
+          target: current.id,
+          metadata: {
+            path: current.path,
+            descendants: removedIds.length - 1,
+            claimsReleased: releasedClaims,
+            // The deletion timestamp is what a restore matches the subtree on.
+            deletedAt: now.toISOString(),
+          },
+        },
+        tx,
+      );
+
+      return { deleted: removedIds.length };
+    });
+  } catch (error) {
+    if (isPageServiceError(error) && error.code === 'conflict') {
+      try {
+        await recordAudit({
+          workspaceId: input.workspaceId,
+          actorType: input.actor.type,
+          actorId: input.actor.id,
+          action: 'page.delete_rejected',
+          target: input.pageId,
+          metadata: { result: 'rejected', reason: error.code, ...(error.details ?? {}) },
+        });
+      } catch (auditError) {
+        console.error('[pages] delete refusal could not be audited', auditError);
+      }
+    }
+    throw error;
+  }
+}
+
+export interface RestorePageInput {
+  workspaceId: string;
+  pageId: string;
+  actor: PageActor;
+}
+
+/**
+ * Brings a soft-deleted page back, with the subtree that was deleted with it.
+ *
+ * "With it" is exact: the rows restored are the page and the rows below its
+ * path that carry the same `deleted_at`, i.e. that went in the same delete. A
+ * child deleted separately earlier stays deleted.
+ *
+ * It is refused with `conflict` rather than guessed at when the tree has moved
+ * on: a live page now occupies one of the paths, the parent is itself deleted,
+ * or the parent has since moved so the old path no longer sits under it. Links
+ * to a counterpart were cleared by the delete and are not re-created; pairing
+ * again is an explicit act.
+ */
+export async function restorePage(input: RestorePageInput): Promise<{ restored: number; path: string }> {
+  const db = getDatabase();
+
+  try {
+    return await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select(pageColumns)
+        .from(pages)
+        .where(and(eq(pages.id, input.pageId), eq(pages.workspaceId, input.workspaceId)))
+        .limit(1)
+        .for('update');
+
+      if (!current) throw new PageServiceError('not_found', 'Page not found');
+      if (current.deletedAt === null) {
+        throw new PageServiceError('conflict', 'Page is not deleted');
+      }
+
+      if (current.parentId !== null) {
+        const [parent] = await tx
+          .select({ id: pages.id, path: pages.path, deletedAt: pages.deletedAt })
+          .from(pages)
+          .where(and(eq(pages.id, current.parentId), eq(pages.workspaceId, input.workspaceId)))
+          .limit(1)
+          .for('update');
+        if (!parent || parent.deletedAt !== null) {
+          throw new PageServiceError('conflict', 'The parent page is deleted; restore it first', {
+            parent_id: current.parentId,
+          });
+        }
+        if (parentPathOf(current.path) !== parent.path) {
+          throw new PageServiceError(
+            'conflict',
+            'The parent page has moved since this page was deleted',
+            { parent_id: parent.id, parent_path: parent.path, path: current.path },
+          );
+        }
+      }
+
+      const subtree = await tx
+        .select({ id: pages.id, path: pages.path })
+        .from(pages)
         .where(
           and(
             eq(pages.workspaceId, input.workspaceId),
-            inArray(pages.linkedPageId, removedIds),
+            eq(pages.deletedAt, current.deletedAt),
+            sql`(${pages.id} = ${current.id} or ${pages.path} like ${likePrefixPattern(current.path)} escape '\\')`,
           ),
         );
-    }
 
-    // A claim on a page that no longer exists would sit in the presence board
-    // until its TTL ran out, naming a page nobody can open.
-    const releasedClaims = await releaseClaimsForPages(
-      tx,
-      input.workspaceId,
-      removedIds,
-      input.actor,
-      now,
-    );
+      const paths = subtree.map((row) => row.path);
+      const occupied = await tx
+        .select({ path: pages.path })
+        .from(pages)
+        .where(
+          and(
+            eq(pages.workspaceId, input.workspaceId),
+            isNull(pages.deletedAt),
+            inArray(pages.path, paths),
+          ),
+        );
+      if (occupied.length > 0) {
+        throw new PageServiceError('conflict', 'A live page already exists at a path being restored', {
+          paths: occupied.map((row) => row.path),
+        });
+      }
 
-    await recordAudit(
-      {
-        workspaceId: input.workspaceId,
-        actorType: input.actor.type,
-        actorId: input.actor.id,
-        action: 'page.deleted',
-        target: current.id,
-        metadata: {
-          path: current.path,
-          descendants: removedIds.length - 1,
-          claimsReleased: releasedClaims,
+      const now = new Date();
+      const restored = await tx
+        .update(pages)
+        .set({ deletedAt: null, updatedAt: now })
+        .where(
+          and(
+            eq(pages.workspaceId, input.workspaceId),
+            isNotNull(pages.deletedAt),
+            inArray(
+              pages.id,
+              subtree.map((row) => row.id),
+            ),
+          ),
+        )
+        .returning({ id: pages.id });
+
+      await recordAudit(
+        {
+          workspaceId: input.workspaceId,
+          actorType: input.actor.type,
+          actorId: input.actor.id,
+          action: 'page.restored',
+          target: current.id,
+          metadata: { path: current.path, descendants: restored.length - 1 },
         },
-      },
-      tx,
-    );
+        tx,
+      );
 
-    return { deleted: removedIds.length };
-  });
+      return { restored: restored.length, path: current.path };
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new PageServiceError('conflict', 'A live page already exists at a path being restored');
+    }
+    throw error;
+  }
 }
 
 export interface LinkPagesInput {

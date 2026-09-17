@@ -11,6 +11,11 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     // Integration tests share one Postgres schema, so they must not race.
     fileParallelism: false,
+    env: {
+      // The anchor suite builds its source repository on disk and links it as
+      // a file:// URL, which an instance accepts only when the operator opts in.
+      ALLOW_FILE_REPOSITORIES: 'true',
+    },
   },
   resolve: {
     alias: {

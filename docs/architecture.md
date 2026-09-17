@@ -165,7 +165,10 @@ line-range anchors produced ~50%):
   data — the same rule page bodies are held to. The credential for a
   private repository is named by environment variable in the workspace's
   settings rather than stored in them, so it never reaches the database,
-  a backup, or an API response.
+  a backup, or an API response. The name must be `CLEWWIKI_GIT_TOKEN` or
+  `CLEWWIKI_GIT_TOKEN_<NAME>`, so the setting cannot reach any other
+  secret of the process, and the credential is sent only to the
+  repository's `https://` origin.
 - **Rename recovery matches on the body, not the declaration.** The
   declaration's token hash covers its name, so a rename changes it by
   construction; what survives a rename is the hash of the body's tokens,

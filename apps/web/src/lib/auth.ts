@@ -5,7 +5,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { nextCookies } from 'better-auth/next-js';
 import { accounts, sessions, users, verifications } from '@clewwiki/db';
 
-import { getAuthBaseUrl, getAuthSecret } from './env';
+import { getAuthBaseUrl, getAuthSecret, getTrustedClientIpHeader } from './env';
 import { getDatabase } from './db';
 
 /**
@@ -50,8 +50,21 @@ export const auth = betterAuth({
       sameSite: 'lax',
       httpOnly: true,
     },
+    ipAddress: {
+      // The library's own rate limiter keys on the client address. By default
+      // it reads `X-Forwarded-For`, whose first entry the client controls, so
+      // it is pointed at the one header the reverse proxy is trusted to
+      // overwrite. When that header is absent every client shares one bucket,
+      // which is the safe failure.
+      ipAddressHeaders: [getTrustedClientIpHeader()],
+    },
   },
   trustedOrigins: [getAuthBaseUrl()],
+  // Accounts come into existence through /setup only, which calls the sign-up
+  // endpoint server-side (`auth.api`, not the HTTP router). Closing the public
+  // route means nobody can register themselves — before setup, when an
+  // account created this way would lock the operator out of /setup, or after.
+  disabledPaths: ['/sign-up/email'],
   // `nextCookies` must stay last: it flushes Set-Cookie headers produced by
   // server actions.
   plugins: [nextCookies()],

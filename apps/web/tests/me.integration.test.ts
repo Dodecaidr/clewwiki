@@ -204,6 +204,52 @@ describe.skipIf(!probe.reachable)('GET /api/v1/me with an agent token', () => {
     expect(rows[0]!.metadata).toMatchObject({ reason: 'revoked' });
   });
 
+  it('coalesces a burst of rejected calls into one audit row per token', async () => {
+    const { and, eq } = await import('drizzle-orm');
+    const burst = await seedToken({
+      workspaceId: primaryWorkspaceId,
+      name: 'revoked-burst',
+      scopes: ['identity:read'],
+      revokedAt: new Date(Date.now() - 60 * 1000),
+    });
+    for (let call = 0; call < 25; call += 1) {
+      expect((await callMe({ Authorization: `Bearer ${burst.token}` })).status).toBe(401);
+    }
+    const rows = await db
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.actorId, burst.id), eq(schema.auditLog.action, 'auth.rejected')));
+    expect(rows).toHaveLength(1);
+  });
+
+  it('coalesces rate-limited calls into one audit row per token per window', async () => {
+    const { and, eq } = await import('drizzle-orm');
+    const { TokenBucketRateLimiter } = await import('@/lib/rate-limit');
+    const previous = globalThis.__clewwikiAgentRateLimiter;
+    globalThis.__clewwikiAgentRateLimiter = new TokenBucketRateLimiter(1, 60);
+    try {
+      const busy = await seedToken({
+        workspaceId: primaryWorkspaceId,
+        name: 'busy',
+        scopes: ['identity:read'],
+      });
+      const statuses: number[] = [];
+      for (let call = 0; call < 20; call += 1) {
+        statuses.push((await callMe({ Authorization: `Bearer ${busy.token}` })).status);
+      }
+      expect(statuses[0]).toBe(200);
+      expect(statuses.slice(1).every((status) => status === 429)).toBe(true);
+
+      const rows = await db
+        .select()
+        .from(schema.auditLog)
+        .where(and(eq(schema.auditLog.actorId, busy.id), eq(schema.auditLog.action, 'auth.rate_limited')));
+      expect(rows).toHaveLength(1);
+    } finally {
+      globalThis.__clewwikiAgentRateLimiter = previous;
+    }
+  });
+
   it('rejects a token whose secret has been tampered with', async () => {
     const [head, secret] = validToken.token.split('.');
     const tampered = `${head}.${'A'.repeat(secret!.length)}`;

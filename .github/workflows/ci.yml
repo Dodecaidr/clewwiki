@@ -75,9 +75,10 @@ jobs:
         run: pnpm build
 
       - name: Audit dependencies
-        # Advisory data changes without any commit of ours, so a new advisory
-        # must not turn every unrelated pull request red.
-        continue-on-error: true
+        # Blocking: a high or critical advisory in the dependency tree fails the
+        # build. Advisory data changes without a commit of ours, so a new one can
+        # turn an unrelated change red; the fix is an upgrade or a
+        # `pnpm.overrides` entry in package.json, not skipping this step.
         run: pnpm audit --audit-level high
 
   secret-scan:
@@ -140,6 +141,10 @@ jobs:
             echo "BETTER_AUTH_SECRET=$(openssl rand -base64 48)"
             echo "BETTER_AUTH_URL=http://localhost:3000"
             echo "MCP_HTTP_ENABLED=true"
+            # First-run setup needs a one-time token. Without this the instance
+            # would generate one and print it to its log, which the smoke test
+            # can also read; setting it exercises the configured path.
+            echo "CLEWWIKI_SETUP_TOKEN=$(openssl rand -hex 24)"
           } > .env
 
       - name: Build and start the stack
@@ -148,7 +153,10 @@ jobs:
       - name: Smoke test over HTTP
         env:
           SMOKE_BASE_URL: http://127.0.0.1:3000
-        run: node scripts/smoke-test.mjs
+        run: |
+          set -eu
+          SMOKE_SETUP_TOKEN="$(grep '^CLEWWIKI_SETUP_TOKEN=' .env | cut -d= -f2-)" \
+            node scripts/smoke-test.mjs
 
       - name: Inspect the running container
         run: |
@@ -184,7 +192,7 @@ jobs:
           image="$(docker inspect --format '{{.Image}}' "$(docker compose ps -q web)")"
           docker history --no-trunc "${image}" > image-history.txt
           docker image inspect "${image}" > image-config.json
-          for key in POSTGRES_PASSWORD BETTER_AUTH_SECRET; do
+          for key in POSTGRES_PASSWORD BETTER_AUTH_SECRET CLEWWIKI_SETUP_TOKEN; do
             value="$(grep "^${key}=" .env | cut -d= -f2-)"
             if grep -qF -- "${value}" image-history.txt image-config.json; then
               echo "::error::the value of ${key} appears in the image"

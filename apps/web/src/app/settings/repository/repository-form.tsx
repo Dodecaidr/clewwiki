@@ -75,7 +75,7 @@ export function RepositoryForm({
           defaultValue={initial.authTokenEnv}
           maxLength={64}
           autoComplete="off"
-          placeholder="GIT_ACCESS_TOKEN"
+          placeholder="CLEWWIKI_GIT_TOKEN"
         />
       </Field>
 

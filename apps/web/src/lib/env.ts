@@ -108,15 +108,64 @@ export function getReposDir(): string {
 }
 
 /**
+ * The only environment variable names a repository setting may point at:
+ * `CLEWWIKI_GIT_TOKEN`, or `CLEWWIKI_GIT_TOKEN_<NAME>` for a second repository
+ * credential.
+ *
+ * The setting is written by a workspace administrator, and the process
+ * environment also holds the database URL and the session-signing secret. A
+ * dedicated namespace is what keeps "name a variable" from meaning "read any
+ * secret this process has and send it to a URL of your choosing".
+ */
+export const REPOSITORY_TOKEN_ENV_PATTERN = /^CLEWWIKI_GIT_TOKEN(?:_[A-Z0-9]{1,40})?$/;
+
+/**
  * Reads the access token for a repository out of the environment.
  *
  * The workspace setting names the variable; the value never enters the
- * database, an API response or a log line.
+ * database, an API response or a log line. The name is checked again here,
+ * not only when the setting is saved, so a setting stored by an older release
+ * cannot reach outside the namespace either.
  */
 export function getRepositoryToken(variableName: string | undefined | null): string | null {
   if (!variableName) return null;
+  if (!REPOSITORY_TOKEN_ENV_PATTERN.test(variableName)) return null;
   const value = process.env[variableName];
   return value && value.trim() !== '' ? value : null;
+}
+
+/**
+ * Whether a workspace may link a `file://` repository.
+ *
+ * A file URL reads any git repository the application's user can see on the
+ * host or in the container, so it is an operator decision rather than an
+ * administrator one: off unless `ALLOW_FILE_REPOSITORIES=true`.
+ */
+export function areFileRepositoriesAllowed(): boolean {
+  return process.env.ALLOW_FILE_REPOSITORIES === 'true';
+}
+
+/**
+ * The request header that carries the client's address, as set by the
+ * reverse proxy in front of the application.
+ *
+ * `X-Real-IP` by default, because each of the three documented proxies can be
+ * made to overwrite it with the address it actually accepted the connection
+ * from. `X-Forwarded-For` is deliberately not the default: a proxy appends to
+ * it, so its first entry is whatever the client chose to send.
+ */
+export function getTrustedClientIpHeader(): string {
+  const configured = process.env.TRUSTED_CLIENT_IP_HEADER?.trim().toLowerCase();
+  return configured && /^[a-z0-9-]{1,64}$/.test(configured) ? configured : 'x-real-ip';
+}
+
+/**
+ * The one-time token first-run setup requires, when the operator chose it.
+ * Unset means the server generates one at start-up and prints it to its log.
+ */
+export function getConfiguredSetupToken(): string | null {
+  const value = process.env.CLEWWIKI_SETUP_TOKEN?.trim();
+  return value ? value : null;
 }
 
 export function isProduction(): boolean {

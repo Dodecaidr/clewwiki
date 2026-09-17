@@ -326,7 +326,9 @@ phase and must complete before Phase 7 starts.
 **Status: built; not complete.** Everything below is in the repository. The
 phase closes when the pre-release security review — run as a separate pass,
 not as part of this work — has reported, and every finding it marks as
-launch-blocking is fixed. Until then Phase 7 does not start.
+launch-blocking is fixed. The review has reported and its findings are
+addressed as recorded under *Security review* below; the phase closes with the
+first green `docker-smoke` run on CI. Until then Phase 7 does not start.
 
 - **Image.** `docker/Dockerfile` is two stages on
   `public.ecr.aws/docker/library/node:22-slim`. The build stage installs the
@@ -416,6 +418,88 @@ any browser is the documented path. The export contract is unchanged:
 `format` accepts `md` and `html`, and a `pdf` value can be added later without
 breaking a caller, if a renderer that does not need a browser in the image
 turns up.
+
+**Security review.** The pre-release review against every control in
+`docs/security.md` has reported. It found no critical issue, two high, eight
+medium and twelve low. `docs/security.md` now states, control by control, what
+is implemented.
+
+Fixed:
+
+- *Password sign-in was not rate limited.* The login form's server action
+  called the authentication library directly and bypassed its HTTP limiter.
+  Sign-in is now limited per account and per client address inside the action,
+  answered like a wrong password, and audited (`auth.login_failed`,
+  `auth.login_rate_limited`). The client address comes only from
+  `TRUSTED_CLIENT_IP_HEADER` (`X-Real-IP` by default), which the documented
+  proxies overwrite; the library's limiter reads the same header.
+- *The repository token setting could name any environment variable* and send
+  its value to any URL, so a workspace administrator could read the session
+  secret or the database URL. The name is now restricted to
+  `CLEWWIKI_GIT_TOKEN` / `CLEWWIKI_GIT_TOKEN_<NAME>` on save and on read, the
+  credential goes only to the `https://` origin of the repository, and
+  **Test connection** is audited. In the same pass, repository URLs with
+  embedded credentials, `git://`, `ext::` or a leading `-` are refused, and
+  `file://` needs `ALLOW_FILE_REPOSITORIES=true`.
+- *Public self-registration* through the authentication library's sign-up
+  route is disabled; `/setup` still creates the first account server-side.
+- *First-run setup was first come, first served.* It now requires a one-time
+  setup token, configured or generated at start-up and printed to the log.
+  A setup that fails after the account is created removes the account again.
+- *Any `pages:write` token could delete a whole subtree*, releasing other
+  actors' claims, with no way back but SQL. Deleting needs the new
+  `pages:delete` scope, is refused while another actor holds a live claim in
+  the subtree unless the caller is an administrator, and administrators can
+  restore a deleted subtree over REST.
+- *The content-as-data statement covered three tools.* It now covers every tool
+  whose result carries text written by others, and git's error output no longer
+  reaches API responses or tool results.
+- *Amplification.* `/mcp` refuses batches of more than ten messages; refusals
+  of a known token are audited at most once per token per ten seconds.
+- *Anchor checks had no resource budget and ran on a `GET` with `pages:read`.*
+  A check now has a file, byte and time budget with an explicit partial
+  result, oversized files are skipped before reading, and recomputing is a
+  `POST` needing `pages:write`; `GET` returns the stored states. (This changes
+  the Phase 4 and Phase 5 contracts: `wiki.check_anchors` now needs
+  `pages:write`.)
+- *Cookie-authenticated REST writes relied on `SameSite=Lax` alone.* They now
+  need the instance's origin and a JSON content type.
+- *CI.* The dependency audit is blocking, after an override moved `lodash-es`
+  (a transitive dependency of the diagram renderer) to a patched release.
+- *Smaller items.* The token form keeps "no expiry" as a deliberate last
+  choice, and the stdio MCP server refuses to send a token to a plain `http://`
+  instance that is not on loopback unless told to.
+
+Accepted for v1, with the reasoning:
+
+- *Unknown or wrong-secret tokens are not audited or limited per address.*
+  Secrets are 256 bits, so guessing is not a threat; such a request has no
+  workspace to attribute a row to, and a per-address limiter for failed
+  lookups is a later hardening step.
+- *Rate limits are per process, and a `/mcp` tool call counts against the token
+  once per REST call it makes.* A single-container deployment is the supported
+  shape; both effects are documented.
+- *Search on the UI page does not cap the query length, and snippets are
+  computed over full bodies.* Only signed-in members reach it, the page asks for
+  at most twenty-five results, and the REST endpoint already caps the query.
+- *The HTML export does not carry its own Content-Security-Policy*, so opening
+  a file that embeds remote images contacts those hosts. No script path exists
+  in the sanitised output; exports are opened deliberately by their reader.
+- *No cap on how many claims one actor holds.* Claims expire, and an
+  administrator can force-release them.
+- *Compose does not drop capabilities or mount the root filesystem read-only,
+  and the app and migrator share one database role.* The image already runs as
+  a non-root user with read-only application files; the remaining hardening
+  is deployment-specific and left to operators.
+- *A moderate advisory in the build tool of the migration generator* affects a
+  development server that clewwiki never runs, and no fixed release of that
+  tool exists yet.
+- *The queue of anchor checks waiting for one workspace's repository lock is
+  unbounded.* Each queued check is bounded by its own budget and by the
+  per-token rate limit.
+- *No automated anomaly detection on the audit log.* The signal is recorded and
+  documented; alerting is outside a single-team self-hosted instance's scope
+  for v1.
 
 **Exit criteria status.** Markdown and HTML export open without error: the
 unit tests assert a standalone document with its print stylesheet, and the

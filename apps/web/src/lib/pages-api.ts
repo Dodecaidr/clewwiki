@@ -29,6 +29,8 @@ export type PagesAuthResult =
 
 export const READ_SCOPES = ['pages:read'] as const;
 export const WRITE_SCOPES = ['pages:write'] as const;
+/** Deleting a subtree needs its own scope on top of `pages:write`. */
+export const DELETE_SCOPES = ['pages:write', 'pages:delete'] as const;
 
 export async function authorizePagesRequest(
   request: Request,

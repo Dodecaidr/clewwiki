@@ -7,7 +7,9 @@ import { extractBearerToken } from './agent-token-crypto';
 import { lookupAgentToken, touchAgentToken } from './agent-tokens';
 import { auth } from './auth';
 import { recordAudit } from './audit';
-import { getAgentRateLimitMax, getAgentRateLimitWindowSeconds } from './env';
+import { getAuditSampler } from './audit-sampler';
+import { checkSessionMutation } from './csrf';
+import { getAgentRateLimitMax, getAgentRateLimitWindowSeconds, getAuthBaseUrl } from './env';
 import { TokenBucketRateLimiter } from './rate-limit';
 import { hasAllScopes } from './scopes';
 import type { AgentScope } from './scopes';
@@ -80,6 +82,13 @@ export async function authenticateRequest(request: Request): Promise<AuthResult>
 }
 
 async function authenticateSession(request: Request): Promise<AuthResult> {
+  // Before the session is even read: a forged cross-site request should learn
+  // nothing, not even whether the cookie it borrowed is valid.
+  const csrf = checkSessionMutation(request, getAuthBaseUrl());
+  if (!csrf.ok) {
+    return { ok: false, response: errorResponse(403, 'forbidden', csrf.message) };
+  }
+
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session?.user) {
     return {
@@ -126,15 +135,20 @@ async function authenticateAgent(request: Request, presented: string): Promise<A
     // A token we can identify gets an audit row even though it was rejected:
     // a burst of calls from a revoked token is exactly the signal the log
     // exists for. An unrecognised token has no workspace to attribute.
+    // Coalesced to one row per token per window, with the count of the rest:
+    // the burst is the signal, and it must not become a write load of its own.
     if (lookup.record) {
-      await recordAudit({
-        workspaceId: lookup.record.workspaceId,
-        actorType: 'agent',
-        actorId: lookup.record.id,
-        action: 'auth.rejected',
-        target: route,
-        metadata: { reason: lookup.reason, method: request.method },
-      });
+      const sample = getAuditSampler().sample(`auth.rejected:${lookup.record.id}`);
+      if (sample.write) {
+        await recordAudit({
+          workspaceId: lookup.record.workspaceId,
+          actorType: 'agent',
+          actorId: lookup.record.id,
+          action: 'auth.rejected',
+          target: route,
+          metadata: { reason: lookup.reason, method: request.method, suppressed: sample.suppressed },
+        });
+      }
     }
     return {
       ok: false,
@@ -150,14 +164,19 @@ async function authenticateAgent(request: Request, presented: string): Promise<A
   };
 
   if (!decision.allowed) {
-    await recordAudit({
-      workspaceId: lookup.record.workspaceId,
-      actorType: 'agent',
-      actorId: lookup.record.id,
-      action: 'auth.rate_limited',
-      target: route,
-      metadata: { method: request.method, limit: decision.limit },
-    });
+    // The limiter protects the handlers; sampling protects the audit table.
+    // One row per token per window, carrying how many refusals it stands for.
+    const sample = getAuditSampler().sample(`auth.rate_limited:${lookup.record.id}`);
+    if (sample.write) {
+      await recordAudit({
+        workspaceId: lookup.record.workspaceId,
+        actorType: 'agent',
+        actorId: lookup.record.id,
+        action: 'auth.rate_limited',
+        target: route,
+        metadata: { method: request.method, limit: decision.limit, suppressed: sample.suppressed },
+      });
+    }
     return {
       ok: false,
       response: errorResponse(429, 'rate_limited', 'Rate limit exceeded', {

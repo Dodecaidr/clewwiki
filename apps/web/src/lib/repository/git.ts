@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 
 import type { WorkspaceRepositorySettings } from '@clewwiki/db';
 
-import { getReposDir, getRepositoryToken } from '../env';
+import { areFileRepositoriesAllowed, getReposDir, getRepositoryToken } from '../env';
 import { PageServiceError } from '../pages/errors';
 import { isSafeRef, isSafeRepoPath } from './settings';
 
@@ -55,13 +55,34 @@ export interface GitEnvironment {
  * at nothing as a second line of defence; the commands used here do not run
  * hooks in the first place.
  */
-function gitEnvironment(settings: WorkspaceRepositorySettings): GitEnvironment {
+/**
+ * The configuration key that carries the credential, scoped to the origin of
+ * an `https://` repository URL — or null when no credential may be sent.
+ *
+ * Two rules. A credential only ever travels over TLS, so an `http://`, `ssh:`
+ * or `file://` URL gets none. And the header is bound to the repository's own
+ * origin (`http.<origin>/.extraHeader`) rather than set for every request git
+ * makes, so a redirect to another host does not carry it along.
+ */
+export function credentialConfigKey(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') return null;
+  return `http.${parsed.origin}/.extraHeader`;
+}
+
+export function gitEnvironment(settings: WorkspaceRepositorySettings): GitEnvironment {
   const entries: Array<[string, string]> = [['core.hooksPath', '/dev/null']];
 
   const token = getRepositoryToken(settings.auth_token_env);
-  if (token !== null) {
+  const credentialKey = credentialConfigKey(settings.url);
+  if (token !== null && credentialKey !== null) {
     const basic = Buffer.from(`x-access-token:${token}`).toString('base64');
-    entries.push(['http.extraHeader', `Authorization: Basic ${basic}`]);
+    entries.push([credentialKey, `Authorization: Basic ${basic}`]);
   }
 
   const env: GitEnvironment = {
@@ -72,6 +93,9 @@ function gitEnvironment(settings: WorkspaceRepositorySettings): GitEnvironment {
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_CONFIG_COUNT: String(entries.length),
+    // The transports git may use at all, for the clone itself and for anything
+    // it would follow from there. `ext::` and `git://` are never on the list.
+    GIT_ALLOW_PROTOCOL: areFileRepositoriesAllowed() ? 'https:http:ssh:file' : 'https:http:ssh',
   };
   entries.forEach(([key, value], index) => {
     env[`GIT_CONFIG_KEY_${index}`] = key;
@@ -103,16 +127,26 @@ function sanitizeGitError(error: unknown): string {
     .slice(0, 400);
 }
 
+/**
+ * A repository failure as the API reports it: a fixed message and nothing
+ * else.
+ *
+ * git's own stderr is written by whoever runs the remote — an arbitrary server
+ * the URL points at — and an API response is read by agents. So that text goes
+ * to the server log, where an operator can read it, and never into `details`,
+ * where it would be one more string a remote party gets to put in front of a
+ * model.
+ */
 function repositoryError(message: string, error: unknown): PageServiceError {
-  return new PageServiceError('repository_unavailable', message, {
-    git: sanitizeGitError(error),
-  });
+  console.error(`[repository] ${message}: ${sanitizeGitError(error)}`);
+  return new PageServiceError('repository_unavailable', message);
 }
 
 async function git(
   args: readonly string[],
   settings: WorkspaceRepositorySettings,
   cwd?: string,
+  maxBuffer: number = GIT_MAX_BUFFER,
 ): Promise<string> {
   const { stdout } = await run('git', [...args], {
     cwd,
@@ -121,7 +155,7 @@ async function git(
     // database URL, an auth secret — is visible to a subprocess.
     env: gitEnvironment(settings) as NodeJS.ProcessEnv,
     timeout: GIT_TIMEOUT_MS,
-    maxBuffer: GIT_MAX_BUFFER,
+    maxBuffer,
     encoding: 'utf8',
     windowsHide: true,
   });
@@ -240,31 +274,54 @@ export async function resolveCommit(
     if (commit === '') throw new Error('empty');
     return commit;
   } catch (error) {
-    throw new PageServiceError('not_found', `Ref not found in the repository: ${ref}`, {
-      git: sanitizeGitError(error),
-    });
+    console.error(`[repository] ref ${ref} could not be resolved: ${sanitizeGitError(error)}`);
+    throw new PageServiceError('not_found', `Ref not found in the repository: ${ref}`);
   }
 }
 
-/** Every path in the tree at `commit`, NUL-separated so spaces are safe. */
+export interface TreeEntry {
+  path: string;
+  /** Blob size in bytes, as git records it. */
+  size: number;
+}
+
+/**
+ * Every blob in the tree at `commit`, with its size, NUL-separated so spaces
+ * are safe. Sizes come from the object database, so an oversized file can be
+ * skipped before a single byte of it is read.
+ */
 export async function listTree(
   dir: string,
   commit: string,
   settings: WorkspaceRepositorySettings,
-): Promise<string[]> {
+): Promise<TreeEntry[]> {
   try {
-    const stdout = await git(['ls-tree', '-r', '-z', '--name-only', commit], settings, dir);
-    return stdout.split('\0').filter((entry) => entry !== '');
+    const stdout = await git(['ls-tree', '-r', '-z', '-l', commit], settings, dir);
+    const entries: TreeEntry[] = [];
+    for (const record of stdout.split('\0')) {
+      // `<mode> SP <type> SP <object> SP+ <size> TAB <path>`
+      const tab = record.indexOf('\t');
+      if (tab <= 0) continue;
+      const fields = record.slice(0, tab).trim().split(/\s+/);
+      if (fields[1] !== 'blob') continue;
+      const size = Number.parseInt(fields[3] ?? '', 10);
+      entries.push({ path: record.slice(tab + 1), size: Number.isFinite(size) ? size : Number.MAX_SAFE_INTEGER });
+    }
+    return entries;
   } catch (error) {
     throw repositoryError('The repository tree could not be listed', error);
   }
 }
 
 /**
- * One file's contents at `commit`, or null when it is not in that tree.
+ * One file's contents at `commit`, or null when it is not in that tree or is
+ * larger than `MAX_SOURCE_BYTES`.
  *
- * The bytes are returned to the caller and handed to a parser. They are never
- * written to disk, never interpolated into a command, and never evaluated.
+ * The output buffer is capped just above that limit, so an oversized blob is
+ * abandoned while it is being read rather than buffered whole and measured
+ * afterwards. The bytes are returned to the caller and handed to a parser.
+ * They are never written to disk, never interpolated into a command, and never
+ * evaluated.
  */
 export async function readBlob(
   dir: string,
@@ -276,7 +333,8 @@ export async function readBlob(
     throw new PageServiceError('validation', `Unsupported repository path: ${filePath}`);
   }
   try {
-    return await git(['show', `${commit}:${filePath}`], settings, dir);
+    const source = await git(['show', `${commit}:${filePath}`], settings, dir, MAX_SOURCE_BYTES + 1);
+    return source.length > MAX_SOURCE_BYTES ? null : source;
   } catch {
     return null;
   }

@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 
 import { SetupForm } from './setup-form';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { ensureSetupToken } from '@/lib/setup-token';
 import { hasAnyUser } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,10 @@ export default async function SetupPage() {
   if (await hasAnyUser()) {
     notFound();
   }
+
+  // Normally generated and printed at start-up already; this covers a start-up
+  // that could not reach the database. Idempotent: it prints only once.
+  ensureSetupToken();
 
   const t = await getTranslations('setup');
 

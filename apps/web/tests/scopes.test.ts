@@ -4,7 +4,7 @@ import { AGENT_SCOPES, hasAllScopes, hasScope, isAgentScope, normalizeScopes } f
 
 describe('normalizeScopes', () => {
   it('drops unknown scopes', () => {
-    expect(normalizeScopes(['identity:read', 'pages:delete', 'nonsense'])).toEqual([
+    expect(normalizeScopes(['identity:read', 'pages:admin', 'nonsense'])).toEqual([
       'identity:read',
     ]);
   });
@@ -37,7 +37,7 @@ describe('isAgentScope', () => {
   });
 
   it('rejects anything else', () => {
-    expect(isAgentScope('pages:delete')).toBe(false);
+    expect(isAgentScope('pages:admin')).toBe(false);
     expect(isAgentScope('')).toBe(false);
   });
 });
@@ -68,6 +68,11 @@ describe('hasScope', () => {
     // A handler asking for `pages:*` must never be satisfied by `pages:read`.
     expect(hasScope(['pages:read'], 'pages:*')).toBe(false);
     expect(hasScope(['*'], '*')).toBe(false);
+  });
+
+  it('keeps deletion out of pages:write', () => {
+    expect(hasScope(['pages:read', 'pages:write'], 'pages:delete')).toBe(false);
+    expect(hasAllScopes(['pages:write', 'pages:delete'], ['pages:write', 'pages:delete'])).toBe(true);
   });
 
   it('rejects everything when nothing is granted', () => {

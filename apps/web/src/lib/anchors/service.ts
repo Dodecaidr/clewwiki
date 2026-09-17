@@ -109,15 +109,78 @@ const anchorColumns = {
 } as const;
 
 /**
- * Ceiling on how much of a repository one check will read.
+ * What one check may spend reading the repository.
  *
- * The move and rename stages of the ladder need a repository-wide view, and a
- * monorepo is large enough that "read everything" is not a plan. Files are
- * taken in path order up to this count; beyond it, the repository-wide stages
- * see a prefix of the tree rather than all of it, which loses recall on a move
- * and never invents one.
+ * The move and rename stages of the ladder need a repository-wide view, and
+ * "read everything" is not a plan for a monorepo — or for a repository with
+ * generated or vendored sources, or one built to be expensive. So every check
+ * carries a budget: how many files it may read, how many bytes of source it may
+ * hold, and how long it may spend reading and parsing. When any of the three
+ * runs out, the check stops reading and says so in its result (`complete:
+ * false`, with the limit that was hit) rather than truncating silently. An
+ * anchor the partial view could not find is not written back as `lost` — the
+ * check does not know that — and is listed as unchecked instead; everything it
+ * did find is a real answer and is stored.
+ *
+ * Git network operations (the fetch before a check) are bounded separately, by
+ * the per-invocation timeout in `lib/repository/git.ts`.
  */
-const MAX_INDEXED_FILES = 4_000;
+export interface CheckBudget {
+  maxFiles: number;
+  maxBytes: number;
+  maxMilliseconds: number;
+}
+
+export const DEFAULT_CHECK_BUDGET: CheckBudget = {
+  maxFiles: 2_000,
+  maxBytes: 32 * 1024 * 1024,
+  maxMilliseconds: 30_000,
+};
+
+export type BudgetLimit = 'files' | 'bytes' | 'time';
+
+export interface BudgetUsage {
+  filesRead: number;
+  bytesRead: number;
+  elapsedMs: number;
+  /** The first limit that stopped the check, or null when nothing did. */
+  limit: BudgetLimit | null;
+}
+
+class ReadBudget {
+  readonly #budget: CheckBudget;
+  readonly #startedAt = Date.now();
+  filesRead = 0;
+  bytesRead = 0;
+  limit: BudgetLimit | null = null;
+
+  constructor(budget: CheckBudget) {
+    this.#budget = budget;
+  }
+
+  /** Whether another file may be read; records the limit the first time not. */
+  canRead(): boolean {
+    if (this.limit !== null) return false;
+    if (this.filesRead >= this.#budget.maxFiles) this.limit = 'files';
+    else if (this.bytesRead >= this.#budget.maxBytes) this.limit = 'bytes';
+    else if (Date.now() - this.#startedAt >= this.#budget.maxMilliseconds) this.limit = 'time';
+    return this.limit === null;
+  }
+
+  record(bytes: number): void {
+    this.filesRead += 1;
+    this.bytesRead += bytes;
+  }
+
+  usage(): BudgetUsage {
+    return {
+      filesRead: this.filesRead,
+      bytesRead: this.bytesRead,
+      elapsedMs: Date.now() - this.#startedAt,
+      limit: this.limit,
+    };
+  }
+}
 
 /** Section identifiers are the same shape claims already accept. */
 const SECTION_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} ._/#-]{0,199}$/u;
@@ -264,38 +327,49 @@ async function readSource(context: RepositoryContext, filePath: string): Promise
 async function indexOneFile(
   context: RepositoryContext,
   filePath: string,
+  budget?: ReadBudget,
 ): Promise<IndexedFile | null> {
   const source = await readSource(context, filePath);
   if (source === null) return null;
+  budget?.record(source.length);
   const language = languageForPath(filePath);
   const declarations: Declaration[] =
     language === null ? [] : await extractDeclarations(language, source);
   return { path: filePath, source, declarations };
 }
 
+/** Lets other requests run between two synchronous parses. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 /**
- * Parses every source file in the revision, up to `MAX_INDEXED_FILES`.
+ * Parses the revision's source files, within the check's budget.
  *
  * Only built when the cheap pass could not answer — the ladder's first rung
  * needs one file, and the overwhelming majority of anchors never leave it.
+ * Files larger than `MAX_SOURCE_BYTES` are skipped from the tree listing,
+ * before any of their bytes are read.
  */
 async function buildRepositoryIndex(
   context: RepositoryContext,
-  extraPaths: readonly string[],
+  alreadyIndexed: readonly IndexedFile[],
+  budget: ReadBudget,
 ): Promise<FileIndex> {
   const tree = await listTree(context.dir, context.commit, context.settings);
+  const seen = new Set(alreadyIndexed.map((file) => file.path));
   const wanted = tree
+    .filter((entry) => entry.size <= MAX_SOURCE_BYTES)
+    .map((entry) => entry.path)
     .filter((entry) => SOURCE_EXTENSIONS.some((extension) => entry.toLowerCase().endsWith(extension)))
-    .filter((entry) => isSafeRepoPath(entry))
-    .slice(0, MAX_INDEXED_FILES);
+    .filter((entry) => isSafeRepoPath(entry) && !seen.has(entry));
 
-  const paths = new Set<string>(wanted);
-  for (const extra of extraPaths) paths.add(extra);
-
-  const files: IndexedFile[] = [];
-  for (const filePath of paths) {
-    const indexed = await indexOneFile(context, filePath);
+  const files: IndexedFile[] = [...alreadyIndexed];
+  for (const filePath of wanted) {
+    if (!budget.canRead()) break;
+    const indexed = await indexOneFile(context, filePath, budget);
     if (indexed !== null) files.push(indexed);
+    await yieldToEventLoop();
   }
   return buildFileIndex(files);
 }
@@ -581,6 +655,8 @@ export interface CheckAnchorsInput {
   actor: AnchorActor;
   workspaceSettings: WorkspaceSettings | null | undefined;
   ref?: string | null;
+  /** Overrides parts of `DEFAULT_CHECK_BUDGET`; tests use it to hit a limit. */
+  budget?: Partial<CheckBudget>;
 }
 
 export interface CheckAnchorsResult {
@@ -589,6 +665,11 @@ export interface CheckAnchorsResult {
   commit: string;
   anchors: AnchorRecord[];
   fallbackShare: FallbackShare;
+  /** False when the read budget ran out before every anchor could be resolved. */
+  complete: boolean;
+  /** Anchors the partial view could not place; their stored state is unchanged. */
+  uncheckedAnchorIds: string[];
+  budget: BudgetUsage;
 }
 
 /**
@@ -597,11 +678,13 @@ export interface CheckAnchorsResult {
  * The repository is read twice at most: once for the files the anchors already
  * point at, and — only if something failed to resolve there — once more for
  * the whole tree, which is what the move and rename stages need. A page whose
- * anchors are all still where they were never pays for the second pass.
+ * anchors are all still where they were never pays for the second pass. Both
+ * passes draw on one `CheckBudget`.
  */
 export async function checkPageAnchors(input: CheckAnchorsInput): Promise<CheckAnchorsResult> {
   const db = getDatabase();
   const existing = await listAnchorsForPage(input.workspaceId, input.pageId);
+  const budgetLimits: CheckBudget = { ...DEFAULT_CHECK_BUDGET, ...input.budget };
 
   if (existing.length === 0) {
     const settings = requireRepositorySettings(input.workspaceSettings);
@@ -611,16 +694,21 @@ export async function checkPageAnchors(input: CheckAnchorsInput): Promise<CheckA
       commit: '',
       anchors: [],
       fallbackShare: await getFallbackShare(input.workspaceId),
+      complete: true,
+      uncheckedAnchorIds: [],
+      budget: { filesRead: 0, bytesRead: 0, elapsedMs: 0, limit: null },
     };
   }
 
-  const { context, resolutions } = await withRepositoryLock(input.workspaceId, async () => {
+  const { context, resolutions, usage } = await withRepositoryLock(input.workspaceId, async () => {
     const opened = await openRepository(input.workspaceId, input.workspaceSettings, input.ref);
+    const budget = new ReadBudget(budgetLimits);
 
     const hinted = [...new Set(existing.map((anchor) => anchor.fileHint))];
     const nearby: IndexedFile[] = [];
     for (const filePath of hinted) {
-      const indexed = await indexOneFile(opened, filePath);
+      if (!budget.canRead()) break;
+      const indexed = await indexOneFile(opened, filePath, budget);
       if (indexed !== null) nearby.push(indexed);
     }
 
@@ -630,15 +718,22 @@ export async function checkPageAnchors(input: CheckAnchorsInput): Promise<CheckA
     // Anything the cheap pass could not find may have moved or been renamed;
     // only those need the repository-wide view.
     const unresolved = existing.filter((anchor) => results.get(anchor.id)?.state === 'lost');
-    if (unresolved.length > 0) {
-      index = await buildRepositoryIndex(opened, hinted);
+    if (unresolved.length > 0 && budget.canRead()) {
+      index = await buildRepositoryIndex(opened, nearby, budget);
       for (const anchor of unresolved) {
         results.set(anchor.id, resolveAnchor(toTarget(anchor), index));
       }
     }
 
-    return { context: opened, resolutions: results };
+    return { context: opened, resolutions: results, usage: budget.usage() };
   });
+
+  const complete = usage.limit === null;
+  // With a partial view, "not found" means "not found in what was read".
+  const unchecked = complete
+    ? []
+    : existing.filter((anchor) => (resolutions.get(anchor.id)?.state ?? 'lost') === 'lost');
+  const uncheckedIds = new Set(unchecked.map((anchor) => anchor.id));
 
   const checkedAt = new Date();
   const updated: AnchorRecord[] = [];
@@ -647,6 +742,10 @@ export async function checkPageAnchors(input: CheckAnchorsInput): Promise<CheckA
     for (const anchor of existing) {
       const resolution = resolutions.get(anchor.id);
       if (!resolution) continue;
+      if (uncheckedIds.has(anchor.id)) {
+        updated.push(anchor);
+        continue;
+      }
 
       const rows = await tx
         .update(anchors)
@@ -664,10 +763,12 @@ export async function checkPageAnchors(input: CheckAnchorsInput): Promise<CheckA
       if (row) updated.push(row);
     }
 
-    const counts = updated.reduce<Record<string, number>>((accumulator, anchor) => {
-      accumulator[anchor.state] = (accumulator[anchor.state] ?? 0) + 1;
-      return accumulator;
-    }, {});
+    const counts = updated
+      .filter((anchor) => !uncheckedIds.has(anchor.id))
+      .reduce<Record<string, number>>((accumulator, anchor) => {
+        accumulator[anchor.state] = (accumulator[anchor.state] ?? 0) + 1;
+        return accumulator;
+      }, {});
 
     await recordAudit(
       {
@@ -676,7 +777,16 @@ export async function checkPageAnchors(input: CheckAnchorsInput): Promise<CheckA
         actorId: input.actor.id,
         action: 'anchor.checked',
         target: input.pageId,
-        metadata: { ref: context.ref, commit: context.commit, checked: updated.length, ...counts },
+        metadata: {
+          ref: context.ref,
+          commit: context.commit,
+          checked: updated.length - unchecked.length,
+          ...counts,
+          complete,
+          ...(complete
+            ? {}
+            : { limit: usage.limit, unchecked: unchecked.length, files_read: usage.filesRead }),
+        },
       },
       tx,
     );
@@ -688,6 +798,9 @@ export async function checkPageAnchors(input: CheckAnchorsInput): Promise<CheckA
     commit: context.commit,
     anchors: updated,
     fallbackShare: await getFallbackShare(input.workspaceId),
+    complete,
+    uncheckedAnchorIds: [...uncheckedIds],
+    budget: usage,
   };
 }
 

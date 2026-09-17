@@ -180,8 +180,8 @@ describe.skipIf(!probe.reachable)('anchors REST API', () => {
     target = pageId,
     query = '',
   ): Promise<{ status: number; json: JsonRecord }> {
-    const response = await checkRoute.GET(
-      request(token, `/api/v1/pages/${target}/anchors/check${query}`),
+    const response = await checkRoute.POST(
+      request(token, `/api/v1/pages/${target}/anchors/check${query}`, { method: 'POST' }),
       params(target),
     );
     return { status: response.status, json: await response.json() };
@@ -412,7 +412,34 @@ describe.skipIf(!probe.reachable)('anchors REST API', () => {
       sourceRepo,
     );
 
+    // With no read budget at all, the check must say it could not look rather
+    // than report the anchors as lost, and must leave their stored state alone.
+    const { checkPageAnchors, listAnchorsForPage } = await import('@/lib/anchors/service');
+    const { eq } = await import('drizzle-orm');
+    const [workspaceRow] = await db
+      .select()
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.id, workspaceId));
+    const storedBefore = await listAnchorsForPage(workspaceId, pageId);
+    const starved = await checkPageAnchors({
+      workspaceId,
+      pageId,
+      actor: { type: 'agent', id: 'budget-test' },
+      workspaceSettings: workspaceRow!.settings,
+      budget: { maxFiles: 0 },
+    });
+    expect(starved.complete).toBe(false);
+    expect(starved.budget.limit).toBe('files');
+    expect(starved.budget.filesRead).toBe(0);
+    expect(starved.uncheckedAnchorIds.sort()).toEqual(storedBefore.map((entry) => entry.id).sort());
+    const storedAfter = await listAnchorsForPage(workspaceId, pageId);
+    expect(storedAfter.map((entry) => [entry.id, entry.state]).sort()).toEqual(
+      storedBefore.map((entry) => [entry.id, entry.state]).sort(),
+    );
+
     const result = await check(readWrite);
+    expect(result.json.complete).toBe(true);
+    expect(result.json.recomputed).toBe(true);
     const anchor = result.json.anchors.find(
       (entry: JsonRecord) => entry.qualified_name === 'Mixer' && entry.kind === 'struct',
     );
@@ -538,10 +565,30 @@ describe.skipIf(!probe.reachable)('anchors REST API', () => {
     expect(written.status).toBe(403);
     expect(written.json.error.code).toBe('insufficient_scope');
 
-    // A read scope is enough to ask the question, which is what the contract
-    // says: checking reads code and writes only the answer.
-    const checked = await check(readOnly);
-    expect(checked.status).toBe(200);
+    // Recomputing stores new states, so it needs pages:write; a read scope gets
+    // the states the last check stored, without touching the repository.
+    const recompute = await check(readOnly);
+    expect(recompute.status).toBe(403);
+    expect(recompute.json.error.code).toBe('insufficient_scope');
+
+    const auditRows = async () => {
+      const { and, eq } = await import('drizzle-orm');
+      return db
+        .select()
+        .from(schema.auditLog)
+        .where(and(eq(schema.auditLog.workspaceId, workspaceId), eq(schema.auditLog.action, 'anchor.checked')));
+    };
+    const checksBefore = (await auditRows()).length;
+    const stored = await checkRoute.GET(
+      request(readOnly, `/api/v1/pages/${pageId}/anchors/check`),
+      params(pageId),
+    );
+    expect(stored.status).toBe(200);
+    const storedJson = await stored.json();
+    expect(storedJson.recomputed).toBe(false);
+    expect(storedJson.anchors.length).toBeGreaterThan(0);
+    expect(typeof storedJson.checked_at).toBe('string');
+    expect((await auditRows()).length).toBe(checksBefore);
 
     const refused = await check(noPageScope);
     expect(refused.status).toBe(403);

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { handleMcpHttpRequest } from '../src/http.ts';
+import { handleMcpHttpRequest, MAX_BATCH_MESSAGES } from '../src/http.ts';
 import { ClewwikiRestClient } from '../src/rest-client.ts';
 import { startFakeRest } from './helpers/fake-rest.ts';
 import type { FakeRest } from './helpers/fake-rest.ts';
@@ -41,6 +41,22 @@ describe('streamable HTTP transport, stateless', () => {
     });
     expect(status).toBe(200);
     expect(body.result.serverInfo.name).toBe('clewwiki');
+  });
+
+  it('refuses a batch larger than the cap before any tool runs', async () => {
+    const before = rest.calls.length;
+    const batch = Array.from({ length: MAX_BATCH_MESSAGES + 1 }, (_, index) => ({
+      jsonrpc: '2.0',
+      id: index + 1,
+      method: 'tools/call',
+      params: { name: 'wiki.get_presence', arguments: {} },
+    }));
+    const response = await handleMcpHttpRequest({ client, request: post(batch) });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { code: number; message: string } };
+    expect(body.error.code).toBe(-32600);
+    expect(body.error.message).toContain(String(MAX_BATCH_MESSAGES));
+    expect(rest.calls.length).toBe(before);
   });
 
   it('runs a tool call in a fresh server per request and returns the REST result', async () => {

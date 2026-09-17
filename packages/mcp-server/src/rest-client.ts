@@ -33,6 +33,33 @@ export interface RestRequest {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * Refuses to send an agent token over plain HTTP to anything but this machine.
+ *
+ * The stdio server runs on a developer's machine and is configured by hand; a
+ * `CLEWWIKI_URL` of `http://wiki.example.com` would put the token on the
+ * network in cleartext on every call. Loopback is allowed because an instance
+ * on the same machine is the normal development setup and never leaves it.
+ * `allowInsecure` (`CLEWWIKI_ALLOW_INSECURE_URL=true`) is the explicit way out
+ * for a private network the operator has decided to trust.
+ */
+export function assertSecureBaseUrl(baseUrl: string, allowInsecure = false): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl.trim());
+  } catch {
+    throw new Error(`clewwiki base URL is not a URL: ${baseUrl}`);
+  }
+  if (parsed.protocol !== 'http:' || allowInsecure) return;
+  if (LOOPBACK_HOSTS.has(parsed.hostname)) return;
+  throw new Error(
+    `clewwiki base URL ${parsed.origin} is plain http, which would send the token unencrypted. ` +
+      'Use https://, or set CLEWWIKI_ALLOW_INSECURE_URL=true if this network is trusted.',
+  );
+}
+
 export class ClewwikiRestClient {
   readonly #baseUrl: string;
   readonly #token: string;

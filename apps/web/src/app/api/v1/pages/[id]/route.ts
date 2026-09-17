@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { apiError, apiJson, readJsonBody, serviceErrorResponse, validationError } from '@/lib/api-response';
 import { requireWorkspace } from '@/lib/api-auth';
 import { listAnchorsForPage } from '@/lib/anchors/service';
-import { authorizePagesRequest, READ_SCOPES, WRITE_SCOPES } from '@/lib/pages-api';
+import {
+  authorizePagesRequest,
+  DELETE_SCOPES,
+  isWorkspaceAdmin,
+  READ_SCOPES,
+  WRITE_SCOPES,
+} from '@/lib/pages-api';
 import { getActiveClaimsForPage } from '@/lib/claims/service';
 import { CONTENT_HASH_PATTERN } from '@/lib/pages/content';
 import { deletePage, getPageById, updatePage } from '@/lib/pages/service';
@@ -59,7 +65,7 @@ export async function GET(request: Request, context: RouteContext) {
       getActiveClaimsForPage(auth.workspaceId, page.id),
       // The state stored by the last check, not a fresh one: recomputing costs
       // a repository fetch, and a read of a page must not depend on the
-      // network. `GET …/anchors/check` is where that is asked for explicitly.
+      // network. `POST …/anchors/check` is where that is asked for explicitly.
       listAnchorsForPage(auth.workspaceId, page.id),
     ]);
 
@@ -135,10 +141,15 @@ export async function PATCH(request: Request, context: RouteContext) {
 
 /**
  * Soft-deletes a page and everything below it. The rows stay so their history
- * stays; the path becomes available again.
+ * stays; the path becomes available again, and an administrator can bring the
+ * subtree back with `POST /pages/{id}/restore`.
+ *
+ * An agent token needs `pages:delete` as well as `pages:write`. Another actor's
+ * live claim in the subtree refuses the delete with `conflict`, unless the
+ * caller is a human administrator.
  */
 export async function DELETE(request: Request, context: RouteContext) {
-  const auth = await authorizePagesRequest(request, WRITE_SCOPES);
+  const auth = await authorizePagesRequest(request, DELETE_SCOPES);
   if (!auth.ok) return auth.response;
 
   const parsed = paramsSchema.safeParse(await context.params);
@@ -155,6 +166,7 @@ export async function DELETE(request: Request, context: RouteContext) {
       workspaceId: auth.workspaceId,
       pageId: parsed.data.id,
       actor: auth.actor,
+      overrideClaims: isWorkspaceAdmin(auth.identity),
     });
 
     return apiJson(

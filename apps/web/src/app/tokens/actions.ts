@@ -35,7 +35,9 @@ export async function createAgentTokenAction(
 
   const parsed = createSchema.safeParse({
     name: formData.get('name'),
-    expiresInDays: formData.get('expiresInDays') ?? '0',
+    // A missing field means the default lifetime, not "never": a token without
+    // an expiry has to be asked for explicitly.
+    expiresInDays: formData.get('expiresInDays') ?? '30',
     scopes: normalizeScopes(formData.getAll('scopes').map(String)),
   });
 

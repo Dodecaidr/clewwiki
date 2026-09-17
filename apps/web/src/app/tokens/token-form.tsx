@@ -42,13 +42,15 @@ export function TokenForm() {
         </Field>
 
         <Field label={t('expiry')} htmlFor="expiresInDays" hint={t('expiryHint')}>
+          {/* A fixed lifetime is preselected; "no expiry" stays available as a
+              deliberate choice at the end of the list, never the default. */}
           <Select id="expiresInDays" name="expiresInDays" defaultValue="30">
-            <option value="0">{t('expiryNever')}</option>
             {EXPIRY_CHOICES.map((days) => (
               <option key={days} value={days}>
                 {t('expiryDays', { days })}
               </option>
             ))}
+            <option value="0">{t('expiryNever')}</option>
           </Select>
         </Field>
 

@@ -104,6 +104,19 @@ export function isClewwikiToolError(value: unknown): value is ClewwikiToolError 
   return value instanceof ClewwikiToolError;
 }
 
+/**
+ * Keys whose values are produced by a remote party rather than by clewwiki —
+ * today, a git server's error output. The REST layer no longer sends them; an
+ * older instance might, and a tool result is not the place for text a remote
+ * server chose.
+ */
+const REMOTE_OUTPUT_KEYS = new Set(['git', 'stderr']);
+
+function withoutRemoteOutput(details: Record<string, unknown>): Record<string, unknown> | undefined {
+  const kept = Object.entries(details).filter(([key]) => !REMOTE_OUTPUT_KEYS.has(key));
+  return kept.length === 0 ? undefined : Object.fromEntries(kept);
+}
+
 interface RestErrorBody {
   error?: { code?: unknown; message?: unknown; details?: unknown };
 }
@@ -125,7 +138,7 @@ export function toolErrorFromRest(status: number, body: unknown): ClewwikiToolEr
       : `The clewwiki instance answered ${status}`;
   const details =
     typeof envelope.details === 'object' && envelope.details !== null
-      ? (envelope.details as Record<string, unknown>)
+      ? withoutRemoteOutput(envelope.details as Record<string, unknown>)
       : undefined;
 
   return new ClewwikiToolError(mapRestErrorCode(code, status), message, details);

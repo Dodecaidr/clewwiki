@@ -7,8 +7,8 @@ export {
   MCP_ERROR_CODES,
 } from './errors.ts';
 export type { McpErrorCode } from './errors.ts';
-export { handleMcpHttpRequest } from './http.ts';
-export { ClewwikiRestClient } from './rest-client.ts';
+export { handleMcpHttpRequest, MAX_BATCH_MESSAGES } from './http.ts';
+export { assertSecureBaseUrl, ClewwikiRestClient } from './rest-client.ts';
 export type { ClewwikiClientOptions, FetchLike, RestRequest } from './rest-client.ts';
 export { createClewwikiMcpServer, createClewwikiMcpServerFromConfig } from './server.ts';
 export type { CreateServerOptions } from './server.ts';
