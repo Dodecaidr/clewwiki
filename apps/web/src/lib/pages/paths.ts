@@ -26,10 +26,11 @@ export class InvalidPathError extends Error {
 /**
  * Turns arbitrary text into one path segment.
  *
- * Non-ASCII letters are transliterated where Unicode normalisation can do it
- * and dropped otherwise, which means a title in a script with no ASCII form
- * produces an empty segment — the caller has to supply an explicit path in
- * that case rather than get a silently mangled one.
+ * Diacritics are stripped by Unicode normalisation and every other non-ASCII
+ * character is dropped, so a segment in a script with no ASCII form comes out
+ * empty and is refused. This is the rule for a segment somebody typed; a
+ * segment generated from a title goes through `generateSegment` in `./slug`,
+ * which transliterates Cyrillic first and never comes out empty.
  */
 export function slugifySegment(value: string): string {
   return value

@@ -27,10 +27,16 @@ const createBodySchema = z.object({
   space: z.string().trim().min(1).max(20),
   title: z.string().trim().min(1).max(300),
   path: z.string().min(1).max(512).optional(),
+  // One segment joined onto the parent's path. Omitted together with `path`,
+  // the segment is generated from the title, and numbered if it is taken.
+  slug: z.string().trim().min(1).max(80).optional(),
   parent_id: z.uuid().nullish(),
+  parent_path: z.string().min(1).max(512).optional(),
   kind: z.enum(['technical', 'human']).default('technical'),
   body: z.string().max(1_000_000).default(''),
   summary: z.string().max(2_000).nullish(),
+  // Pairs the new page with its counterpart of the other kind as it is created.
+  link_to_page_id: z.uuid().nullish(),
 });
 
 /** Cuts a tree down to the requested depth before it is serialised. */
@@ -129,7 +135,14 @@ export async function GET(request: Request) {
   }
 }
 
-/** Creates a page in a space. Requires `pages:write` for an agent token. */
+/**
+ * Creates a page in a space. Requires `pages:write` for an agent token.
+ *
+ * The parent is `parent_id` or `parent_path`; the last segment is `slug`, or
+ * the last segment of `path`, or — with neither — generated from the title and
+ * numbered (`-2`, `-3`, …) when a page already sits there. An explicit segment
+ * that is taken answers `conflict` naming the page in the way.
+ */
 export async function POST(request: Request) {
   const auth = await authorizePagesRequest(request, WRITE_SCOPES);
   if (!auth.ok) return auth.response;
@@ -143,6 +156,16 @@ export async function POST(request: Request) {
 
   const parsed = createBodySchema.safeParse(raw);
   if (!parsed.success) return validationError(parsed.error);
+  if (parsed.data.path !== undefined && parsed.data.slug !== undefined) {
+    return apiError(400, 'validation', 'Give path or slug, not both', {
+      fields: { slug: ['Not allowed together with path'] },
+    });
+  }
+  if (typeof parsed.data.parent_id === 'string' && parsed.data.parent_path !== undefined) {
+    return apiError(400, 'validation', 'Give parent_id or parent_path, not both', {
+      fields: { parent_path: ['Not allowed together with parent_id'] },
+    });
+  }
 
   try {
     const resolved = await resolveSpaceParam(auth.identity, parsed.data.space);
@@ -155,13 +178,19 @@ export async function POST(request: Request) {
       actor: auth.actor,
       title: parsed.data.title,
       path: parsed.data.path,
+      slug: parsed.data.slug,
       parentId: parsed.data.parent_id ?? null,
+      parentPath: parsed.data.parent_path,
       kind: parsed.data.kind,
       body: parsed.data.body,
       summary: parsed.data.summary ?? null,
+      linkToPageId: parsed.data.link_to_page_id ?? null,
     });
+    const linkedPage = page.linkedPageId
+      ? await getPageById(auth.workspaceId, page.linkedPageId)
+      : null;
     return apiCreated(
-      toPageResource(page, space, { linkedPage: null, claim: null }),
+      toPageResource(page, space, { linkedPage, claim: null }),
       auth.headers,
     );
   } catch (error) {

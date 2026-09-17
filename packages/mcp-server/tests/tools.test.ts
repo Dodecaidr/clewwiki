@@ -27,12 +27,13 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the twelve tools docs/mcp.md names', () => {
+  it('registers exactly the thirteen tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
       'wiki.list_spaces',
       'wiki.search',
       'wiki.get_page',
       'wiki.list_pages',
+      'wiki.create_page',
       'wiki.claim',
       'wiki.renew_claim',
       'wiki.write_page',
@@ -87,6 +88,15 @@ describe('tool surface', () => {
       'wiki.get_presence',
     ]);
   });
+
+  it('marks page creation as a write that is not idempotent', () => {
+    expect(tool('wiki.create_page').annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
+  });
 });
 
 describe('input validation', () => {
@@ -130,6 +140,32 @@ describe('input validation', () => {
     ).rejects.toMatchObject({ code: 'VALIDATION' });
     await expect(
       tool('wiki.list_pages').run(clientWith(never), { space: 'X' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+
+  it('refuses a page creation without a space, a title or a kind', async () => {
+    for (const args of [
+      { title: 'Auth', kind: 'technical' },
+      { space: 'API', kind: 'technical' },
+      { space: 'API', title: 'Auth' },
+      { space: 'API', title: '   ', kind: 'technical' },
+      { space: 'API', title: 'Auth', kind: 'prose' },
+    ]) {
+      await expect(tool('wiki.create_page').run(clientWith(never), args)).rejects.toMatchObject({
+        code: 'VALIDATION',
+      });
+    }
+  });
+
+  it('refuses a page creation with both parent_id and parent_path', async () => {
+    await expect(
+      tool('wiki.create_page').run(clientWith(never), {
+        space: 'API',
+        title: 'Auth',
+        kind: 'technical',
+        parent_id: '11111111-1111-4111-8111-111111111111',
+        parent_path: '/backend',
+      }),
     ).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 
@@ -293,6 +329,116 @@ describe('REST calls', () => {
       'https://wiki.example.com/api/v1/pages?space=API&depth=1',
       'https://wiki.example.com/api/v1/claims?space=API',
     ]);
+  });
+});
+
+describe('wiki.create_page', () => {
+  const created = {
+    page_id: '44444444-4444-4444-8444-444444444444',
+    space: { key: 'API', name: 'API' },
+    parent_id: '11111111-1111-4111-8111-111111111111',
+    path: '/backend/arkhitektura-bekenda',
+    title: 'Архитектура бэкенда',
+    kind: 'technical',
+    summary: null,
+    content_hash: 'sha256:abc',
+    version: 1,
+    body: '# Архитектура\n',
+    anchors: [],
+    linked_page: {
+      page_id: '55555555-5555-4555-8555-555555555555',
+      title: 'Written by someone else',
+      kind: 'human',
+    },
+    claim: null,
+  };
+
+  it('posts to the page collection with only the fields it was given', async () => {
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(201, created));
+    await tool('wiki.create_page').run(clientWith(fetchMock), {
+      space: 'API',
+      parent_path: '/backend',
+      title: 'Архитектура бэкенда',
+      kind: 'technical',
+      body: '# Архитектура\n',
+      link_to_page_id: '55555555-5555-4555-8555-555555555555',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://wiki.example.com/api/v1/pages');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({
+      space: 'API',
+      title: 'Архитектура бэкенда',
+      kind: 'technical',
+      parent_path: '/backend',
+      body: '# Архитектура\n',
+      link_to_page_id: '55555555-5555-4555-8555-555555555555',
+    });
+  });
+
+  it('passes an explicit slug, parent id and summary through', async () => {
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(201, created));
+    await tool('wiki.create_page').run(clientWith(fetchMock), {
+      space: 'API',
+      parent_id: '11111111-1111-4111-8111-111111111111',
+      title: 'Auth',
+      kind: 'human',
+      summary: 'How sign-in works.',
+      slug: 'sign-in',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1].body))).toEqual({
+      space: 'API',
+      title: 'Auth',
+      kind: 'human',
+      parent_id: '11111111-1111-4111-8111-111111111111',
+      summary: 'How sign-in works.',
+      slug: 'sign-in',
+    });
+  });
+
+  it('answers with the identifiers of the new page and no text written by others', async () => {
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(201, created));
+    const result = await tool('wiki.create_page').run(clientWith(fetchMock), {
+      space: 'API',
+      title: 'Архитектура бэкенда',
+      kind: 'technical',
+    });
+    expect(result).toEqual({
+      page_id: created.page_id,
+      space: { key: 'API', name: 'API' },
+      parent_id: created.parent_id,
+      path: '/backend/arkhitektura-bekenda',
+      title: 'Архитектура бэкенда',
+      kind: 'technical',
+      content_hash: 'sha256:abc',
+      version: 1,
+      linked_page_id: '55555555-5555-4555-8555-555555555555',
+    });
+    expect(JSON.stringify(result)).not.toContain('Written by someone else');
+  });
+
+  it('turns a taken path into CONFLICT naming the existing page', async () => {
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(
+      jsonResponse(409, {
+        error: {
+          code: 'conflict',
+          message: 'A page already exists at /backend/auth in this space',
+          details: {
+            path: '/backend/auth',
+            space: 'API',
+            existing_page_id: '66666666-6666-4666-8666-666666666666',
+          },
+        },
+      }),
+    );
+    const failure = await tool('wiki.create_page')
+      .run(clientWith(fetchMock), { space: 'API', title: 'Auth', kind: 'technical', slug: 'auth' })
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      code: 'CONFLICT',
+      details: { existing_page_id: '66666666-6666-4666-8666-666666666666' },
+    });
   });
 });
 

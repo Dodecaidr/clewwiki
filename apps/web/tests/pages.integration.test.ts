@@ -327,6 +327,197 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
 
   /* ---------------------------------------------------------------- */
 
+  describe('paths generated from titles', () => {
+    it('transliterates a Cyrillic title into the path under its parent', async () => {
+      const root = `gen-${randomUUID().slice(0, 8)}`;
+      const parent = await createPage(readWrite, { title: 'Backend', path: `/${root}` });
+      expect(parent.status).toBe(201);
+
+      const created = await createPage(readWrite, {
+        title: 'Архитектура бэкенда',
+        parent_id: parent.json.page_id,
+      });
+      expect(created.status).toBe(201);
+      expect(created.json.path).toBe(`/${root}/arkhitektura-bekenda`);
+      expect(created.json.parent_id).toBe(parent.json.page_id);
+    });
+
+    it('numbers a generated path that is taken, and only inside the same parent', async () => {
+      const root = `num-${randomUUID().slice(0, 8)}`;
+      const left = await createPage(readWrite, { title: 'Left', path: `/${root}-left` });
+      const right = await createPage(readWrite, { title: 'Right', path: `/${root}-right` });
+
+      const titles = ['Їжак і ґанок', 'Їжак і ґанок', 'ЇЖАК І ҐАНОК'];
+      const paths: string[] = [];
+      for (const title of titles) {
+        const created = await createPage(readWrite, { title, parent_id: left.json.page_id });
+        expect(created.status).toBe(201);
+        paths.push(created.json.path as string);
+      }
+      expect(paths).toEqual([
+        `/${root}-left/izhak-i-ganok`,
+        `/${root}-left/izhak-i-ganok-2`,
+        `/${root}-left/izhak-i-ganok-3`,
+      ]);
+
+      // Another parent in the same space starts from the bare segment again.
+      const elsewhere = await createPage(readWrite, {
+        title: 'Їжак і ґанок',
+        parent_id: right.json.page_id,
+      });
+      expect(elsewhere.json.path).toBe(`/${root}-right/izhak-i-ganok`);
+    });
+
+    it('numbers concurrent creations of the same title instead of failing one', async () => {
+      const root = `race-${randomUUID().slice(0, 8)}`;
+      const parent = await createPage(readWrite, { title: 'Race', path: `/${root}` });
+      const results = await Promise.all(
+        Array.from({ length: 4 }, () =>
+          createPage(readWrite, { title: 'Ўзор', parent_id: parent.json.page_id }),
+        ),
+      );
+      expect(results.map((result) => result.status)).toEqual([201, 201, 201, 201]);
+      expect(results.map((result) => result.json.path).sort()).toEqual([
+        `/${root}/uzor`,
+        `/${root}/uzor-2`,
+        `/${root}/uzor-3`,
+        `/${root}/uzor-4`,
+      ]);
+    });
+
+    it('reuses the bare segment once the page holding it is deleted', async () => {
+      const root = `reuse-${randomUUID().slice(0, 8)}`;
+      const parent = await createPage(readWrite, { title: 'Reuse', path: `/${root}` });
+      const first = await createPage(readWrite, { title: 'Größe', parent_id: parent.json.page_id });
+      expect(first.json.path).toBe(`/${root}/grosse`);
+
+      const deleted = await pageRoute.DELETE(
+        request(readWrite, `/api/v1/pages/${first.json.page_id}`, { method: 'DELETE' }),
+        params(first.json.page_id as string),
+      );
+      expect(deleted.status).toBe(200);
+
+      const second = await createPage(readWrite, { title: 'Größe', parent_id: parent.json.page_id });
+      expect(second.json.path).toBe(`/${root}/grosse`);
+    });
+
+    it('falls back to page-<hash> for an emoji-only title', async () => {
+      const root = `emoji-${randomUUID().slice(0, 8)}`;
+      const parent = await createPage(readWrite, { title: 'Emoji', path: `/${root}` });
+      const created = await createPage(readWrite, { title: '🚀🔥', parent_id: parent.json.page_id });
+      expect(created.status).toBe(201);
+      expect(created.json.path).toMatch(new RegExp(`^/${root}/page-[0-9a-f]{8}$`));
+    });
+
+    it('places a page by parent_path and an explicit slug', async () => {
+      const root = `pp-${randomUUID().slice(0, 8)}`;
+      const parent = await createPage(readWrite, { title: 'Section', path: `/${root}` });
+      const created = await createPage(readWrite, {
+        title: 'Архитектура',
+        parent_path: `/${root}`,
+        slug: 'Design Notes',
+      });
+      expect(created.status).toBe(201);
+      expect(created.json.path).toBe(`/${root}/design-notes`);
+      expect(created.json.parent_id).toBe(parent.json.page_id);
+    });
+
+    it('answers conflict naming the existing page when an explicit slug is taken', async () => {
+      const root = `taken-${randomUUID().slice(0, 8)}`;
+      const parent = await createPage(readWrite, { title: 'Taken', path: `/${root}` });
+      const first = await createPage(readWrite, {
+        title: 'Auth',
+        parent_id: parent.json.page_id,
+        slug: 'auth',
+      });
+      const second = await createPage(readWrite, {
+        title: 'Auth again',
+        parent_id: parent.json.page_id,
+        slug: 'auth',
+      });
+      expect(second.status).toBe(409);
+      expect(second.json.error).toMatchObject({
+        code: 'conflict',
+        details: { path: `/${root}/auth`, space: 'MAIN', existing_page_id: first.json.page_id },
+      });
+    });
+
+    it('keeps validating an explicit slug as a typed segment', async () => {
+      const response = await createPage(readWrite, { title: 'Архитектура', slug: 'Архитектура' });
+      expect(response.status).toBe(400);
+      expect(response.json.error).toMatchObject({ code: 'validation' });
+    });
+
+    it('refuses parent_id with parent_path, and path with slug', async () => {
+      const root = `both-${randomUUID().slice(0, 8)}`;
+      const parent = await createPage(readWrite, { title: 'Both', path: `/${root}` });
+      const parents = await createPage(readWrite, {
+        title: 'X',
+        parent_id: parent.json.page_id,
+        parent_path: `/${root}`,
+      });
+      expect(parents.status).toBe(400);
+      const segments = await createPage(readWrite, { title: 'X', path: `/${root}/x`, slug: 'x' });
+      expect(segments.status).toBe(400);
+    });
+
+    it('answers not_found for a parent_path nothing sits at', async () => {
+      const response = await createPage(readWrite, {
+        title: 'Orphan',
+        parent_path: `/missing-${randomUUID().slice(0, 8)}`,
+      });
+      expect(response.status).toBe(404);
+      expect(response.json.error).toMatchObject({ code: 'not_found' });
+    });
+
+    it('pairs the new page with its counterpart in the same transaction', async () => {
+      const root = `pair-${randomUUID().slice(0, 8)}`;
+      const technical = await createPage(readWrite, {
+        title: 'Auth internals',
+        path: `/${root}`,
+        kind: 'technical',
+      });
+      const human = await createPage(readWrite, {
+        title: 'Как работает вход',
+        parent_path: `/${root}`,
+        kind: 'human',
+        link_to_page_id: technical.json.page_id,
+      });
+      expect(human.status).toBe(201);
+      expect(human.json.path).toBe(`/${root}/kak-rabotaet-vkhod`);
+      expect(human.json.linked_page).toMatchObject({ page_id: technical.json.page_id });
+
+      const read = await pageRoute.GET(
+        request(readWrite, `/api/v1/pages/${technical.json.page_id}`),
+        params(technical.json.page_id as string),
+      );
+      expect((await read.json()).linked_page).toMatchObject({ page_id: human.json.page_id });
+    });
+
+    it('creates nothing when the pairing is refused', async () => {
+      const root = `nopair-${randomUUID().slice(0, 8)}`;
+      const technical = await createPage(readWrite, {
+        title: 'Technical',
+        path: `/${root}`,
+        kind: 'technical',
+      });
+      const refused = await createPage(readWrite, {
+        title: 'Also technical',
+        parent_path: `/${root}`,
+        kind: 'technical',
+        link_to_page_id: technical.json.page_id,
+      });
+      expect(refused.status).toBe(400);
+
+      const children = await pagesRoute.GET(
+        request(readWrite, `/api/v1/pages?parent_id=${technical.json.page_id as string}`),
+      );
+      expect((await children.json()).nodes).toEqual([]);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
   describe('tree', () => {
     it('nests children under their parent and moves a whole subtree', async () => {
       const root = `tree-${randomUUID().slice(0, 8)}`;

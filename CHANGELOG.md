@@ -26,7 +26,7 @@ tagged after the UI design pass.
   line-range fallback, anchor states (`fresh`, `stale`, `moved-renamed`,
   `lost`), and a `confirm` action to clear a flag after review.
 - MCP server (`packages/mcp-server`, `@clewwiki/mcp-server`) exposing
-  twelve tools over the same service layer as the REST API, with both
+  thirteen tools over the same service layer as the REST API, with both
   stdio and streamable HTTP (`/mcp`) transports.
 - Spaces: Confluence-style areas per project, each with its own page tree,
   overview, home page and linked source repository. Paths are unique per
@@ -50,6 +50,20 @@ tagged after the UI design pass.
   the image and walks the full first-run path over HTTP.
 - Packaging for `@clewwiki/mcp-server` as a standalone npm package
   (`publishConfig`, `bin`, `files`), ready for its first publish.
+- MCP tool `wiki.create_page` (`pages:write`): agents create a missing page
+  inside a space and section instead of adding it to an existing page, with
+  an optional pairing (`link_to_page_id`) made in the same transaction. The
+  `/connect` onboarding prompt tells agents to use it.
+- `POST /api/v1/pages` accepts `slug`, `parent_path` and `link_to_page_id`;
+  an explicit path that is taken answers `conflict` with `existing_page_id`.
+
+### Changed
+
+- Page path segments generated from titles transliterate Russian, Ukrainian
+  and Belarusian Cyrillic (ICAO Doc 9303), strip Latin diacritics, fall back
+  to `page-<hash>` when nothing is left, and are numbered `-2`, `-3`, … on the
+  server when the path is taken. A title without Latin letters no longer
+  needs a typed segment, and the page form previews the generated path.
 
 ### Security
 

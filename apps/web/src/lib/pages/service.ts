@@ -15,8 +15,8 @@ import {
   likePrefixPattern,
   normalizePath,
   parentPathOf,
-  slugifySegment,
 } from './paths';
+import { generateSegment, withNumericSuffix } from './slug';
 import { recordAudit } from '../audit';
 import {
   advanceClaimBaseHash,
@@ -24,7 +24,7 @@ import {
   requireClaimForWrite,
 } from '../claims/service';
 import { getDatabase } from '../db';
-import type { DbExecutor } from '../db';
+import type { DbExecutor, Transaction } from '../db';
 
 /**
  * The page service.
@@ -405,29 +405,79 @@ export interface CreatePageInput {
   summary?: string | null;
   kind?: PageKind;
   parentId?: string | null;
-  /** Explicit path. Derived from the title and the parent when omitted. */
+  /** The parent by its path in the same space. Exclusive with `parentId`. */
+  parentPath?: string;
+  /** Explicit path. With a parent, only its last segment is used. */
   path?: string;
+  /** Explicit last segment, joined onto the parent's path. Exclusive with `path`. */
+  slug?: string;
+  /**
+   * A page of the other kind in the same space to pair the new page with, in
+   * the transaction that creates it.
+   */
+  linkToPageId?: string | null;
 }
 
-async function resolveCreationPath(
+/** Where a new page goes, before its segment is known to be free. */
+interface CreationTarget {
+  parentId: string | null;
+  /**
+   * The path as asked for. When `generated` is true it came from the title,
+   * and the service may append `-2`, `-3`, … to its last segment.
+   */
+  path: string;
+  parentPath: string | null;
+  segment: string;
+  generated: boolean;
+}
+
+/** How many numbered segments are tried before a generated path gives up. */
+const MAX_GENERATED_SUFFIX = 200;
+/** How many times an insert is retried after losing a race for a generated path. */
+const GENERATED_PATH_ATTEMPTS = 5;
+
+async function resolveCreationTarget(
   workspaceId: string,
   input: CreatePageInput,
-): Promise<{ path: string; parentId: string | null }> {
-  const parent =
-    typeof input.parentId === 'string' ? await requirePage(workspaceId, input.parentId) : null;
-  if (parent && parent.spaceId !== input.spaceId) {
-    // Answered as "not found" rather than "in another space", so the refusal
-    // says nothing about a space the caller may not be able to see.
-    throw new PageServiceError('not_found', 'Parent page not found');
+): Promise<CreationTarget> {
+  if (typeof input.parentId === 'string' && input.parentPath !== undefined) {
+    throw new PageServiceError('validation', 'Give parent_id or parent_path, not both');
+  }
+  if (input.path !== undefined && input.slug !== undefined) {
+    throw new PageServiceError('validation', 'Give path or slug, not both');
   }
 
   try {
-    if (input.path) {
+    let parent: PageRecord | null = null;
+    if (typeof input.parentId === 'string') {
+      parent = await requirePage(workspaceId, input.parentId);
+      if (parent.spaceId !== input.spaceId) {
+        // Answered as "not found" rather than "in another space", so the refusal
+        // says nothing about a space the caller may not be able to see.
+        throw new PageServiceError('not_found', 'Parent page not found');
+      }
+    } else if (input.parentPath !== undefined) {
+      parent = await getPageByPath(workspaceId, input.spaceId, input.parentPath);
+      if (!parent) {
+        throw new PageServiceError('not_found', 'Parent page not found', {
+          parent_path: input.parentPath,
+        });
+      }
+    }
+
+    if (input.path !== undefined) {
       const normalized = normalizePath(input.path);
       if (parent) {
         // With both a parent and a path, the parent wins on placement and the
         // path contributes only its last segment. The two cannot disagree.
-        return { path: joinPath(parent.path, lastSegment(normalized)), parentId: parent.id };
+        const segment = lastSegment(normalized);
+        return {
+          path: joinPath(parent.path, segment),
+          parentId: parent.id,
+          parentPath: parent.path,
+          segment,
+          generated: false,
+        };
       }
       // Without an explicit parent, the path decides: attach to whatever page
       // already occupies the path above, if any.
@@ -435,23 +485,83 @@ async function resolveCreationPath(
       const implied = parentPath
         ? await getPageByPath(workspaceId, input.spaceId, parentPath)
         : null;
-      return { path: normalized, parentId: implied?.id ?? null };
+      return {
+        path: normalized,
+        parentId: implied?.id ?? null,
+        parentPath,
+        segment: lastSegment(normalized),
+        generated: false,
+      };
     }
 
-    const slug = slugifySegment(input.title);
-    if (slug.length === 0) {
-      throw new PageServiceError(
-        'validation',
-        'A path could not be derived from the title; supply one explicitly',
-      );
+    const parentPath = parent?.path ?? null;
+    if (input.slug !== undefined) {
+      const path = joinPath(parentPath, input.slug);
+      return {
+        path,
+        parentId: parent?.id ?? null,
+        parentPath,
+        segment: lastSegment(path),
+        generated: false,
+      };
     }
+
+    const segment = generateSegment(input.title);
     return {
-      path: joinPath(parent?.path ?? null, slug),
+      path: joinPath(parentPath, segment),
       parentId: parent?.id ?? null,
+      parentPath,
+      segment,
+      generated: true,
     };
   } catch (error) {
     throw toServiceError(error);
   }
+}
+
+/**
+ * The first of `segment`, `segment-2`, `segment-3`, … that no live page in the
+ * space occupies under `parentPath`. Candidates are looked up a batch at a
+ * time, so a title used a hundred times costs a few queries rather than a
+ * hundred.
+ */
+async function firstFreeGeneratedPath(
+  workspaceId: string,
+  spaceId: string,
+  parentPath: string | null,
+  segment: string,
+): Promise<string> {
+  const db = getDatabase();
+  const batch = 25;
+  for (let from = 1; from <= MAX_GENERATED_SUFFIX; from += batch) {
+    const candidates: string[] = [];
+    for (let n = from; n < from + batch && n <= MAX_GENERATED_SUFFIX; n += 1) {
+      try {
+        candidates.push(joinPath(parentPath, withNumericSuffix(segment, n)));
+      } catch (error) {
+        throw toServiceError(error);
+      }
+    }
+    const taken = await db
+      .select({ path: pages.path })
+      .from(pages)
+      .where(
+        and(
+          eq(pages.workspaceId, workspaceId),
+          eq(pages.spaceId, spaceId),
+          isNull(pages.deletedAt),
+          inArray(pages.path, candidates),
+        ),
+      );
+    const occupied = new Set(taken.map((row) => row.path));
+    const free = candidates.find((candidate) => !occupied.has(candidate));
+    if (free !== undefined) return free;
+  }
+  throw new PageServiceError(
+    'conflict',
+    `Every numbered variant of ${segment} is taken here; choose a slug explicitly`,
+    { segment },
+  );
 }
 
 export async function createPage(input: CreatePageInput): Promise<PageRecord> {
@@ -475,18 +585,19 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
     });
   }
 
-  const { path, parentId } = await resolveCreationPath(input.workspaceId, input);
+  const target = await resolveCreationTarget(input.workspaceId, { ...input, title });
   const body = input.body ?? '';
   const contentHash = computeContentHash(body);
+  const linkToPageId = input.linkToPageId ?? null;
 
-  try {
-    return await db.transaction(async (tx) => {
-      const [created] = await tx
+  const insert = (path: string) =>
+    db.transaction(async (tx) => {
+      const [inserted] = await tx
         .insert(pages)
         .values({
           workspaceId: input.workspaceId,
           spaceId: space.id,
-          parentId,
+          parentId: target.parentId,
           path,
           title,
           kind: input.kind ?? 'technical',
@@ -501,17 +612,17 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
         })
         .returning(pageColumns);
 
-      if (!created) {
+      if (!inserted) {
         throw new PageServiceError('conflict', 'Page could not be created');
       }
 
       await tx.insert(pageRevisions).values({
-        pageId: created.id,
+        pageId: inserted.id,
         version: 1,
-        title: created.title,
-        body: created.body,
-        summary: created.summary,
-        contentHash: created.contentHash,
+        title: inserted.title,
+        body: inserted.body,
+        summary: inserted.summary,
+        contentHash: inserted.contentHash,
         authorType: input.actor.type,
         authorId: input.actor.id,
       });
@@ -522,22 +633,68 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
           actorType: input.actor.type,
           actorId: input.actor.id,
           action: 'page.created',
-          target: created.id,
-          metadata: { space: space.key, path: created.path, kind: created.kind, version: 1 },
+          target: inserted.id,
+          metadata: { space: space.key, path: inserted.path, kind: inserted.kind, version: 1 },
         },
         tx,
       );
 
-      return created;
-    });
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw new PageServiceError('conflict', `A page already exists at ${path} in this space`, {
-        path,
-        space: space.key,
+      if (linkToPageId === null) return inserted;
+
+      // Paired in the same transaction: a failed pairing — a counterpart of the
+      // same kind, or one that is not there — leaves no half-made page behind.
+      const linked = await linkPagesWithin(tx, {
+        workspaceId: input.workspaceId,
+        pageId: inserted.id,
+        linkedPageId: linkToPageId,
+        actor: input.actor,
       });
+      return { ...inserted, linkedPageId: linked.linkedPageId };
+    });
+
+  if (!target.generated) {
+    try {
+      return await insert(target.path);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        const existing = await getPageByPath(input.workspaceId, space.id, target.path);
+        throw new PageServiceError(
+          'conflict',
+          `A page already exists at ${target.path} in this space`,
+          {
+            path: target.path,
+            space: space.key,
+            ...(existing ? { existing_page_id: existing.id } : {}),
+          },
+        );
+      }
+      throw error;
     }
-    throw error;
+  }
+
+  // A generated path is the title's, not the caller's choice, so a taken one is
+  // numbered rather than refused. Two creations racing for the same number end
+  // with one unique violation, and the loser simply looks again.
+  for (let attempt = 1; ; attempt += 1) {
+    const path = await firstFreeGeneratedPath(
+      input.workspaceId,
+      space.id,
+      target.parentPath,
+      target.segment,
+    );
+    try {
+      return await insert(path);
+    } catch (error) {
+      if (!isUniqueViolation(error) || attempt >= GENERATED_PATH_ATTEMPTS) {
+        if (isUniqueViolation(error)) {
+          throw new PageServiceError('conflict', `A page already exists at ${path} in this space`, {
+            path,
+            space: space.key,
+          });
+        }
+        throw error;
+      }
+    }
   }
 }
 
@@ -1123,114 +1280,118 @@ export interface LinkPagesInput {
 export async function linkPages(
   input: LinkPagesInput,
 ): Promise<{ pageId: string; linkedPageId: string | null }> {
-  const db = getDatabase();
+  return getDatabase().transaction((tx) => linkPagesWithin(tx, input));
+}
 
-  return db.transaction(async (tx) => {
-    const [page] = await tx
-      .select(pageColumns)
-      .from(pages)
-      .where(
-        and(
-          eq(pages.id, input.pageId),
-          eq(pages.workspaceId, input.workspaceId),
-          isNull(pages.deletedAt),
-        ),
-      )
-      .limit(1)
-      .for('update');
+/** `linkPages` inside a transaction the caller already holds. */
+async function linkPagesWithin(
+  tx: Transaction,
+  input: LinkPagesInput,
+): Promise<{ pageId: string; linkedPageId: string | null }> {
+  const [page] = await tx
+    .select(pageColumns)
+    .from(pages)
+    .where(
+      and(
+        eq(pages.id, input.pageId),
+        eq(pages.workspaceId, input.workspaceId),
+        isNull(pages.deletedAt),
+      ),
+    )
+    .limit(1)
+    .for('update');
 
-    if (!page) {
-      throw new PageServiceError('not_found', 'Page not found');
-    }
+  if (!page) {
+    throw new PageServiceError('not_found', 'Page not found');
+  }
 
-    const now = new Date();
+  const now = new Date();
 
-    const clearPartner = async (partnerId: string | null) => {
-      if (!partnerId || partnerId === input.linkedPageId) return;
-      await tx
-        .update(pages)
-        .set({ linkedPageId: null, updatedAt: now })
-        .where(and(eq(pages.id, partnerId), eq(pages.workspaceId, input.workspaceId)));
-    };
+  const clearPartner = async (partnerId: string | null) => {
+    if (!partnerId || partnerId === input.linkedPageId) return;
+    await tx
+      .update(pages)
+      .set({ linkedPageId: null, updatedAt: now })
+      .where(and(eq(pages.id, partnerId), eq(pages.workspaceId, input.workspaceId)));
+  };
 
-    if (input.linkedPageId === null) {
-      await clearPartner(page.linkedPageId);
-      await tx
-        .update(pages)
-        .set({ linkedPageId: null, updatedAt: now })
-        .where(eq(pages.id, page.id));
-
-      await recordAudit(
-        {
-          workspaceId: input.workspaceId,
-          actorType: input.actor.type,
-          actorId: input.actor.id,
-          action: 'page.unlinked',
-          target: page.id,
-          metadata: { previousLinkedPageId: page.linkedPageId },
-        },
-        tx,
-      );
-      return { pageId: page.id, linkedPageId: null };
-    }
-
-    if (input.linkedPageId === page.id) {
-      throw new PageServiceError('validation', 'A page cannot be linked to itself');
-    }
-
-    const [counterpart] = await tx
-      .select(pageColumns)
-      .from(pages)
-      .where(
-        and(
-          eq(pages.id, input.linkedPageId),
-          eq(pages.workspaceId, input.workspaceId),
-          // A pair lives in one space: the technical and the human page of
-          // one subject belong to the same project.
-          eq(pages.spaceId, page.spaceId),
-          isNull(pages.deletedAt),
-        ),
-      )
-      .limit(1)
-      .for('update');
-
-    if (!counterpart) {
-      throw new PageServiceError('not_found', 'Page not found');
-    }
-    if (counterpart.kind === page.kind) {
-      throw new PageServiceError(
-        'validation',
-        'A pair must join one technical page with one human page',
-        { kind: page.kind },
-      );
-    }
-
+  if (input.linkedPageId === null) {
     await clearPartner(page.linkedPageId);
-    await clearPartner(counterpart.linkedPageId);
-
     await tx
       .update(pages)
-      .set({ linkedPageId: counterpart.id, updatedAt: now })
+      .set({ linkedPageId: null, updatedAt: now })
       .where(eq(pages.id, page.id));
-    await tx
-      .update(pages)
-      .set({ linkedPageId: page.id, updatedAt: now })
-      .where(eq(pages.id, counterpart.id));
 
     await recordAudit(
       {
         workspaceId: input.workspaceId,
         actorType: input.actor.type,
         actorId: input.actor.id,
-        action: 'page.linked',
+        action: 'page.unlinked',
         target: page.id,
-        metadata: { linkedPageId: counterpart.id },
+        metadata: { previousLinkedPageId: page.linkedPageId },
       },
       tx,
     );
+    return { pageId: page.id, linkedPageId: null };
+  }
 
-    return { pageId: page.id, linkedPageId: counterpart.id };
-  });
+  if (input.linkedPageId === page.id) {
+    throw new PageServiceError('validation', 'A page cannot be linked to itself');
+  }
+
+  const [counterpart] = await tx
+    .select(pageColumns)
+    .from(pages)
+    .where(
+      and(
+        eq(pages.id, input.linkedPageId),
+        eq(pages.workspaceId, input.workspaceId),
+        // A pair lives in one space: the technical and the human page of
+        // one subject belong to the same project.
+        eq(pages.spaceId, page.spaceId),
+        isNull(pages.deletedAt),
+      ),
+    )
+    .limit(1)
+    .for('update');
+
+  if (!counterpart) {
+    throw new PageServiceError('not_found', 'Page not found');
+  }
+  if (counterpart.kind === page.kind) {
+    throw new PageServiceError(
+      'validation',
+      'A pair must join one technical page with one human page',
+      { kind: page.kind },
+    );
+  }
+
+  await clearPartner(page.linkedPageId);
+  await clearPartner(counterpart.linkedPageId);
+
+  await tx
+    .update(pages)
+    .set({ linkedPageId: counterpart.id, updatedAt: now })
+    .where(eq(pages.id, page.id));
+  await tx
+    .update(pages)
+    .set({ linkedPageId: page.id, updatedAt: now })
+    .where(eq(pages.id, counterpart.id));
+
+  await recordAudit(
+    {
+      workspaceId: input.workspaceId,
+      actorType: input.actor.type,
+      actorId: input.actor.id,
+      action: 'page.linked',
+      target: page.id,
+      metadata: { linkedPageId: counterpart.id },
+    },
+    tx,
+  );
+
+  return { pageId: page.id, linkedPageId: counterpart.id };
 }
 
 /* ------------------------------------------------------------------ */

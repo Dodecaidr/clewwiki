@@ -59,7 +59,7 @@ describe('stdio transport', () => {
     return { isError: result.isError === true, data: JSON.parse(text) as Record<string, unknown> };
   }
 
-  it('advertises the twelve tools, with the content contract on the ones that return stored text', async () => {
+  it('advertises the thirteen tools, with the content contract on the ones that return stored text', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((entry) => entry.name).sort();
 
@@ -68,6 +68,7 @@ describe('stdio transport', () => {
         'wiki.list_spaces',
         'wiki.check_anchors',
         'wiki.claim',
+        'wiki.create_page',
         'wiki.get_page',
         'wiki.get_presence',
         'wiki.link_docs',
@@ -111,6 +112,39 @@ describe('stdio transport', () => {
     const unknown = await call('wiki.get_presence', { space: 'NOPE' });
     expect(unknown.isError).toBe(true);
     expect(unknown.data).toMatchObject({ error: { code: 'NOT_FOUND' } });
+  });
+
+  it('creates a page in a space, and reports a taken path as CONFLICT with the page in the way', async () => {
+    const createdPage = await call('wiki.create_page', {
+      space: 'ops',
+      parent_path: '/runbooks',
+      title: 'Restart the queue',
+      kind: 'human',
+      body: '# Restart\n',
+    });
+    expect(createdPage.isError).toBe(false);
+    expect(createdPage.data).toMatchObject({
+      space: { key: 'OPS' },
+      path: '/runbooks/restart-the-queue',
+      kind: 'human',
+      version: 1,
+      linked_page_id: null,
+    });
+    expect(createdPage.data.page_id).toEqual(expect.any(String));
+    expect(createdPage.data.content_hash).toEqual(expect.any(String));
+    expect(rest.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/v1/pages' });
+
+    const taken = await call('wiki.create_page', {
+      space: 'MAIN',
+      parent_path: '/backend',
+      slug: 'auth',
+      title: 'Auth again',
+      kind: 'technical',
+    });
+    expect(taken.isError).toBe(true);
+    expect(taken.data).toMatchObject({
+      error: { code: 'CONFLICT', details: { existing_page_id: rest.page.page_id } },
+    });
   });
 
   it('refuses a page path without its space before any REST call is made', async () => {
@@ -215,6 +249,16 @@ describe('stdio transport, scope violations', () => {
       const data = JSON.parse(content[0]?.text ?? '{}') as { error?: { code?: string } };
       expect(result.isError).toBe(true);
       expect(data.error?.code).toBe('FORBIDDEN');
+
+      const creation = await client.callTool({
+        name: 'wiki.create_page',
+        arguments: { space: 'MAIN', title: 'Nope', kind: 'technical' },
+      });
+      const creationContent = (creation.content ?? []) as Array<{ type: string; text?: string }>;
+      expect(creation.isError).toBe(true);
+      expect(JSON.parse(creationContent[0]?.text ?? '{}')).toMatchObject({
+        error: { code: 'FORBIDDEN' },
+      });
 
       // Reading still works with the scopes it does have.
       const read = await client.callTool({

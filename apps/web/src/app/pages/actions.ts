@@ -117,9 +117,10 @@ export async function createPageAction(
       spaceId: space.id,
       actor: { type: 'user', id: session.userId },
       title: parsed.data.title,
-      // With a parent, the service joins this one segment onto the parent's
-      // path; without one, it becomes a top-level path.
-      path: parsed.data.segment,
+      // One segment, joined onto the parent's path or made top-level. Left
+      // empty, the service generates it from the title — transliterating
+      // Cyrillic — and numbers it when that path is already taken.
+      slug: parsed.data.segment,
       parentId: parsed.data.parentId ?? null,
       kind: parsed.data.kind,
       body: parsed.data.body,

@@ -12,6 +12,7 @@ import { Alert } from '@/components/ui/card';
 import { Field, Input, Label, Select } from '@/components/ui/field';
 import { PageBody } from '@/components/page-body';
 import { lastSegment, slugifySegment } from '@/lib/pages/paths';
+import { generateSegment } from '@/lib/pages/slug';
 import { cn, formatDateTime } from '@/lib/utils';
 
 export interface PageFormParent {
@@ -53,18 +54,26 @@ const initialState: PageFormState = {};
  */
 /**
  * The path a page will get, as the server will build it: the parent's path, then
- * the typed segment or, failing that, the fallback made into one. `null` when
- * the fallback has nothing a segment can be made of — a title in Cyrillic, say —
- * and no segment was typed.
+ * the typed segment or, failing that, the fallback. On create the fallback is
+ * the segment generated from the title; on edit it is the page's current
+ * segment. `invalid` when a typed segment has nothing a segment can be made of,
+ * `null` when there is nothing to show yet. A taken generated path is numbered
+ * by the server, which the preview does not try to predict.
  */
 function previewPath(
   parents: PageFormParent[],
   parentId: string,
   segment: string,
   fallback: string,
-): string | null {
+): string | 'invalid' | null {
   const parent = parents.find((candidate) => candidate.id === parentId);
-  const last = slugifySegment(segment) || slugifySegment(fallback);
+  let last: string;
+  if (segment.trim() !== '') {
+    last = slugifySegment(segment);
+    if (last === '') return 'invalid';
+  } else {
+    last = fallback;
+  }
   if (last === '') return null;
   return `${parent ? parent.path : ''}/${last}`;
 }
@@ -89,11 +98,12 @@ export function PageForm({ mode, spaceKey, parents, initial, cancelHref }: PageF
   const [segment, setSegment] = useState(initial.segment);
   // An edit with the segment cleared keeps the page's current segment, which is
   // what the server does too; a new page falls back to its title.
+  const generatedSegment = title.trim() === '' ? '' : generateSegment(title);
   const resultingPath = previewPath(
     parents,
     parentId,
     segment,
-    mode === 'edit' ? initial.segment : title,
+    mode === 'edit' ? initial.segment : generatedSegment,
   );
   const [showPreview, setShowPreview] = useState(false);
   const [preview, setPreview] = useState('');
@@ -197,22 +207,21 @@ export function PageForm({ mode, spaceKey, parents, initial, cancelHref }: PageF
             value={segment}
             onChange={(event) => setSegment(event.target.value)}
             maxLength={80}
-            placeholder={slugifySegment(title) || 'auth'}
+            placeholder={generatedSegment || 'auth'}
             className="font-mono text-xs"
           />
         </Field>
 
         <p className="text-xs text-muted-foreground" aria-live="polite">
-          {resultingPath === null ? (
-            t('resultingPathUnknown')
-          ) : (
-            <>
-              {t('resultingPath')}{' '}
-              <code className="font-mono text-foreground">
-                {spaceKey}:{resultingPath}
-              </code>
-            </>
-          )}
+          {resultingPath === 'invalid'
+            ? t('resultingPathUnknown')
+            : resultingPath === null
+              ? null
+              : t.rich('resultingPath', {
+                  space: spaceKey,
+                  path: resultingPath,
+                  code: (chunks) => <code className="font-mono text-foreground">{chunks}</code>,
+                })}
         </p>
 
         <Field label={t('summary')} htmlFor="summary" hint={t('summaryHint')}>

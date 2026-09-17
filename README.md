@@ -316,9 +316,10 @@ is unchanged; only where the image comes from differs.
 
 ### Connecting an AI coding agent (MCP)
 
-Agents talk to clewwiki through the Model Context Protocol with twelve
-tools — `wiki.list_spaces`, `wiki.search`, `wiki.get_page`, `wiki.claim`,
-`wiki.write_page`, `wiki.release_claim` and the rest. An agent calls
+Agents talk to clewwiki through the Model Context Protocol with thirteen
+tools — `wiki.list_spaces`, `wiki.search`, `wiki.get_page`,
+`wiki.create_page`, `wiki.claim`, `wiki.write_page`, `wiki.release_claim` and
+the rest. An agent calls
 `wiki.list_spaces` first and passes the key of its project's space as `space`
 to `wiki.search`, `wiki.list_pages`, `wiki.get_presence`, and to
 `wiki.get_page` when it reads by path. The full contract, with input and

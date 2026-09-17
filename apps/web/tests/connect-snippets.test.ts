@@ -127,6 +127,8 @@ describe('onboarding prompt', () => {
       'wiki.search',
       'wiki.list_pages',
       'wiki.get_page',
+      'wiki.create_page',
+      'link_to_page_id',
       'wiki.claim',
       'wiki.write_page',
       'base_content_hash',

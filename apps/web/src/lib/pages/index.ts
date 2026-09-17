@@ -11,4 +11,5 @@ export * from './export';
 export * from './markdown';
 export * from './paths';
 export * from './serialize';
+export * from './slug';
 export * from './service';

@@ -28,7 +28,7 @@ An agent token belongs to exactly one workspace and carries a scope set:
 | Scope | Grants |
 |---|---|
 | `pages:read` | `wiki.list_spaces`, `wiki.search`, `wiki.get_page`, `wiki.list_pages`, `wiki.get_presence` |
-| `pages:write` | `wiki.claim`, `wiki.renew_claim`, `wiki.write_page`, `wiki.release_claim`, `wiki.post_note`, `wiki.check_anchors`, `wiki.link_docs` |
+| `pages:write` | `wiki.create_page`, `wiki.claim`, `wiki.renew_claim`, `wiki.write_page`, `wiki.release_claim`, `wiki.post_note`, `wiki.check_anchors`, `wiki.link_docs` |
 | `pages:delete` | No tool. `DELETE /api/v1/pages/{id}` over REST, together with `pages:write`. |
 
 `wiki.check_anchors` needs `pages:write` because a check stores the states it
@@ -154,6 +154,52 @@ every space the token can reach are listed, each carrying its space.
 input:  { space?: string, parent_id?: string, depth?: number (1..3, default 1) }
 output: { nodes: [ { page_id, space: { key, name }, path, title, kind, has_children, stale_anchor_count, claimed: boolean } ] }
 ```
+
+### wiki.create_page
+
+Create a page in a space. Maps to `POST /api/v1/pages` and needs
+`pages:write`; a token limited to some spaces can create pages only in those,
+and a `space` outside them is `NOT_FOUND`. It is the tool for a subject that
+has no page yet: an agent creates the page under the section it belongs to
+rather than appending unrelated content to an existing page.
+
+```
+input:  { space: string, parent_id?: string, parent_path?: string, title: string,
+          kind: "technical" | "human", body?: string, summary?: string, slug?: string,
+          link_to_page_id?: string }
+output: { page_id, space: { key, name }, parent_id, path, title, kind, content_hash, version,
+          linked_page_id }
+errors: CONFLICT { path, space, existing_page_id } (explicit slug taken),
+        NOT_FOUND (space, parent or link_to_page_id not found), VALIDATION
+```
+
+The parent is `parent_id` or `parent_path` — not both — and a page with
+neither is a top-level section of the space. The last path segment is `slug`
+when given, validated like any typed segment. Without it the segment is
+generated from the title:
+
+- Cyrillic letters of Russian, Ukrainian and Belarusian are transliterated
+  with the ICAO Doc 9303 table, one table for all three (`Архитектура
+  бэкенда` → `arkhitektura-bekenda`, `Їжак` → `izhak`, `Ўзор` → `uzor`);
+- other diacritics are stripped (`Größe` → `grosse`, `Côté` → `cote`), and
+  everything that is not a Latin letter or digit becomes one hyphen;
+- a title with nothing left, such as emoji only, gets `page-` and eight hex
+  digits hashed from the title;
+- the segment is cut to 80 characters, and if a live page already sits at that
+  path in the space, `-2`, `-3`, … is appended.
+
+A generated path is therefore never a conflict; an explicit `slug` that is
+taken answers `CONFLICT` naming the page in the way as `existing_page_id`.
+
+Creating needs no claim: nobody else can hold a page that does not exist yet.
+The creator writes further with `wiki.claim` and `wiki.write_page` like
+anyone else. `link_to_page_id` pairs the new page with a page of the other kind
+in the same space in the transaction that creates it, as `wiki.link_docs`
+would; a counterpart of the same kind is `VALIDATION` and nothing is created.
+The result carries only the caller's own title and the identifiers a next
+write needs, so it has no text written by others and no content notice. The
+tool is not idempotent: calling it twice with the same title creates two
+pages, the second one numbered.
 
 ### wiki.claim
 
@@ -337,7 +383,6 @@ sequenceDiagram
 
 Every tool above maps to one REST call (`wiki.get_page` by path makes two: the
 path lookup, then the read). Several REST endpoints have no tool of their own.
-`POST /api/v1/pages` creates a page and requires `space`.
 `GET /api/v1/spaces/{key}` reads one space and `GET /api/v1/spaces/{key}/export`
 downloads a whole space as a ZIP of Markdown files mirroring its tree.
 Creating, changing and archiving spaces (`POST /api/v1/spaces`,

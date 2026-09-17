@@ -5,7 +5,7 @@ import { ClewwikiToolError } from './errors.ts';
 import type { ClewwikiRestClient } from './rest-client.ts';
 
 /**
- * The twelve tools of `docs/mcp.md`, each one REST call deep — two for
+ * The thirteen tools of `docs/mcp.md`, each one REST call deep — two for
  * `wiki.get_page` by path, which resolves the path first.
  *
  * A tool's job here is to name its inputs, put them where the REST endpoint
@@ -248,6 +248,82 @@ const listPages = defineTool({
   },
 });
 
+/** A page path as an agent passes it: `/backend/auth`. */
+const pagePathSchema = z.string().min(1).max(512);
+
+const createPage = defineTool({
+  name: 'wiki.create_page',
+  title: 'Create a page',
+  description:
+    'Create a new page inside a space, under the section it belongs to, when the subject has no ' +
+    'page yet — rather than stuffing unrelated content into an existing page. Place it with ' +
+    'parent_id or parent_path (omit both for a top-level section). The path segment is generated ' +
+    'from the title (Cyrillic is transliterated) and numbered -2, -3, … if taken; pass slug to ' +
+    'choose it yourself, in which case a taken path answers CONFLICT with existing_page_id. No ' +
+    'claim is needed: nobody can hold a page that does not exist yet. Pass link_to_page_id to ' +
+    'pair the new page with its counterpart of the other kind in the same space. Returns the ' +
+    'new page id, path, space, content hash and version, ready for wiki.claim and ' +
+    'wiki.write_page.',
+  input: z.object({
+    space: spaceKeySchema.describe('The space to create the page in, from wiki.list_spaces.'),
+    parent_id: pageIdSchema.optional().describe('The parent page. Give this or parent_path, not both.'),
+    parent_path: pagePathSchema
+      .optional()
+      .describe('The parent page by its path in the space, for example /backend.'),
+    title: z.string().trim().min(1).max(300).describe('The page title.'),
+    kind: z
+      .enum(['technical', 'human'])
+      .describe('"technical" for precise pages written for agents, "human" for plain-language ones.'),
+    body: z.string().max(1_000_000).optional().describe('The page body in Markdown. Default empty.'),
+    summary: z.string().max(2_000).optional().describe('One line shown in search results.'),
+    slug: z
+      .string()
+      .trim()
+      .min(1)
+      .max(80)
+      .optional()
+      .describe('The last path segment. Omit to generate it from the title.'),
+    link_to_page_id: pageIdSchema
+      .optional()
+      .describe('A page of the other kind in the same space to pair the new page with.'),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  async run(client, args) {
+    if (args.parent_id !== undefined && args.parent_path !== undefined) {
+      throw new ClewwikiToolError('VALIDATION', 'Give parent_id or parent_path, not both');
+    }
+    const page = await client.request<PageResource>({
+      method: 'POST',
+      path: '/pages',
+      body: {
+        space: args.space,
+        title: args.title,
+        kind: args.kind,
+        ...(args.parent_id !== undefined ? { parent_id: args.parent_id } : {}),
+        ...(args.parent_path !== undefined ? { parent_path: args.parent_path } : {}),
+        ...(args.body !== undefined ? { body: args.body } : {}),
+        ...(args.summary !== undefined ? { summary: args.summary } : {}),
+        ...(args.slug !== undefined ? { slug: args.slug } : {}),
+        ...(args.link_to_page_id !== undefined ? { link_to_page_id: args.link_to_page_id } : {}),
+      },
+    });
+    // Only what identifies the new page and what the next write needs. The
+    // counterpart's title and body stay out, so nothing written by someone
+    // else comes back through this tool.
+    return {
+      page_id: page.page_id,
+      space: page.space,
+      parent_id: page.parent_id ?? null,
+      path: page.path,
+      title: page.title,
+      kind: page.kind,
+      content_hash: page.content_hash,
+      version: page.version,
+      linked_page_id: page.linked_page?.page_id ?? null,
+    };
+  },
+});
+
 const claim = defineTool({
   name: 'wiki.claim',
   title: 'Claim a page before writing',
@@ -464,6 +540,7 @@ export const TOOLS: readonly ToolDefinition[] = [
   search,
   getPage,
   listPages,
+  createPage,
   claim,
   renewClaim,
   writePage,

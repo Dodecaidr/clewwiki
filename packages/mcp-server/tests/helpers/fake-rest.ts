@@ -12,7 +12,9 @@ import type { AddressInfo } from 'node:net';
  * else: a bearer token must be present, a write must carry both a live claim
  * and a matching base hash, and a path is looked up inside a space.
  *
- * It holds two spaces, `MAIN` and `OPS`, and one page in `MAIN`.
+ * It holds two spaces, `MAIN` and `OPS`, and one page in `MAIN`. Pages created
+ * through it are kept only to answer a second creation at the same path with
+ * the conflict the real API gives.
  */
 
 export interface FakeRestOptions {
@@ -102,6 +104,7 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
     anchors: [],
   };
   const claims = new Map<string, FakeClaim>();
+  const created: FakePage[] = [];
   const spaces: FakeSpace[] = [
     { key: 'MAIN', name: 'Main', description: 'The main project.', icon: null, page_count: 1, archived: false },
     { key: 'OPS', name: 'Operations', description: 'Runbooks.', icon: '🛠', page_count: 0, archived: false },
@@ -186,6 +189,59 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
               ]
             : [];
         return send(200, { nodes });
+      }
+
+      if (method === 'POST' && path === '/api/v1/pages') {
+        if (!needs('pages:write')) return;
+        const payload = (body ?? {}) as {
+          space?: string;
+          title?: string;
+          kind?: 'technical' | 'human';
+          parent_path?: string;
+          slug?: string;
+          body?: string;
+        };
+        const target = spaces.find((space) => space.key === payload.space?.toUpperCase());
+        if (!target) return fail(404, 'not_found', 'Space not found');
+        if (target.archived) {
+          return fail(409, 'conflict', 'This space is archived and takes no new pages');
+        }
+        // Enough of the real rule to exercise the wrapper: an explicit slug is
+        // used as given, anything else is made from the title.
+        const segment =
+          payload.slug ??
+          (payload.title ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const newPath = `${payload.parent_path ?? ''}/${segment || 'page'}`;
+        const occupant = [page, ...created].find(
+          (existing) => existing.space.key === target.key && existing.path === newPath,
+        );
+        if (occupant) {
+          return fail(409, 'conflict', `A page already exists at ${newPath} in this space`, {
+            path: newPath,
+            space: target.key,
+            existing_page_id: occupant.page_id,
+          });
+        }
+        const now = new Date().toISOString();
+        const fresh: FakePage = {
+          page_id: randomUUID(),
+          space: { key: target.key, name: target.name },
+          parent_id: null,
+          path: newPath,
+          title: payload.title ?? '',
+          kind: payload.kind ?? 'technical',
+          summary: null,
+          content_hash: hashOf(payload.body ?? ''),
+          version: 1,
+          created_at: now,
+          created_by: { type: 'user', id: 'token-1' },
+          updated_at: now,
+          updated_by: { type: 'agent', id: 'token-1' },
+          body: payload.body ?? '',
+          anchors: [],
+        };
+        created.push(fresh);
+        return send(201, { ...fresh, linked_page: null, claim: null });
       }
 
       if (method === 'GET' && path === '/api/v1/search') {
