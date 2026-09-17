@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { AnchorPanel } from './anchor-panel';
@@ -105,6 +105,7 @@ export default async function PageView({ params }: Props) {
 
   const { page } = loaded;
   const t = await getTranslations('pages');
+  const format = await getFormatter();
 
   const [html, linked, revisions, activeClaims, notes, pageAnchors, fallbackShare] =
     await Promise.all([
@@ -137,7 +138,7 @@ export default async function PageView({ params }: Props) {
     lineEnd: anchor.lineEnd,
     detailLabel: describeAnchorDetail(anchor, ta),
     lastCheckedLabel: anchor.lastCheckedAt
-      ? ta('lastChecked', { at: formatDateTime(anchor.lastCheckedAt) ?? '' })
+      ? ta('lastChecked', { at: formatDateTime(format, anchor.lastCheckedAt) ?? '' })
       : null,
   }));
 
@@ -232,7 +233,7 @@ export default async function PageView({ params }: Props) {
           </div>
           <div className="flex gap-1">
             <dt>{t('updatedLabel')}:</dt>
-            <dd className="font-medium text-foreground">{formatDateTime(page.updatedAt)}</dd>
+            <dd className="font-medium text-foreground">{formatDateTime(format, page.updatedAt)}</dd>
           </div>
           <div className="flex gap-1">
             <dt>{t('updatedByLabel')}:</dt>
@@ -262,7 +263,7 @@ export default async function PageView({ params }: Props) {
             <span className="font-medium">
               {t('claimHeldBy', {
                 name: claim.holderLabel,
-                since: formatDateTime(claim.createdAt) ?? '—',
+                since: formatDateTime(format, claim.createdAt) ?? '—',
               })}
             </span>{' '}
             <span className="text-muted-foreground">
@@ -270,7 +271,7 @@ export default async function PageView({ params }: Props) {
                 ? t('claimSection', { section: claim.sectionId })
                 : t('claimWholePage')}
               {' · '}
-              {t('claimExpires', { until: formatDateTime(claim.expiresAt) ?? '—' })}
+              {t('claimExpires', { until: formatDateTime(format, claim.expiresAt) ?? '—' })}
             </span>
           </p>
         ) : null}
@@ -289,7 +290,7 @@ export default async function PageView({ params }: Props) {
                 <p className="mt-1 text-xs text-muted-foreground">
                   {t('noteBy', {
                     name: note.authorLabel,
-                    at: formatDateTime(note.createdAt) ?? '—',
+                    at: formatDateTime(format, note.createdAt) ?? '—',
                   })}
                 </p>
               </li>
@@ -326,8 +327,10 @@ export default async function PageView({ params }: Props) {
           <ul className="grid gap-2 text-sm">
             {revisions.map((revision) => (
               <li key={revision.version} className="flex flex-wrap gap-x-3 text-muted-foreground">
-                <span className="font-medium text-foreground">v{revision.version}</span>
-                <span>{formatDateTime(revision.createdAt)}</span>
+                <span className="font-medium text-foreground">
+                  {t('versionShort', { version: revision.version })}
+                </span>
+                <span>{formatDateTime(format, revision.createdAt)}</span>
                 <span>{revision.authorType === 'agent' ? t('actorAgent') : t('actorUser')}</span>
                 <span className="font-mono text-xs">{revision.contentHash.slice(0, 12)}</span>
               </li>

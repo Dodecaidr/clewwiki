@@ -38,7 +38,9 @@ export default async function HomePage() {
               </div>
               <div>
                 <dt className="text-muted-foreground">{t('roleLabel')}</dt>
-                <dd className="font-medium">{session.role}</dd>
+                <dd className="font-medium">
+                  {session.role === 'admin' ? t('role_admin') : t('role_editor')}
+                </dd>
               </div>
             </dl>
             <div className="flex flex-wrap gap-4">
@@ -54,6 +56,18 @@ export default async function HomePage() {
               >
                 {t('manageTokens')}
               </Link>
+              <Link
+                href="/connect"
+                className="text-sm underline underline-offset-2 hover:text-foreground"
+              >
+                {t('connectAgent')}
+              </Link>
+              <Link
+                href="/guide"
+                className="text-sm underline underline-offset-2 hover:text-foreground"
+              >
+                {t('readGuide')}
+              </Link>
             </div>
           </CardBody>
         </Card>
@@ -63,7 +77,7 @@ export default async function HomePage() {
             <p>
               {t('signedOutHint')}{' '}
               <Link href="/login" className="underline underline-offset-2 hover:text-foreground">
-                /login
+                {t('signInLink')}
               </Link>
             </p>
           </CardBody>

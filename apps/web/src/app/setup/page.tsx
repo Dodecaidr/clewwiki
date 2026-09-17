@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 
 import { SetupForm } from './setup-form';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { LanguageSwitcher } from '@/components/language-switcher';
 import { ensureSetupToken } from '@/lib/setup-token';
 import { hasAnyUser } from '@/lib/workspace';
 
@@ -33,7 +34,10 @@ export default async function SetupPage() {
   return (
     <Card className="mx-auto max-w-xl">
       <CardHeader>
-        <CardTitle>{t('title')}</CardTitle>
+        <div className="flex items-start justify-between gap-3">
+          <CardTitle>{t('title')}</CardTitle>
+          <LanguageSwitcher />
+        </div>
         <CardDescription>{t('intro')}</CardDescription>
       </CardHeader>
       <CardBody>

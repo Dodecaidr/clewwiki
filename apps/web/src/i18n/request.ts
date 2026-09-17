@@ -1,18 +1,20 @@
+import { cookies, headers } from 'next/headers';
 import { getRequestConfig } from 'next-intl/server';
 
+import { LOCALE_COOKIE, negotiateLocale } from './locale';
+
 /**
- * i18n scaffold. v1 ships English strings only and no locale routing, so every
- * request resolves to `en`. The plumbing exists now so that adding a locale is
- * a matter of adding a message file and a negotiation step, not retrofitting
- * every string in the UI.
+ * Resolves the locale for every request without a locale segment in the URL:
+ * the `NEXT_LOCALE` cookie when the reader picked a language, else the
+ * browser's `Accept-Language`, else English.
  */
-export const defaultLocale = 'en';
-export const locales = [defaultLocale] as const;
-
-export type Locale = (typeof locales)[number];
-
 export default getRequestConfig(async () => {
-  const locale: Locale = defaultLocale;
+  const [cookieStore, headerList] = await Promise.all([cookies(), headers()]);
+  const locale = negotiateLocale({
+    cookie: cookieStore.get(LOCALE_COOKIE)?.value,
+    acceptLanguage: headerList.get('accept-language'),
+  });
+
   return {
     locale,
     messages: (await import(`../../messages/${locale}.json`)).default,

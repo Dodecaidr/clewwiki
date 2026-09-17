@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { RevokeButton } from './revoke-button';
@@ -25,6 +25,7 @@ export default async function TokensPage() {
   }
 
   const t = await getTranslations('tokens');
+  const format = await getFormatter();
   const isAdmin = session.role === 'admin';
   const tokens = await listAgentTokens(session.workspace.id);
 
@@ -93,13 +94,13 @@ export default async function TokensPage() {
                           {token.scopes.join(', ') || '—'}
                         </td>
                         <td className="py-3 pr-4 text-muted-foreground">
-                          {formatDateTime(token.createdAt)}
+                          {formatDateTime(format, token.createdAt)}
                         </td>
                         <td className="py-3 pr-4 text-muted-foreground">
-                          {formatDateTime(token.expiresAt) ?? t('never')}
+                          {formatDateTime(format, token.expiresAt) ?? t('never')}
                         </td>
                         <td className="py-3 pr-4 text-muted-foreground">
-                          {formatDateTime(token.lastUsedAt) ?? t('never')}
+                          {formatDateTime(format, token.lastUsedAt) ?? t('never')}
                         </td>
                         <td className="py-3 pr-4">{statusLabel[state]}</td>
                         <td className="py-3">

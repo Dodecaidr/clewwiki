@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 
 import { PageTree } from '@/components/page-tree';
@@ -55,6 +55,7 @@ export default async function PagesLayout({ children }: { children: ReactNode })
 
   const t = await getTranslations('pages');
   const ta = await getTranslations('anchors');
+  const format = await getFormatter();
   const [tree, claims, staleAnchors] = await Promise.all([
     getPageTree(session.workspace.id),
     // One query each for the whole sidebar rather than one per node: the tree
@@ -68,7 +69,7 @@ export default async function PagesLayout({ children }: { children: ReactNode })
     claim: (claim: ClaimRecord) =>
       t('claimHeldBy', {
         name: claim.holderLabel,
-        since: formatDateTime(claim.createdAt) ?? '—',
+        since: formatDateTime(format, claim.createdAt) ?? '—',
       }),
     staleAnchors: (count: number) => ta('treeBadge', { count }),
   };

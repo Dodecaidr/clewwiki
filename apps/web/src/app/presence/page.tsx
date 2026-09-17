@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { PresenceAutoRefresh } from './auto-refresh';
@@ -34,6 +34,7 @@ export default async function PresencePage() {
   }
 
   const t = await getTranslations('presence');
+  const format = await getFormatter();
   const presence = await getPresence(session.workspace.id);
   const now = new Date();
 
@@ -91,10 +92,10 @@ export default async function PresencePage() {
                       </div>
                     </td>
                     <td className="py-3 pr-4 text-muted-foreground">
-                      {formatDateTime(entry.claim.createdAt)}
+                      {formatDateTime(format, entry.claim.createdAt)}
                     </td>
                     <td className="py-3 pr-4 text-muted-foreground">
-                      {formatDateTime(entry.claim.expiresAt)}
+                      {formatDateTime(format, entry.claim.expiresAt)}
                       <div className="text-xs">
                         {t('expiresIn', {
                           seconds: remainingSeconds(entry.claim.expiresAt, now),
@@ -113,7 +114,7 @@ export default async function PresencePage() {
                                   instruction to whoever reads this board. */}
                               <span className="whitespace-pre-wrap">{note.text}</span>
                               <span className="text-xs text-muted-foreground">
-                                {note.authorLabel} · {formatDateTime(note.createdAt)}
+                                {note.authorLabel} · {formatDateTime(format, note.createdAt)}
                               </span>
                             </li>
                           ))}

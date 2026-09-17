@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { buttonVariants } from '@/components/ui/button';
@@ -23,6 +23,7 @@ export default async function PagesIndex() {
   }
 
   const t = await getTranslations('pages');
+  const format = await getFormatter();
   const recent = await listPages(session.workspace.id, { limit: 20 });
   const sorted = [...recent].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
@@ -37,9 +38,14 @@ export default async function PagesIndex() {
         <Card>
           <CardBody className="grid justify-items-start gap-4 text-sm">
             <p className="text-muted-foreground">{t('emptyIntro')}</p>
-            <Link href="/pages/new" className={buttonVariants({ size: 'sm' })}>
-              {t('new')}
-            </Link>
+            <div className="flex flex-wrap items-center gap-4">
+              <Link href="/pages/new" className={buttonVariants({ size: 'sm' })}>
+                {t('new')}
+              </Link>
+              <Link href="/guide" className="text-sm underline underline-offset-2 hover:text-foreground">
+                {t('whatIsThis')}
+              </Link>
+            </div>
           </CardBody>
         </Card>
       ) : (
@@ -59,8 +65,8 @@ export default async function PagesIndex() {
                   </Link>
                   <span className="font-mono text-xs text-muted-foreground">{page.path}</span>
                   <span className="text-xs text-muted-foreground">
-                    {t('kindLabel')}: {page.kind} · {t('updatedLabel')}:{' '}
-                    {formatDateTime(page.updatedAt)}
+                    {t('kindLabel')}: {t(`kind_${page.kind}`)} · {t('updatedLabel')}:{' '}
+                    {formatDateTime(format, page.updatedAt)}
                   </span>
                 </li>
               ))}

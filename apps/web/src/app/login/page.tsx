@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 
 import { LoginForm } from './login-form';
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { LanguageSwitcher } from '@/components/language-switcher';
 import { getSessionContext } from '@/lib/session';
 import { hasAnyUser } from '@/lib/workspace';
 
@@ -29,7 +30,10 @@ export default async function LoginPage() {
   return (
     <Card className="mx-auto max-w-md">
       <CardHeader>
-        <CardTitle>{t('title')}</CardTitle>
+        <div className="flex items-start justify-between gap-3">
+          <CardTitle>{t('title')}</CardTitle>
+          <LanguageSwitcher />
+        </div>
         <CardDescription>{t('intro')}</CardDescription>
       </CardHeader>
       <CardBody>

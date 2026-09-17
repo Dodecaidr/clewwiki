@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useActionState } from 'react';
 import { useTranslations } from 'next-intl';
 
@@ -28,6 +29,19 @@ export function TokenForm() {
             {state.issuedToken}
           </code>
           <p className="text-xs text-muted-foreground">{t('secretWarning')}</p>
+          <div className="grid gap-1 border-t border-success/30 pt-2">
+            <p className="font-medium">{t('nextStepsTitle')}</p>
+            <p className="text-xs">
+              {t.rich('nextSteps', {
+                code: (chunks) => <code className="font-mono">{chunks}</code>,
+                link: (chunks) => (
+                  <Link href="/connect" className="underline underline-offset-2">
+                    {chunks}
+                  </Link>
+                ),
+              })}
+            </p>
+          </div>
         </Alert>
       ) : null}
 

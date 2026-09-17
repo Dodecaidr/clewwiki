@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useActionState, useEffect, useState, useTransition } from 'react';
-import { useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 
 import { createPageAction, renderPreviewAction, updatePageAction } from './actions';
 import type { PageFormState } from './actions';
@@ -48,6 +48,7 @@ const initialState: PageFormState = {};
 export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) {
   const t = useTranslations('editor');
   const tc = useTranslations('common');
+  const format = useFormatter();
 
   const action = mode === 'create' ? createPageAction : updatePageAction;
   const [state, formAction, pending] = useActionState(action, initialState);
@@ -93,7 +94,7 @@ export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) 
         <Alert tone="error">
           {t('claimHeldByOther', {
             name: lease.heldBy ?? t('claimSomeoneElse'),
-            since: formatDateTime(lease.heldSince) ?? '—',
+            since: formatDateTime(format, lease.heldSince) ?? '—',
           })}{' '}
           <Link href={cancelHref} className="underline underline-offset-2">
             {t('claimReadOnly')}

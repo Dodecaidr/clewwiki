@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { Card, CardBody } from '@/components/ui/card';
@@ -28,6 +28,8 @@ export default async function SearchPage({
   }
 
   const t = await getTranslations('search');
+  const tp = await getTranslations('pages');
+  const format = await getFormatter();
   const query = (await searchParams).q?.trim() ?? '';
   const results = query === '' ? [] : await searchPages(session.workspace.id, { query, limit: 25 });
 
@@ -79,7 +81,7 @@ export default async function SearchPage({
                     of stored page content, not a piece of the interface. */}
                 <p className="text-sm text-muted-foreground">{hit.snippet}</p>
                 <span className="text-xs text-muted-foreground">
-                  {hit.kind} · {formatDateTime(hit.updatedAt)}
+                  {tp(`kind_${hit.kind}`)} · {formatDateTime(format, hit.updatedAt)}
                 </span>
               </li>
             ))}

@@ -12,7 +12,7 @@ export async function SearchBox() {
   const t = await getTranslations('search');
 
   return (
-    <form action="/search" method="get" role="search" className="w-full max-w-56">
+    <form action="/search" method="get" role="search" className="min-w-40 flex-1 sm:w-56 sm:flex-none">
       <label htmlFor="site-search" className="sr-only">
         {t('label')}
       </label>

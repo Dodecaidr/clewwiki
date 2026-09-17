@@ -1,5 +1,5 @@
 import { notFound, redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import Link from 'next/link';
@@ -42,6 +42,7 @@ export default async function EditPage({ params }: Props) {
   assertSameWorkspace(session.workspace.id, page.workspaceId);
 
   const t = await getTranslations('editor');
+  const format = await getFormatter();
   const [candidates, activeClaims] = await Promise.all([
     listPages(session.workspace.id, { limit: 500 }),
     getActiveClaimsForPage(session.workspace.id, page.id),
@@ -62,7 +63,7 @@ export default async function EditPage({ params }: Props) {
         <Alert tone="error">
           {t('claimHeldByOther', {
             name: heldByOther.holderLabel,
-            since: formatDateTime(heldByOther.createdAt) ?? '—',
+            since: formatDateTime(format, heldByOther.createdAt) ?? '—',
           })}
         </Alert>
         <Card>
