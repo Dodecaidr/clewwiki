@@ -8,6 +8,7 @@ import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@
 import { listAgentTokens } from '@/lib/agent-tokens';
 import { classifyTokenLifecycle } from '@/lib/agent-token-crypto';
 import { getSessionContext } from '@/lib/session';
+import { listSpaces } from '@/lib/spaces/service';
 import { assertSameWorkspace } from '@/lib/workspace';
 import { formatDateTime } from '@/lib/utils';
 
@@ -27,7 +28,11 @@ export default async function TokensPage() {
   const t = await getTranslations('tokens');
   const format = await getFormatter();
   const isAdmin = session.role === 'admin';
-  const tokens = await listAgentTokens(session.workspace.id);
+  const [tokens, spaces] = await Promise.all([
+    listAgentTokens(session.workspace.id),
+    listSpaces(session.workspace.id, { includeArchived: true }),
+  ]);
+  const spaceKeyById = new Map(spaces.map((space) => [space.id, space.key]));
 
   // The query already filters by workspace; this re-asserts it on the rows we
   // are about to render, so a future change to the query cannot quietly widen
@@ -55,7 +60,9 @@ export default async function TokensPage() {
             <CardTitle>{t('createHeading')}</CardTitle>
           </CardHeader>
           <CardBody>
-            <TokenForm />
+            <TokenForm
+              spaces={spaces.map((space) => ({ id: space.id, key: space.key, name: space.name }))}
+            />
           </CardBody>
         </Card>
       ) : (
@@ -77,6 +84,7 @@ export default async function TokensPage() {
                   <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
                     <th className="py-2 pr-4 font-medium">{t('columnName')}</th>
                     <th className="py-2 pr-4 font-medium">{t('columnScopes')}</th>
+                    <th className="py-2 pr-4 font-medium">{t('columnSpaces')}</th>
                     <th className="py-2 pr-4 font-medium">{t('columnCreated')}</th>
                     <th className="py-2 pr-4 font-medium">{t('columnExpires')}</th>
                     <th className="py-2 pr-4 font-medium">{t('columnLastUsed')}</th>
@@ -92,6 +100,13 @@ export default async function TokensPage() {
                         <td className="py-3 pr-4 font-medium">{token.name}</td>
                         <td className="py-3 pr-4 font-mono text-xs text-muted-foreground">
                           {token.scopes.join(', ') || '—'}
+                        </td>
+                        <td className="py-3 pr-4 font-mono text-xs text-muted-foreground">
+                          {token.spaceIds === null
+                            ? t('allSpaces')
+                            : token.spaceIds
+                                .map((id) => spaceKeyById.get(id) ?? '?')
+                                .join(', ') || '—'}
                         </td>
                         <td className="py-3 pr-4 text-muted-foreground">
                           {formatDateTime(format, token.createdAt)}

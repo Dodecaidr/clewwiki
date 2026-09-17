@@ -8,9 +8,11 @@ import type { AddressInfo } from 'node:net';
  *
  * It exists so the MCP server can be exercised end to end — spawned as a
  * process, driven by a real MCP client — without a PostgreSQL instance behind
- * it. It enforces the two things the wrapper is supposed to respect and
- * nothing else: a bearer token must be present, and a write must carry both a
- * live claim and a matching base hash.
+ * it. It enforces the things the wrapper is supposed to respect and nothing
+ * else: a bearer token must be present, a write must carry both a live claim
+ * and a matching base hash, and a path is looked up inside a space.
+ *
+ * It holds two spaces, `MAIN` and `OPS`, and one page in `MAIN`.
  */
 
 export interface FakeRestOptions {
@@ -28,8 +30,18 @@ export interface RecordedCall {
   body: unknown;
 }
 
+interface FakeSpace {
+  key: string;
+  name: string;
+  description: string;
+  icon: string | null;
+  page_count: number;
+  archived: boolean;
+}
+
 interface FakePage {
   page_id: string;
+  space: { key: string; name: string };
   parent_id: null;
   path: string;
   title: string;
@@ -74,6 +86,7 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
 
   const page: FakePage = {
     page_id: randomUUID(),
+    space: { key: 'MAIN', name: 'Main' },
     parent_id: null,
     path: '/backend/auth',
     title: 'Authentication',
@@ -89,6 +102,13 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
     anchors: [],
   };
   const claims = new Map<string, FakeClaim>();
+  const spaces: FakeSpace[] = [
+    { key: 'MAIN', name: 'Main', description: 'The main project.', icon: null, page_count: 1, archived: false },
+    { key: 'OPS', name: 'Operations', description: 'Runbooks.', icon: '🛠', page_count: 0, archived: false },
+    { key: 'OLD', name: 'Old project', description: '', icon: null, page_count: 0, archived: true },
+  ];
+  const knownSpace = (key: string | null): boolean =>
+    key === null || spaces.some((space) => space.key === key.toUpperCase());
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -133,14 +153,27 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
       const method = req.method ?? 'GET';
       const path = url.pathname;
 
+      if (method === 'GET' && path === '/api/v1/spaces') {
+        if (!needs('pages:read')) return;
+        const includeArchived = url.searchParams.get('include_archived') === 'true';
+        return send(200, { spaces: spaces.filter((space) => includeArchived || !space.archived) });
+      }
+
       if (method === 'GET' && path === '/api/v1/pages') {
         if (!needs('pages:read')) return;
         const wanted = url.searchParams.get('path');
+        const space = url.searchParams.get('space');
+        if (wanted !== null && space === null) {
+          return fail(400, 'validation', 'A path lookup needs a space: paths are unique per space');
+        }
+        if (!knownSpace(space)) return fail(404, 'not_found', 'Space not found');
+        const inSpace = space === null || space.toUpperCase() === page.space.key;
         const nodes =
-          wanted === null || wanted === page.path
+          inSpace && (wanted === null || wanted === page.path)
             ? [
                 {
                   page_id: page.page_id,
+                  space: page.space,
                   parent_id: null,
                   path: page.path,
                   title: page.title,
@@ -157,11 +190,17 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
 
       if (method === 'GET' && path === '/api/v1/search') {
         if (!needs('pages:read')) return;
+        const space = url.searchParams.get('space');
+        if (!knownSpace(space)) return fail(404, 'not_found', 'Space not found');
+        const inSpace = space === null || space.toUpperCase() === page.space.key;
         return send(200, {
           query: url.searchParams.get('q'),
-          results: [
+          results: !inSpace
+            ? []
+            : [
             {
               page_id: page.page_id,
+              space: page.space,
               path: page.path,
               title: page.title,
               kind: page.kind,
@@ -252,7 +291,14 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
 
       if (method === 'GET' && path === '/api/v1/claims') {
         if (!needs('pages:read')) return;
-        return send(200, { claims: [...claims.values()].filter((claim) => !claim.released) });
+        const space = url.searchParams.get('space');
+        if (!knownSpace(space)) return fail(404, 'not_found', 'Space not found');
+        const inSpace = space === null || space.toUpperCase() === page.space.key;
+        return send(200, {
+          claims: inSpace
+            ? [...claims.values()].filter((claim) => !claim.released).map((claim) => ({ ...claim, space: page.space }))
+            : [],
+        });
       }
 
       if (method === 'POST' && path === `/api/v1/pages/${page.page_id}/notes`) {

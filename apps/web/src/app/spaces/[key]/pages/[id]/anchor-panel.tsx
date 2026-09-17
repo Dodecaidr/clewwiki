@@ -7,8 +7,8 @@ import {
   confirmAnchorAction,
   createAnchorAction,
   deleteAnchorAction,
-} from '../anchor-actions';
-import type { AnchorActionState } from '../anchor-actions';
+} from '@/app/pages/anchor-actions';
+import type { AnchorActionState } from '@/app/pages/anchor-actions';
 import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';

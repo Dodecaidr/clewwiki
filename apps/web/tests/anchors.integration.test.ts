@@ -216,17 +216,22 @@ describe.skipIf(!probe.reachable)('anchors REST API', () => {
 
     const [workspace] = await db
       .insert(schema.workspaces)
-      .values({ name: `Anchors ${suiteTag}`, slug: `${suiteTag}-a`, settings: { repository } })
+      .values({ name: `Anchors ${suiteTag}`, slug: `${suiteTag}-a` })
       .returning({ id: schema.workspaces.id });
     const [other] = await db
       .insert(schema.workspaces)
-      .values({ name: `Other ${suiteTag}`, slug: `${suiteTag}-b`, settings: { repository } })
+      .values({ name: `Other ${suiteTag}`, slug: `${suiteTag}-b` })
       .returning({ id: schema.workspaces.id });
 
     if (!workspace || !other) throw new Error('workspace seeding failed');
     workspaceId = workspace.id;
     otherWorkspaceId = other.id;
     workspaceIds.push(workspaceId, otherWorkspaceId);
+    // The repository is a setting of the space the page lives in.
+    await db.insert(schema.spaces).values([
+      { workspaceId, key: 'MAIN', name: 'Main', settings: { repository } },
+      { workspaceId: otherWorkspaceId, key: 'MAIN', name: 'Main', settings: { repository } },
+    ]);
 
     readWrite = await seedToken({
       workspaceId,
@@ -244,7 +249,12 @@ describe.skipIf(!probe.reachable)('anchors REST API', () => {
     const created = await pagesRoute.POST(
       request(readWrite, '/api/v1/pages', {
         method: 'POST',
-        body: JSON.stringify({ title: 'Mixer', path: `/${suiteTag}-mixer`, kind: 'technical' }),
+        body: JSON.stringify({
+          space: 'MAIN',
+          title: 'Mixer',
+          path: `/${suiteTag}-mixer`,
+          kind: 'technical',
+        }),
       }),
     );
     const page = await created.json();
@@ -415,17 +425,11 @@ describe.skipIf(!probe.reachable)('anchors REST API', () => {
     // With no read budget at all, the check must say it could not look rather
     // than report the anchors as lost, and must leave their stored state alone.
     const { checkPageAnchors, listAnchorsForPage } = await import('@/lib/anchors/service');
-    const { eq } = await import('drizzle-orm');
-    const [workspaceRow] = await db
-      .select()
-      .from(schema.workspaces)
-      .where(eq(schema.workspaces.id, workspaceId));
     const storedBefore = await listAnchorsForPage(workspaceId, pageId);
     const starved = await checkPageAnchors({
       workspaceId,
       pageId,
       actor: { type: 'agent', id: 'budget-test' },
-      workspaceSettings: workspaceRow!.settings,
       budget: { maxFiles: 0 },
     });
     expect(starved.complete).toBe(false);
@@ -647,4 +651,80 @@ describe.skipIf(!probe.reachable)('anchors REST API', () => {
     expect(rows.length).toBeGreaterThan(1);
     expect(rows[0]?.metadata?.ref).toBe('main');
   });
+  it('checks every anchor against the repository of its own space', async () => {
+    // A second project, in a second space of the same workspace, with its own
+    // repository — and a third space that has none linked yet.
+    const otherRepo = path.join(scratch, 'router');
+    mkdirSync(path.join(otherRepo, 'Sources'), { recursive: true });
+    git(['init', '-q', '-b', 'main', '.'], otherRepo);
+    writeFileSync(
+      path.join(otherRepo, 'Sources/Router.swift'),
+      'struct Router {\n    func route(path: String) -> String {\n        let trimmed = path\n        return trimmed\n    }\n}\n',
+      'utf8',
+    );
+    git(['add', '-A'], otherRepo);
+    git(
+      ['-c', 'user.email=tests@clewwiki.invalid', '-c', 'user.name=clewwiki tests', 'commit', '-q', '-m', 'router'],
+      otherRepo,
+    );
+    await db.insert(schema.spaces).values([
+      {
+        workspaceId,
+        key: 'ROUTER',
+        name: 'Router',
+        settings: { repository: { url: `file://${otherRepo}`, default_ref: 'main' } },
+      },
+      { workspaceId, key: 'NOREPO', name: 'No repository' },
+    ]);
+
+    const createIn = async (space: string) => {
+      const response = await pagesRoute.POST(
+        request(readWrite, '/api/v1/pages', {
+          method: 'POST',
+          body: JSON.stringify({ space, title: 'Routing', path: `/${suiteTag}-routing` }),
+        }),
+      );
+      expect(response.status).toBe(201);
+      return ((await response.json()) as JsonRecord).page_id as string;
+    };
+    const routerPage = await createIn('ROUTER');
+    const noRepoPage = await createIn('NOREPO');
+
+    const inRouter = await anchorsRoute.POST(
+      request(readWrite, `/api/v1/pages/${routerPage}/anchors`, {
+        method: 'POST',
+        body: JSON.stringify({ file: 'Sources/Router.swift', qualified_name: 'Router' }),
+      }),
+      params(routerPage),
+    );
+    expect(inRouter.status).toBe(201);
+
+    // The same file does not exist in the MAIN space's repository.
+    const inMain = await anchorsRoute.POST(
+      request(readWrite, `/api/v1/pages/${pageId}/anchors`, {
+        method: 'POST',
+        body: JSON.stringify({ file: 'Sources/Router.swift', qualified_name: 'Router' }),
+      }),
+      params(pageId),
+    );
+    expect(inMain.status).toBe(400);
+    expect(((await inMain.json()) as JsonRecord).error.message).toContain('File not found');
+
+    const noRepo = await anchorsRoute.POST(
+      request(readWrite, `/api/v1/pages/${noRepoPage}/anchors`, {
+        method: 'POST',
+        body: JSON.stringify({ file: 'Sources/Router.swift', qualified_name: 'Router' }),
+      }),
+      params(noRepoPage),
+    );
+    expect(noRepo.status).toBe(400);
+    expect(((await noRepo.json()) as JsonRecord).error.message).toContain('This space has no source repository');
+
+    const checked = await check(readWrite, routerPage);
+    expect(checked.status).toBe(200);
+    expect(checked.json.anchors).toHaveLength(1);
+    expect(checked.json.anchors[0].state).toBe('fresh');
+    // The share describes this space's anchors only.
+    expect(checked.json.fallback_share.total).toBe(1);
+  }, 120_000);
 });

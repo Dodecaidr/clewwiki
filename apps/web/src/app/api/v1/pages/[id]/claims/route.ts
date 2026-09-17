@@ -8,12 +8,13 @@ import {
   serviceErrorResponse,
   validationError,
 } from '@/lib/api-response';
-import { requireWorkspace } from '@/lib/api-auth';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
 import { acquireClaim, getActiveClaimsForPage } from '@/lib/claims/service';
 import { toClaimResource } from '@/lib/claims/serialize';
 import { MAX_CLAIM_TTL_SECONDS, MIN_CLAIM_TTL_SECONDS } from '@/lib/claims/ttl';
 import { authorizePagesRequest, claimActorOf, READ_SCOPES, WRITE_SCOPES } from '@/lib/pages-api';
 import { getPageById } from '@/lib/pages/service';
+import { getSpaceById } from '@/lib/spaces/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +63,8 @@ export async function POST(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
     const result = await acquireClaim({
       workspaceId: auth.workspaceId,
@@ -72,7 +75,12 @@ export async function POST(request: Request, context: RouteContext) {
       settings: auth.identity.workspace.settings,
     });
 
-    const body = toClaimResource(result.claim, { path: page.path, title: page.title });
+    const space = await getSpaceById(auth.workspaceId, page.spaceId);
+    const body = toClaimResource(result.claim, {
+      space: space ?? undefined,
+      path: page.path,
+      title: page.title,
+    });
     return result.created ? apiCreated(body, auth.headers) : apiJson(body, auth.headers);
   } catch (error) {
     return serviceErrorResponse(error);
@@ -93,12 +101,17 @@ export async function GET(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
-    const active = await getActiveClaimsForPage(auth.workspaceId, page.id);
+    const [active, space] = await Promise.all([
+      getActiveClaimsForPage(auth.workspaceId, page.id),
+      getSpaceById(auth.workspaceId, page.spaceId),
+    ]);
     return apiJson(
       {
         claims: active.map((claim) =>
-          toClaimResource(claim, { path: page.path, title: page.title }),
+          toClaimResource(claim, { space: space ?? undefined, path: page.path, title: page.title }),
         ),
       },
       auth.headers,

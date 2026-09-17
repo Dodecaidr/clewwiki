@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { apiError, apiJson, readJsonBody, serviceErrorResponse, validationError } from '@/lib/api-response';
-import { requireWorkspace } from '@/lib/api-auth';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
 import { checkPageAnchors, getFallbackShare, listAnchorsForPage } from '@/lib/anchors/service';
 import { toAnchorResource, toFallbackShareResource } from '@/lib/anchors/serialize';
 import { authorizePagesRequest, READ_SCOPES, WRITE_SCOPES } from '@/lib/pages-api';
@@ -35,10 +35,12 @@ export async function GET(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
     const [stored, fallbackShare] = await Promise.all([
       listAnchorsForPage(auth.workspaceId, page.id),
-      getFallbackShare(auth.workspaceId),
+      getFallbackShare(auth.workspaceId, page.spaceId),
     ]);
     const latest = stored.reduce<(typeof stored)[number] | null>(
       (best, anchor) =>
@@ -79,7 +81,7 @@ export async function GET(request: Request, context: RouteContext) {
  * could not be placed in `unchecked_anchor_ids`, whose stored state is left as
  * it was.
  *
- * `fallback_share` rides along on purpose. It is the workspace-wide share of
+ * `fallback_share` rides along on purpose. It is the space-wide share of
  * anchors sitting on the line-range path, and it is the number that says when
  * these states are about to stop being worth believing.
  */
@@ -110,12 +112,13 @@ export async function POST(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
     const result = await checkPageAnchors({
       workspaceId: auth.workspaceId,
       pageId: page.id,
       actor: auth.actor,
-      workspaceSettings: auth.identity.workspace.settings,
       ref: parsedBody.data.ref,
     });
 

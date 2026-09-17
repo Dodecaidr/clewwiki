@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { apiError, apiJson, readJsonBody, serviceErrorResponse, validationError } from '@/lib/api-response';
-import { requireWorkspace } from '@/lib/api-auth';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
 import { listAnchorsForPage } from '@/lib/anchors/service';
 import {
   authorizePagesRequest,
@@ -14,6 +14,7 @@ import { getActiveClaimsForPage } from '@/lib/claims/service';
 import { CONTENT_HASH_PATTERN } from '@/lib/pages/content';
 import { deletePage, getPageById, updatePage } from '@/lib/pages/service';
 import { toPageResource } from '@/lib/pages/serialize';
+import { getSpaceById } from '@/lib/spaces/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,8 +60,13 @@ export async function GET(request: Request, context: RouteContext) {
     // the query cannot widen what this endpoint answers with.
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    // The same check for the page's space: a token limited to other spaces
+    // gets the answer a page in another workspace would get.
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
-    const [linked, activeClaims, pageAnchors] = await Promise.all([
+    const [space, linked, activeClaims, pageAnchors] = await Promise.all([
+      getSpaceById(auth.workspaceId, page.spaceId),
       page.linkedPageId ? getPageById(auth.workspaceId, page.linkedPageId) : Promise.resolve(null),
       getActiveClaimsForPage(auth.workspaceId, page.id),
       // The state stored by the last check, not a fresh one: recomputing costs
@@ -74,8 +80,10 @@ export async function GET(request: Request, context: RouteContext) {
     const claim =
       activeClaims.find((candidate) => candidate.sectionId === null) ?? activeClaims[0] ?? null;
 
+    if (!space) return apiError(404, 'not_found', 'Page not found');
+
     return apiJson(
-      toPageResource(page, { linkedPage: linked, claim, anchors: pageAnchors }),
+      toPageResource(page, space, { linkedPage: linked, claim, anchors: pageAnchors }),
       auth.headers,
     );
   } catch (error) {
@@ -114,6 +122,8 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, existing.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, existing.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
     const page = await updatePage({
       workspaceId: auth.workspaceId,
@@ -129,11 +139,13 @@ export async function PATCH(request: Request, context: RouteContext) {
       baseContentHash: parsed.data.base_content_hash,
     });
 
-    const linked = page.linkedPageId
-      ? await getPageById(auth.workspaceId, page.linkedPageId)
-      : null;
+    const [space, linked] = await Promise.all([
+      getSpaceById(auth.workspaceId, page.spaceId),
+      page.linkedPageId ? getPageById(auth.workspaceId, page.linkedPageId) : Promise.resolve(null),
+    ]);
+    if (!space) return apiError(404, 'not_found', 'Page not found');
 
-    return apiJson(toPageResource(page, { linkedPage: linked }), auth.headers);
+    return apiJson(toPageResource(page, space, { linkedPage: linked }), auth.headers);
   } catch (error) {
     return serviceErrorResponse(error);
   }
@@ -161,6 +173,8 @@ export async function DELETE(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, existing.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, existing.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
     const result = await deletePage({
       workspaceId: auth.workspaceId,

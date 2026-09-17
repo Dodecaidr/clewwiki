@@ -37,6 +37,7 @@ describe.skipIf(!probe.reachable)('GET /api/v1/me with an agent token', () => {
     scopes: string[];
     expiresAt?: Date | null;
     revokedAt?: Date | null;
+    spaceIds?: string[] | null;
   }): Promise<SeededToken> {
     const { generateAgentToken } = await import('@/lib/agent-token-crypto');
     const generated = generateAgentToken();
@@ -50,6 +51,7 @@ describe.skipIf(!probe.reachable)('GET /api/v1/me with an agent token', () => {
         scopes: options.scopes,
         expiresAt: options.expiresAt ?? null,
         revokedAt: options.revokedAt ?? null,
+        spaceIds: options.spaceIds ?? null,
       })
       .returning({ id: schema.agentTokens.id });
     return { id: row!.id, token: generated.token };
@@ -66,6 +68,7 @@ describe.skipIf(!probe.reachable)('GET /api/v1/me with an agent token', () => {
   let revokedToken: SeededToken;
   let noScopeToken: SeededToken;
   let otherWorkspaceToken: SeededToken;
+  let restrictedToken: SeededToken;
 
   beforeAll(async () => {
     schema = await import('@clewwiki/db');
@@ -84,6 +87,14 @@ describe.skipIf(!probe.reachable)('GET /api/v1/me with an agent token', () => {
     primaryWorkspaceId = primary!.id;
     otherWorkspaceId = other!.id;
     workspaceIds.push(primaryWorkspaceId, otherWorkspaceId);
+    const [alpha] = await db
+      .insert(schema.spaces)
+      .values([
+        { workspaceId: primaryWorkspaceId, key: 'ALPHA', name: 'Alpha' },
+        { workspaceId: primaryWorkspaceId, key: 'BETA', name: 'Beta', archivedAt: new Date() },
+        { workspaceId: otherWorkspaceId, key: 'GAMMA', name: 'Gamma' },
+      ])
+      .returning({ id: schema.spaces.id });
 
     validToken = await seedToken({
       workspaceId: primaryWorkspaceId,
@@ -107,6 +118,12 @@ describe.skipIf(!probe.reachable)('GET /api/v1/me with an agent token', () => {
       workspaceId: primaryWorkspaceId,
       name: 'no-scope',
       scopes: ['pages:read'],
+    });
+    restrictedToken = await seedToken({
+      workspaceId: primaryWorkspaceId,
+      name: 'restricted',
+      scopes: ['identity:read'],
+      spaceIds: [alpha!.id],
     });
     otherWorkspaceToken = await seedToken({
       workspaceId: otherWorkspaceId,
@@ -134,6 +151,22 @@ describe.skipIf(!probe.reachable)('GET /api/v1/me with an agent token', () => {
     expect(body.role).toBe('agent');
     expect(body.scopes).toEqual(['identity:read', 'pages:read']);
     expect(body.workspace.id).toBe(primaryWorkspaceId);
+    // No restriction: every space of the workspace, archived ones marked.
+    expect(body.space_access.all).toBe(true);
+    expect(body.space_access.spaces).toEqual([
+      { key: 'ALPHA', name: 'Alpha', archived: false },
+      { key: 'BETA', name: 'Beta', archived: true },
+    ]);
+  });
+
+  it('reports the spaces a restricted token can reach, and only those', async () => {
+    const response = await callMe({ Authorization: `Bearer ${restrictedToken.token}` });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.space_access).toEqual({
+      all: false,
+      spaces: [{ key: 'ALPHA', name: 'Alpha', archived: false }],
+    });
   });
 
   it('never returns the token secret or its hash', async () => {

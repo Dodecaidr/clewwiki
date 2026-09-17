@@ -1,11 +1,13 @@
 import { z } from 'zod';
 
 import { apiError, apiJson, serviceErrorResponse } from '@/lib/api-response';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
 import { getStaleAnchorCounts } from '@/lib/anchors/service';
 import { getActiveClaimsByPage } from '@/lib/claims/service';
 import { authorizePagesRequest, READ_SCOPES } from '@/lib/pages-api';
-import { getPageTree } from '@/lib/pages/service';
+import { getPageById, getPageTree } from '@/lib/pages/service';
 import { toTreeResource } from '@/lib/pages/serialize';
+import { getSpaceById } from '@/lib/spaces/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,14 +27,23 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!parsed.success) return apiError(404, 'not_found', 'Page not found');
 
   try {
-    const nodes = await getPageTree(auth.workspaceId, parsed.data.id);
-    const [claims, staleAnchors] = await Promise.all([
+    const page = await getPageById(auth.workspaceId, parsed.data.id);
+    if (!page) return apiError(404, 'not_found', 'Page not found');
+    const mismatch = requireWorkspace(auth.identity, page.workspaceId);
+    if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
+
+    const [space, nodes, claims, staleAnchors] = await Promise.all([
+      getSpaceById(auth.workspaceId, page.spaceId),
+      getPageTree(auth.workspaceId, page.spaceId, page.id),
       getActiveClaimsByPage(auth.workspaceId),
       getStaleAnchorCounts(auth.workspaceId),
     ]);
+    if (!space) return apiError(404, 'not_found', 'Page not found');
     const claimed = new Set(claims.keys());
     return apiJson(
-      { nodes: nodes.map((node) => toTreeResource(node, claimed, staleAnchors)) },
+      { nodes: nodes.map((node) => toTreeResource(node, space, claimed, staleAnchors)) },
       auth.headers,
     );
   } catch (error) {

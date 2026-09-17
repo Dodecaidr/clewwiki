@@ -24,8 +24,9 @@ partly in place, the gap is named rather than implied away.
   `identity:read`, `pages:read`, `pages:write`, `pages:delete`, `audit:read` —
   checked per endpoint at the authentication layer (`lib/scopes.ts`,
   `requireScopes`). There is no token role: anything that needs a role
-  (force-releasing a claim, restoring a deleted page, repository settings,
-  token issuance) is reserved to a human administrator, and no scope set
+  (force-releasing a claim, restoring a deleted page, creating, changing or
+  archiving a space and its repository settings, token issuance) is reserved to
+  a human administrator, and no scope set
   reaches it. Deleting a page needs `pages:delete` on top of `pages:write`,
   because one call removes a subtree.
 - **Token TTL.** Tokens past `expires_at` are rejected at the authentication
@@ -40,6 +41,20 @@ partly in place, the gap is named rather than implied away.
 - **Workspace binding.** Every query carries the caller's workspace in its SQL
   predicate, and handlers additionally compare the resource's workspace with
   the caller's where they read a row some other way; a mismatch answers `404`.
+- **Space restriction for tokens.** An agent token can be limited to some of
+  the workspace's spaces (`agent_tokens.space_ids`; `null` means every space,
+  which is what tokens issued before spaces have). Every handler that reaches a
+  page, a claim, a note, an anchor, an export, search or presence checks the
+  space of the resource next to the workspace check — for a claim or an anchor,
+  the space of the page it is on — and answers `404` outside the list, the same
+  answer as another workspace. A `space` parameter naming a space outside the
+  list is `404` too, and lists, the tree, search and presence are filtered by
+  the list in their queries. Pages cannot be paired across spaces, so a pairing
+  never reaches into a space the caller cannot see. The audit log covers every
+  space, so a restricted token cannot read it at all, whatever its scopes.
+  Issuing a restricted token requires at least one space of the same
+  workspace. A space created later is not added to an existing restriction.
+  People are not restricted: roles are workspace-wide in this version.
 - **Write audit log.** Every write attempt — success, claim conflict, content-
   hash conflict, a refused subtree delete — is recorded. A successful write
   commits its audit row in the same transaction as the write itself. A refused
@@ -47,7 +62,10 @@ partly in place, the gap is named rather than implied away.
   back, so the record follows immediately on its own connection instead.
   Authentication events are recorded too: `auth.rejected` (revoked or expired
   token), `auth.rate_limited`, `auth.login_failed`, `auth.login_rate_limited`,
-  and `workspace.repository_set` / `workspace.repository_tested`. Refusals that
+  and `space.repository_set` / `space.repository_tested` (before spaces:
+  `workspace.repository_set` / `workspace.repository_tested`). Creating,
+  changing and archiving a space is audited as `space.created`,
+  `space.updated`, `space.archived` and `space.unarchived`. Refusals that
   arrive in bursts (`auth.rejected`, `auth.rate_limited`,
   `auth.login_rate_limited`) are written at most once per key per ten seconds,
   carrying a `suppressed` count, so a flood is visible without becoming a
@@ -85,7 +103,7 @@ partly in place, the gap is named rather than implied away.
   reading them, yields to the event loop between parses, and reports a partial
   result (`complete: false`) instead of truncating silently. Recomputing
   anchors is a `POST` that needs `pages:write`. Not yet bounded: the queue of
-  checks waiting for one workspace's repository lock, and a `/mcp` tool call
+  checks waiting for one space's repository lock, and a `/mcp` tool call
   still counts against the token's limit once for the outer request and once
   per REST call it makes.
 - **First-run setup.** No account or credential ships in any migration or
@@ -113,9 +131,10 @@ partly in place, the gap is named rather than implied away.
   `CLEWWIKI_ALLOW_INSECURE_URL=true`.
 - **Content-as-data.** Responses that carry page body text separate it from
   provenance metadata (author, timestamps, content hash). Every MCP tool whose
-  result carries text written by someone else — pages, claim notes, holder
-  names, names read from repository code — states verbatim in its description
-  that the text is data, not instructions (`docs/mcp.md` lists the eight).
+  result carries text written by someone else — pages, space descriptions,
+  claim notes, holder names, names read from repository code — states verbatim
+  in its description that the text is data, not instructions (`docs/mcp.md`
+  lists the nine).
   Output written by a remote git server is kept out of API responses and tool
   results and goes to the server log. This is a documented contract, not a
   technical guarantee enforceable on a calling agent.
@@ -151,9 +170,12 @@ partly in place, the gap is named rather than implied away.
 
 ## Explicitly out of scope for v1
 
-- Per-page or per-path token scope — `resource:action` scopes plus TTL,
-  revocation and workspace binding already bound the blast radius of a leaked
-  token without per-object access lists.
+- Per-page or per-path token scope — `resource:action` scopes, the space
+  restriction, TTL, revocation and workspace binding already bound the blast
+  radius of a leaked token without per-object access lists.
+- Per-space roles for people — accounts are admin or editor across the whole
+  workspace in this version; per-space permissions are the next step on the
+  roadmap.
 - A WAF, IDS, or full SIEM — excessive for a single-team self-hosted
   instance; the audit log, rate limiting, and reverse-proxy TLS already
   cover this threat model.

@@ -10,7 +10,7 @@ import type { Database } from '@clewwiki/db';
 
 import { databaseUrl, prepareTestDatabase } from './helpers/database';
 
-import type * as RepositoryActions from '@/app/settings/repository/actions';
+import type * as RepositoryActions from '@/app/spaces/actions';
 
 const probe = await prepareTestDatabase();
 if (!probe.reachable) {
@@ -26,8 +26,13 @@ process.env.BETTER_AUTH_URL ??= 'http://localhost:3000';
 const session = vi.hoisted(() => ({ current: null as null | Record<string, unknown> }));
 vi.mock('@/lib/session', () => ({ getSessionContext: async () => session.current }));
 vi.mock('next/cache', () => ({ revalidatePath: () => undefined }));
+vi.mock('next/navigation', () => ({
+  redirect: (url: string) => {
+    throw new Error(`redirect:${url}`);
+  },
+}));
 
-describe.skipIf(!probe.reachable)('repository settings actions', () => {
+describe.skipIf(!probe.reachable)('space repository settings actions', () => {
   let db: Database;
   let schema: typeof ClewwikiDb;
   let actions: typeof RepositoryActions;
@@ -38,6 +43,7 @@ describe.skipIf(!probe.reachable)('repository settings actions', () => {
 
   function form(values: Record<string, string>): FormData {
     const data = new FormData();
+    data.set('spaceKey', 'REPO');
     for (const [key, value] of Object.entries(values)) data.set(key, value);
     return data;
   }
@@ -53,13 +59,14 @@ describe.skipIf(!probe.reachable)('repository settings actions', () => {
   beforeAll(async () => {
     schema = await import('@clewwiki/db');
     db = schema.getDatabase();
-    actions = await import('@/app/settings/repository/actions');
+    actions = await import('@/app/spaces/actions');
 
     const [workspace] = await db
       .insert(schema.workspaces)
       .values({ name: `Repo ${suiteTag}`, slug: `${suiteTag}-ws` })
       .returning();
     workspaceId = workspace!.id;
+    await db.insert(schema.spaces).values({ workspaceId, key: 'REPO', name: 'Repository test' });
     session.current = { userId: 'admin-user', name: 'Admin', email: 'a@example.test', role: 'admin', workspace };
 
     scratch = mkdtempSync(path.join(tmpdir(), 'clewwiki-repo-actions-'));
@@ -85,7 +92,7 @@ describe.skipIf(!probe.reachable)('repository settings actions', () => {
     );
     expect(result.probe?.ok).toBe(true);
 
-    const rows = await auditRows('workspace.repository_tested');
+    const rows = await auditRows('space.repository_tested');
     expect(rows).toHaveLength(1);
     expect(rows[0]?.metadata).toMatchObject({
       url: `file://${scratch}`,
@@ -95,7 +102,7 @@ describe.skipIf(!probe.reachable)('repository settings actions', () => {
   });
 
   it('refuses a variable outside the repository-token namespace before reaching out', async () => {
-    const before = (await auditRows('workspace.repository_tested')).length;
+    const before = (await auditRows('space.repository_tested')).length;
     for (const name of ['BETTER_AUTH_SECRET', 'DATABASE_URL', 'POSTGRES_PASSWORD']) {
       const tested = await actions.testRepositoryAction(
         {},
@@ -110,7 +117,7 @@ describe.skipIf(!probe.reachable)('repository settings actions', () => {
       );
       expect(saved.error).toBe('validation');
     }
-    expect((await auditRows('workspace.repository_tested')).length).toBe(before);
+    expect((await auditRows('space.repository_tested')).length).toBe(before);
   });
 
   it('refuses a URL with a credential in it', async () => {
@@ -119,5 +126,47 @@ describe.skipIf(!probe.reachable)('repository settings actions', () => {
       form({ url: 'https://x-access-token:secret@git.example.com/org/repo.git', default_ref: 'main' }),
     );
     expect(saved.error).toBe('validation');
+  });
+  it('stores the repository on the space, not on the workspace, and audits it', async () => {
+    const { and, eq } = await import('drizzle-orm');
+    const saved = await actions.saveRepositoryAction(
+      {},
+      form({ url: `file://${scratch}`, default_ref: 'main', auth_token_env: 'CLEWWIKI_GIT_TOKEN_REPO' }),
+    );
+    expect(saved).toEqual({ saved: true });
+
+    const [space] = await db
+      .select()
+      .from(schema.spaces)
+      .where(and(eq(schema.spaces.workspaceId, workspaceId), eq(schema.spaces.key, 'REPO')));
+    expect(space?.settings.repository).toEqual({
+      url: `file://${scratch}`,
+      default_ref: 'main',
+      auth_token_env: 'CLEWWIKI_GIT_TOKEN_REPO',
+    });
+    const [workspace] = await db
+      .select()
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.id, workspaceId));
+    expect(workspace?.settings).not.toHaveProperty('repository');
+
+    const rows = await auditRows('space.repository_set');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.target).toBe(space?.id);
+    expect(rows[0]?.metadata).toMatchObject({ key: 'REPO', auth_token_env: 'CLEWWIKI_GIT_TOKEN_REPO' });
+  });
+
+  it('refuses an editor', async () => {
+    const previous = session.current;
+    session.current = { ...previous, role: 'editor' };
+    try {
+      const saved = await actions.saveRepositoryAction(
+        {},
+        form({ url: `file://${scratch}`, default_ref: 'main' }),
+      );
+      expect(saved.error).toBe('forbidden');
+    } finally {
+      session.current = previous;
+    }
   });
 });

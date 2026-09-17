@@ -11,8 +11,9 @@ conflict-safe shared state through claims and leases instead of silent
 overwrites, documentation pages carry a staleness flag anchored to the code
 they describe, and every page comes in two linked forms — one written for
 humans, one written for agents — kept in sync. The server exposes both an
-MCP interface and a REST API. v1 runs as a single workspace with three
-roles: admin, editor, and scoped agent tokens.
+MCP interface and a REST API. v1 runs as a single workspace, divided into
+spaces — one per project or product area — with three roles: admin, editor,
+and scoped agent tokens that can be limited to some spaces.
 
 ## Why
 
@@ -49,6 +50,13 @@ repository — a symbol, a function, a region — by content hash. When the
 anchored code changes, the section is flagged `stale` instead of being
 silently trusted or silently rewritten. A human or agent has to look at it
 and clear the flag.
+
+**Spaces.** The wiki is divided the way Confluence is: a **space** per
+project or product area, each with its own page tree, its own linked source
+repository and its own overview; inside it, top-level pages act as
+**sections** (Architecture, Backend, Runbooks…) with subsections below them.
+An agent starts by listing the spaces and then works inside its project's
+one, and a token can be limited to the spaces it needs.
 
 **Two linked document types.** Every page can carry a technical body
 (structured, code-linked, agent-optimized) and a human body (prose,
@@ -222,6 +230,14 @@ grant only the scopes the agent needs:
 | `pages:delete` | Soft-delete a page and everything below it. Needs `pages:write` as well. Kept separate because one call removes a whole subtree. |
 | `audit:read` | Read the audit log. |
 
+Under **Spaces**, keep **All spaces**, or choose **Only selected spaces** and
+tick the spaces the token may reach. A token limited to some spaces gets
+`404 not_found` for every page, claim, anchor and export anywhere else, sees
+only its spaces in lists, search and presence, and cannot read the audit log,
+which covers every space. Give an agent that works on one project a token for
+that project's space. A space created later is not added to an existing
+token's list.
+
 Press **Issue token**. The token appears once:
 
 ```
@@ -246,7 +262,11 @@ curl -H "Authorization: Bearer $CLEWWIKI_TOKEN" "$CLEWWIKI_URL/api/v1/me"
   "actor": { "type": "agent", "id": "1ced1eae-…", "name": "build-agent" },
   "role": "agent",
   "scopes": ["identity:read", "pages:read"],
-  "workspace": { "id": "9c7fe5b6-…", "name": "Engineering", "slug": "default" }
+  "workspace": { "id": "9c7fe5b6-…", "name": "Engineering", "slug": "default" },
+  "space_access": {
+    "all": false,
+    "spaces": [{ "key": "API", "name": "Public API", "archived": false }]
+  }
 }
 ```
 
@@ -264,7 +284,15 @@ WWW-Authenticate: Bearer realm="clewwiki"
 {"error":{"code":"invalid_token","message":"Invalid or expired token"}}
 ```
 
-**9. Connect an agent.** Continue with
+**9. Create a space.** Pages always live in a space, and a fresh instance has
+none. On the home page, which lists the spaces, press **Create space**: a name,
+a **key** of 2–10 letters or digits (`API`, `MOBILE`) that appears in URLs and
+agent prompts and cannot be changed later, and optionally an icon and a short
+description. An existing instance that already had pages gets a space with the
+key `MAIN` holding all of them when it is upgraded — see
+[Upgrading](#upgrading).
+
+**10. Connect an agent.** Continue with
 [Connecting an AI coding agent (MCP)](#connecting-an-ai-coding-agent-mcp)
 below. Then go through the [Security checklist](#security-checklist) before
 anyone else starts using the instance.
@@ -288,9 +316,12 @@ is unchanged; only where the image comes from differs.
 
 ### Connecting an AI coding agent (MCP)
 
-Agents talk to clewwiki through the Model Context Protocol with eleven
-tools — `wiki.search`, `wiki.get_page`, `wiki.claim`, `wiki.write_page`,
-`wiki.release_claim` and the rest. The full contract, with input and
+Agents talk to clewwiki through the Model Context Protocol with twelve
+tools — `wiki.list_spaces`, `wiki.search`, `wiki.get_page`, `wiki.claim`,
+`wiki.write_page`, `wiki.release_claim` and the rest. An agent calls
+`wiki.list_spaces` first and passes the key of its project's space as `space`
+to `wiki.search`, `wiki.list_pages`, `wiki.get_presence`, and to
+`wiki.get_page` when it reads by path. The full contract, with input and
 output shapes and error codes, is in [`docs/mcp.md`](docs/mcp.md). The
 MCP server is a REST client of your instance: it holds an agent token and
 has no other way in, so every tool call gets the same scope checks, rate
@@ -298,7 +329,8 @@ limits and audit rows as a direct REST request.
 
 **1. Issue a token** on the **Agent tokens** page (step 7 above). Give it
 `pages:read` for an agent that only reads, and `pages:write` as well for one
-that edits.
+that edits. Limit it to the project's space unless the agent really works
+across projects.
 
 **2. Run the stdio server.** Once `@clewwiki/mcp-server` is published, this is
 the primary path and needs nothing installed ahead of time beyond Node.js 22:
@@ -581,8 +613,10 @@ Each line is pass or fail, not a matter of judgement.
       subtrees should hold `pages:delete`.
 - [ ] **Repository tokens live in `CLEWWIKI_GIT_TOKEN`** (or
       `CLEWWIKI_GIT_TOKEN_<NAME>`), the repository URL is `https://`, and
-      `ALLOW_FILE_REPOSITORIES` is `false` unless a workspace really links a
+      `ALLOW_FILE_REPOSITORIES` is `false` unless a space really links a
       checkout on the host.
+- [ ] **Agent tokens reach only the spaces they need.** A token for one
+      project's agent is limited to that project's space.
 - [ ] **Leaked tokens are revoked, not just rotated.** Revocation takes effect
       on the next request, at the authentication layer.
 - [ ] **MCP over HTTP is off unless an agent needs it.** `MCP_HTTP_ENABLED` is
@@ -635,8 +669,8 @@ container.
 | `MCP_INTERNAL_BASE_URL` | no | `http://127.0.0.1:$PORT` | Where `/mcp` reaches the app's own REST API. Outside compose only. |
 | `RUN_MIGRATIONS_ON_START` | no | `true` | Set to `false` to manage the schema yourself. |
 | `CLAIM_SWEEP_INTERVAL_SECONDS` | no | `60` | How often lapsed claims are released in the background. `0` disables the sweep; expiry is still applied whenever a claim is read or written. |
-| `REPOS_DIR` | no | `/data/repos` | Where read-only mirrors of workspace repositories are kept. Compose backs it with the `repos-data` volume. |
-| `CLEWWIKI_GIT_TOKEN`, `CLEWWIKI_GIT_TOKEN_<NAME>` | **yes** | empty | Access tokens for private repositories. The only variables a workspace's repository setting may name; sent only to `https://` URLs. |
+| `REPOS_DIR` | no | `/data/repos` | Where read-only mirrors of the spaces' repositories are kept, one per space. Compose backs it with the `repos-data` volume. |
+| `CLEWWIKI_GIT_TOKEN`, `CLEWWIKI_GIT_TOKEN_<NAME>` | **yes** | empty | Access tokens for private repositories. The only variables a space's repository setting may name; sent only to `https://` URLs. |
 | `ALLOW_FILE_REPOSITORIES` | no | `false` | Allows `file://` repository URLs (a repository on the host or mounted into the container). |
 | `CLEWWIKI_MIGRATIONS_DIR` | no | set by the image | Where the app looks for migration SQL. Outside a container only. |
 | `CLEWWIKI_GRAMMARS_DIR` | no | set by the image | Where the app looks for the tree-sitter grammar `.wasm` files. Outside a container only. |
@@ -649,8 +683,9 @@ application process.
 
 A private repository's access token is configured by name, not by value: put it
 in `.env` as `CLEWWIKI_GIT_TOKEN` (compose passes that one through) and enter
-`CLEWWIKI_GIT_TOKEN` as the workspace's access token variable. A second token
-goes in `CLEWWIKI_GIT_TOKEN_<NAME>`, with a matching line under
+`CLEWWIKI_GIT_TOKEN` as the space's access token variable. A second token —
+for a second space whose repository needs a different one — goes in
+`CLEWWIKI_GIT_TOKEN_<NAME>`, with a matching line under
 `web.environment` in a `docker-compose.override.yml`. No other variable name is
 accepted — the setting cannot point at `BETTER_AUTH_SECRET` or `DATABASE_URL` —
 and the token is sent only to `https://` repository URLs, never over plain
@@ -727,6 +762,18 @@ an advisory lock lets the first one migrate while the rest wait. Read the
 release notes before upgrading across a version that says it changes
 `.env.example` or `docker-compose.yml`.
 
+**Upgrading to spaces.** The release that introduces spaces migrates an
+existing database on start. Every workspace that has pages or a linked
+repository gets one space with the key `MAIN`, named after the workspace; all
+of its pages — soft-deleted ones included — move into it with their paths,
+history, claims, notes and anchors untouched, and the repository setting moves
+from the workspace onto that space (the workspace keeps no copy). Existing
+agent tokens keep reaching everything: a token issued before the upgrade is not
+limited to any space. Old page links (`/pages/{id}`) redirect to the page's new
+address (`/spaces/MAIN/pages/{id}`). The first anchor check afterwards clones the
+repository again, because mirrors are now kept per space. REST and MCP callers
+must now name a space when they create a page or look one up by path.
+
 The compose file pins PostgreSQL to major version 16. Moving to another major
 version is a dump and restore into a fresh volume, not a tag change.
 
@@ -749,17 +796,49 @@ A page can be written from the browser or over the REST API, and both go
 through the same code — there is no "API version" of a page that behaves
 differently from the one the UI produces.
 
+### Spaces, sections and pages
+
+Pages live in **spaces**. A good structure is one space per project or product
+area, top-level pages inside it as sections — Architecture, Backend, Frontend,
+Mobile, Runbooks, Decisions — and technical and human pages on the same subject
+kept as pairs in the same section:
+
+```
+API · Public API
+├── Architecture
+│   ├── Request pipeline          (technical)
+│   └── How a request is handled  (human)
+├── Backend
+├── Runbooks
+└── Decisions
+```
+
+The same path can exist in two spaces: `/backend` in `API` and `/backend` in
+`MOBILE` are different pages. Administrators create spaces from the home page
+and manage each one under its **Settings**: name, description, icon, the page
+shown as the space's home, the linked repository, and archiving. An archived
+space stays readable but drops out of the space list and of searches across
+all spaces, and takes no new pages. Roles are workspace-wide in this version:
+an editor can edit in every space.
+
 ### From the UI
 
-Sign in and open **Pages**. **New page** asks for a title, where the page sits
-in the tree, its kind, and the body:
+Sign in and pick a space on the home page (or from **Go to space** in the
+header). **New page**, above the space's page tree, asks where the page goes,
+its title, kind and body; **Add child page** on any page does the same with
+that page already chosen as the parent:
 
+- **Parent page** is picked from the space's tree, so a subsection is made by
+  choosing its section rather than by typing a path. Leave it empty for a
+  top-level section. Moving a page to another parent later moves everything
+  below it.
 - **Kind** is `technical` or `human`. The two are the linked document pair:
   one written for agents, one written for people. A page of each kind can be
   paired so that a reader of either lands on the other.
-- **Path** is derived from the title and the parent if you leave it empty —
-  a page called "Auth service" under `/backend` becomes `/backend/auth-service`.
-  Moving a page later moves everything below it.
+- **URL segment** is optional and built from the title — a page called "Auth
+  service" under `/backend` becomes `/backend/auth-service`, and the form shows
+  the resulting path before you save. A title with no Latin letters needs a
+  segment typed in.
 - **Body** is Markdown. A fenced block marked `mermaid` is rendered as a
   diagram in the browser:
 
@@ -791,11 +870,15 @@ Issue a token with `pages:read` and `pages:write` ([Deploy](#quick-start), step
 export CLEWWIKI_TOKEN=cww_…
 export CLEWWIKI_URL=http://localhost:3000
 
-# Create a page.
+# Which spaces can this token reach?
+curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" "$CLEWWIKI_URL/api/v1/spaces"
+
+# Create a page in one of them.
 curl -sS -X POST "$CLEWWIKI_URL/api/v1/pages" \
      -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
      -H 'Content-Type: application/json' \
      -d '{
+           "space": "API",
            "title": "Auth service",
            "path": "/backend/auth",
            "kind": "technical",
@@ -807,6 +890,7 @@ curl -sS -X POST "$CLEWWIKI_URL/api/v1/pages" \
 ```json
 {
   "page_id": "3f0c…",
+  "space": { "key": "API", "name": "Public API" },
   "path": "/backend/auth",
   "title": "Auth service",
   "kind": "technical",
@@ -816,6 +900,11 @@ curl -sS -X POST "$CLEWWIKI_URL/api/v1/pages" \
   "anchors": []
 }
 ```
+
+A page by path is looked up inside a space —
+`GET /api/v1/pages?space=API&path=/backend/auth` — because paths are unique per
+space. Creating a space is an administrator's act, from the UI or with
+`POST /api/v1/spaces` from a signed-in session; no agent token can do it.
 
 ### Claim, write, release
 
@@ -924,7 +1013,8 @@ writes again. Nothing is lost either way.
 
 ### Presence and notes
 
-`GET /api/v1/claims` answers with every claim held in the workspace right now.
+`GET /api/v1/claims` answers with every claim held right now, in every space the
+caller can see — or in one, with `?space=API`.
 The same data is on the **Presence** page in the UI, refreshed every ten
 seconds, with a badge in the page tree and in the page header so a reader sees
 that a page is spoken for before opening the editor.
@@ -939,6 +1029,7 @@ curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" "$CLEWWIKI_URL/api/v1/claims
     {
       "claim_id": "8b41…",
       "page_id": "3f0c…",
+      "space": { "key": "API", "name": "Public API" },
       "path": "/backend/auth",
       "section_id": "api-reference",
       "held_by": "ci-writer",
@@ -984,7 +1075,7 @@ Search, history and the tree:
 
 ```sh
 curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
-     "$CLEWWIKI_URL/api/v1/search?q=bearer&limit=5"
+     "$CLEWWIKI_URL/api/v1/search?q=bearer&space=API&limit=5"
 curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
      "$CLEWWIKI_URL/api/v1/pages/$PAGE_ID/versions"
 curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
@@ -1007,7 +1098,15 @@ curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
 ```
 
 The Markdown file is the body exactly as stored, under front matter carrying
-the title, path, kind, version, content hash and modification time. The HTML
+the title, space, path, kind, version, content hash and modification time.
+
+A whole space exports as a ZIP of those Markdown files, with folders mirroring
+the page tree — `API/backend.md`, `API/backend/auth.md`:
+
+```sh
+curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+     "$CLEWWIKI_URL/api/v1/spaces/API/export?format=md" -o API.zip
+``` The HTML
 file is a standalone document that opens from disk with nothing to load;
 Mermaid blocks are kept as `<pre class="mermaid">` holding their source, since
 drawing them would mean shipping a renderer inside every exported file.
@@ -1026,8 +1125,9 @@ An anchor ties a page, or one named section of it, to a declaration in your
 source repository. When the code changes, the page is flagged — it is never
 rewritten, and nothing is trusted silently.
 
-**Link a repository once, as an administrator.** Open **Repository** in the
-header and fill in three fields:
+**Link a repository once per space, as an administrator.** Each space has its
+own, because each project has its own code. Open the space, then **Space
+settings**, and fill in three fields under *Linked repository*:
 
 | Field | What it takes |
 |---|---|
@@ -1040,9 +1140,11 @@ records the variable's name, and the server reads the value out of its own
 environment when it talks to git, and sends it only to the `https://` origin of
 the repository. **Test connection** checks the URL, the ref and the token
 without cloning anything, and is recorded in the audit log as
-`workspace.repository_tested`.
+`space.repository_tested`; saving is recorded as `space.repository_set`.
+Administrators can set it over REST too, with `repository` in
+`PATCH /api/v1/spaces/{key}`.
 
-The server keeps a read-only bare mirror per workspace under `REPOS_DIR`,
+The server keeps a read-only bare mirror per space under `REPOS_DIR`,
 fetches it on demand, and reads files with `git show`. It never creates a
 working tree, never runs a build, an install script or a hook, and never
 executes anything it finds in your repository.
@@ -1101,7 +1203,7 @@ curl -sS -X POST -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
      "$CLEWWIKI_URL/api/v1/anchors/$ANCHOR_ID/confirm"
 ```
 
-The check response also carries `fallback_share` — the share of the workspace's
+The check response also carries `fallback_share` — the share of the space's
 anchors sitting on the line-range path. Line ranges do not survive an edit above
 them, so a rising number is the early warning that the badges are turning into
 noise.
@@ -1111,31 +1213,37 @@ noise.
 | Endpoint | Auth | Scope | Purpose |
 |---|---|---|---|
 | `GET /api/v1/health` | none | — | Liveness and database reachability. Used by the compose healthcheck. |
-| `GET /api/v1/me` | session or token | `identity:read` | Who the caller is, what it may do, and which workspace it is bound to. |
-| `GET /api/v1/pages` | session or token | `pages:read` | The page tree, without bodies. Takes `parent_id`, `path`, `kind`, `depth`. |
-| `POST /api/v1/pages` | session or token | `pages:write` | Create a page. |
+| `GET /api/v1/me` | session or token | `identity:read` | Who the caller is, what it may do, which workspace it is bound to, and which spaces it can reach (`space_access`). |
+| `GET /api/v1/spaces` | session or token | `pages:read` | The spaces the caller can reach, with page counts. `include_archived=true` adds archived ones. |
+| `POST /api/v1/spaces` | admin session | — | Create a space: `key`, `name`, `description`, `icon`. `409` when the key is taken. |
+| `GET /api/v1/spaces/{key}` | session or token | `pages:read` | One space. The repository link is shown in full to administrators only. |
+| `PATCH /api/v1/spaces/{key}` | admin session | — | Change `name`, `description`, `icon`, `home_page_id` or `repository`. The key cannot be changed. |
+| `POST /api/v1/spaces/{key}/archive`, `…/unarchive` | admin session | — | Archive a space, or bring it back. |
+| `GET /api/v1/spaces/{key}/export` | session or token | `pages:read` | The whole space as a ZIP of Markdown files mirroring the tree. Takes `format=md`. |
+| `GET /api/v1/pages` | session or token | `pages:read` | The page tree, without bodies. Takes `space`, `parent_id`, `path` (needs `space`), `kind`, `depth`; without `space`, the top of every space. |
+| `POST /api/v1/pages` | session or token | `pages:write` | Create a page. Requires `space`. |
 | `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |
 | `PATCH /api/v1/pages/{id}` | session or token | `pages:write` | Update or move a page under a claim. Requires `claim_id` and `base_content_hash`. Writes a revision and bumps the version. |
 | `DELETE /api/v1/pages/{id}` | session or token | `pages:write` + `pages:delete` | Soft-delete a page and everything below it. `409 conflict` while another actor holds a live claim in the subtree, unless the caller is an administrator. |
 | `POST /api/v1/pages/{id}/restore` | admin session | — | Restore a soft-deleted page and the subtree deleted with it. `409 conflict` when a live page has taken one of its paths or its parent is gone or moved. |
 | `GET /api/v1/pages/{id}/tree` | session or token | `pages:read` | The subtree rooted at a page, nested. |
 | `GET /api/v1/pages/{id}/versions` | session or token | `pages:read` | Revision history: version, author, content hash, timestamp. |
-| `POST /api/v1/pages/{id}/link` | session or token | `pages:write` | Pair a technical page with a human one, or unpair them. |
+| `POST /api/v1/pages/{id}/link` | session or token | `pages:write` | Pair a technical page with a human one of the same space, or unpair them. |
 | `POST /api/v1/pages/{id}/claims` | session or token | `pages:write` | Take a claim on the page, or on a section of it. `201` when granted, `200` when it extends a lease the caller already held, `409` when someone else holds it. |
 | `GET /api/v1/pages/{id}/claims` | session or token | `pages:read` | The live claims on one page. |
 | `PATCH /api/v1/claims/{claimId}` | session or token | `pages:write` | Heartbeat: extends a lease the caller holds. |
 | `DELETE /api/v1/claims/{claimId}` | session or token | `pages:write` | Release a claim and delete its notes. Idempotent. `?force=true` is administrator-only. |
-| `GET /api/v1/claims` | session or token | `pages:read` | The presence board: every claim held in the workspace, with its notes. |
+| `GET /api/v1/claims` | session or token | `pages:read` | The presence board: every live claim, with its notes and space. Takes `space`. |
 | `POST /api/v1/pages/{id}/notes` | session or token | `pages:write` | Leave an ephemeral note on a claim the caller holds. |
 | `GET /api/v1/pages/{id}/notes` | session or token | `pages:read` | The active notes on a page. |
 | `POST /api/v1/pages/{id}/anchors` | session or token | `pages:write` | Anchor the page, or one of its sections, to a declaration or a line range. Resolves it against the repository first. |
-| `GET /api/v1/pages/{id}/anchors` | session or token | `pages:read` | The anchors on one page, plus the workspace's `fallback_share`. |
+| `GET /api/v1/pages/{id}/anchors` | session or token | `pages:read` | The anchors on one page, plus the space's `fallback_share`. |
 | `GET /api/v1/pages/{id}/anchors/check` | session or token | `pages:read` | The anchor states the last check stored, without touching the repository. |
 | `POST /api/v1/pages/{id}/anchors/check` | session or token | `pages:write` | Recompute every anchor on the page against the repository, within a read budget. Takes `ref`. |
 | `POST /api/v1/anchors/{anchorId}/confirm` | session or token | `pages:write` | Clear a flag after review, re-baselining the anchor onto what is there now. |
 | `DELETE /api/v1/anchors/{anchorId}` | session or token | `pages:write` | Remove an anchor. |
-| `GET /api/v1/audit` | admin session or token | `audit:read` | The audit log, newest first. Takes `action`, `target`, `since`, `limit`. |
-| `GET /api/v1/search` | session or token | `pages:read` | Full-text search. Takes `q`, `limit`, `kind`. |
+| `GET /api/v1/audit` | admin session or token | `audit:read` | The audit log, newest first. Takes `action`, `target`, `since`, `limit`. Refused to a token limited to some spaces. |
+| `GET /api/v1/search` | session or token | `pages:read` | Full-text search. Takes `q`, `space`, `limit`, `kind`; without `space`, every unarchived space the caller can see. |
 | `GET /api/v1/export/{id}` | session or token | `pages:read` | Export a page. Takes `format=md` or `format=html`. |
 
 A browser session can call these endpoints too, but a request that changes
@@ -1144,8 +1252,9 @@ state must then come from the instance's own origin (`Origin` equal to
 `Content-Type: application/json`; anything else is `403 forbidden`. Requests
 with an agent token are not affected.
 
-All of them refuse to answer for a workspace other than the caller's own, with
-`404` rather than `403` so the response does not confirm that a page exists
+All of them refuse to answer for a workspace other than the caller's own — and,
+for a token limited to some spaces, for a space outside its list — with `404`
+rather than `403` so the response does not confirm that a page exists
 somewhere else. That check is written explicitly in each handler rather than
 inferred from there being one workspace, so it does not have to be retrofitted
 when there is more than one. Errors share one envelope:
@@ -1163,7 +1272,7 @@ particular things: `conflict` is
 "you have no claim here", `not_found` on a write is "your claim has expired or
 been released", `forbidden` is "that claim belongs to someone else", and
 `stale_base` is "the page moved under you". `repository_unavailable` is a `502`:
-the workspace's source repository could not be reached or read, which is this
+the space's source repository could not be reached or read, which is this
 instance's dependency failing rather than anything wrong with the request.
 
 ## Development
@@ -1258,6 +1367,9 @@ No calendar dates — phases are ordered by dependency, not by schedule.
   HTML export), Docker image and compose, full README and license text. *Built;
   closes once the pre-release security review's launch-blocking findings are
   fixed.*
+- **Spaces** — Confluence-style areas per project: a page tree, a repository
+  and an overview per space, tokens limited to spaces, space export. *Done.*
+  Per-space permissions come next.
 - **Phase 7** — Public launch.
 
 See `docs/roadmap.md` for exit criteria per phase.

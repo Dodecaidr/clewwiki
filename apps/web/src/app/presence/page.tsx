@@ -5,10 +5,14 @@ import type { Metadata } from 'next';
 
 import { PresenceAutoRefresh } from './auto-refresh';
 import { ForceReleaseButton } from './force-release-button';
+import { SpaceFilterSelect } from '@/components/space-filter';
+import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { getPresence } from '@/lib/claims/service';
 import { remainingSeconds } from '@/lib/claims/ttl';
 import { getSessionContext } from '@/lib/session';
+import { listSpaces } from '@/lib/spaces/service';
+import { spacePageHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -27,7 +31,11 @@ export async function generateMetadata(): Promise<Metadata> {
  * see before they start editing it, rather than something they discover from a
  * conflict.
  */
-export default async function PresencePage() {
+export default async function PresencePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ space?: string }>;
+}) {
   const session = await getSessionContext();
   if (!session) {
     redirect('/login');
@@ -35,7 +43,12 @@ export default async function PresencePage() {
 
   const t = await getTranslations('presence');
   const format = await getFormatter();
-  const presence = await getPresence(session.workspace.id);
+  const spaces = await listSpaces(session.workspace.id, { includeArchived: true });
+  const requested = (await searchParams).space?.trim().toUpperCase() ?? '';
+  const selected = spaces.find((space) => space.key === requested) ?? null;
+  const presence = await getPresence(session.workspace.id, {
+    spaceIds: selected ? [selected.id] : null,
+  });
   const now = new Date();
 
   return (
@@ -46,6 +59,19 @@ export default async function PresencePage() {
         <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">{t('intro')}</p>
       </div>
+
+      <form action="/presence" method="get" className="flex flex-wrap items-center gap-2">
+        <SpaceFilterSelect
+          id="presence-space"
+          label={t('spaceFilter')}
+          allLabel={t('allSpaces')}
+          spaces={spaces.map((space) => ({ key: space.key, name: space.name }))}
+          value={selected?.key ?? ''}
+        />
+        <Button type="submit" variant="outline" size="sm">
+          {t('applyFilter')}
+        </Button>
+      </form>
 
       {presence.length === 0 ? (
         <Card>
@@ -73,12 +99,14 @@ export default async function PresencePage() {
                   <tr key={entry.claim.id} className="border-b border-border align-top last:border-0">
                     <td className="py-3 pr-4">
                       <Link
-                        href={`/pages/${entry.claim.pageId}`}
+                        href={spacePageHref(entry.spaceKey, entry.claim.pageId)}
                         className="font-medium underline-offset-2 hover:underline"
                       >
                         {entry.title}
                       </Link>
-                      <div className="font-mono text-xs text-muted-foreground">{entry.path}</div>
+                      <div className="font-mono text-xs text-muted-foreground">
+                        {entry.spaceKey}:{entry.path}
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {entry.claim.sectionId
                           ? t('sectionTarget', { section: entry.claim.sectionId })

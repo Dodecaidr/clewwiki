@@ -20,6 +20,12 @@ export interface IssueAgentTokenInput {
   scopes: readonly string[];
   /** Days until the token expires. Omit for a non-expiring token. */
   expiresInDays?: number | null;
+  /**
+   * The spaces the token may reach. `null` or omitted means every space. The
+   * caller is responsible for having checked that the ids belong to the
+   * workspace; `issueAgentToken` stores what it is given, de-duplicated.
+   */
+  spaceIds?: readonly string[] | null;
   createdBy: string;
 }
 
@@ -45,6 +51,7 @@ export async function issueAgentToken(input: IssueAgentTokenInput): Promise<Issu
       prefix: generated.prefix,
       tokenHash: generated.tokenHash,
       scopes: normalizeScopes(input.scopes),
+      spaceIds: input.spaceIds ? [...new Set(input.spaceIds)] : null,
       expiresAt,
       createdBy: input.createdBy,
     })
@@ -90,7 +97,7 @@ export async function revokeAgentToken(workspaceId: string, tokenId: string): Pr
 export type AgentTokenRejection = 'malformed' | 'unknown' | 'invalid' | 'revoked' | 'expired';
 
 export type AgentTokenLookup =
-  | { ok: true; record: AgentToken; scopes: AgentScope[] }
+  | { ok: true; record: AgentToken; scopes: AgentScope[]; spaceIds: string[] | null }
   | { ok: false; reason: AgentTokenRejection; record?: AgentToken };
 
 /**
@@ -127,7 +134,24 @@ export async function lookupAgentToken(presented: string): Promise<AgentTokenLoo
     return { ok: false, reason: lifecycle, record };
   }
 
-  return { ok: true, record, scopes: normalizeScopes(record.scopes) };
+  return {
+    ok: true,
+    record,
+    scopes: normalizeScopes(record.scopes),
+    spaceIds: normalizeSpaceIds(record.spaceIds),
+  };
+}
+
+/**
+ * Reads the stored space restriction defensively. It is a JSON column, so a
+ * row written by hand could hold anything; anything that is not a list of
+ * strings is read as the narrowest thing it could mean — no spaces at all —
+ * rather than widened to every space.
+ */
+export function normalizeSpaceIds(value: unknown): string[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((entry): entry is string => typeof entry === 'string'))];
 }
 
 export async function touchAgentToken(tokenId: string): Promise<void> {

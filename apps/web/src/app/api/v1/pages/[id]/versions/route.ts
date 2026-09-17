@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 import { apiError, apiJson, serviceErrorResponse, validationError } from '@/lib/api-response';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
 import { authorizePagesRequest, READ_SCOPES } from '@/lib/pages-api';
-import { listRevisions } from '@/lib/pages/service';
+import { getPageById, listRevisions } from '@/lib/pages/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,13 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!parsedQuery.success) return validationError(parsedQuery.error);
 
   try {
+    const page = await getPageById(auth.workspaceId, parsedParams.data.id);
+    if (!page) return apiError(404, 'not_found', 'Page not found');
+    const mismatch = requireWorkspace(auth.identity, page.workspaceId);
+    if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
+
     const revisions = await listRevisions(
       auth.workspaceId,
       parsedParams.data.id,

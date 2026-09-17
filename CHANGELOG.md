@@ -26,8 +26,25 @@ tagged after the UI design pass.
   line-range fallback, anchor states (`fresh`, `stale`, `moved-renamed`,
   `lost`), and a `confirm` action to clear a flag after review.
 - MCP server (`packages/mcp-server`, `@clewwiki/mcp-server`) exposing
-  eleven tools over the same service layer as the REST API, with both
+  twelve tools over the same service layer as the REST API, with both
   stdio and streamable HTTP (`/mcp`) transports.
+- Spaces: Confluence-style areas per project, each with its own page tree,
+  overview, home page and linked source repository. Paths are unique per
+  space. Migration `0004_spaces` moves existing pages and the workspace
+  repository setting into a `MAIN` space per workspace.
+- Space REST endpoints (`/api/v1/spaces`, `/api/v1/spaces/{key}`, archive and
+  unarchive) and a space export as a ZIP of Markdown files mirroring the tree
+  (`/api/v1/spaces/{key}/export`). Pages, search results, tree nodes and
+  claims carry their space; search, the page tree and presence take `space`.
+- Agent tokens limited to selected spaces (`agent_tokens.space_ids`), enforced
+  on every page, claim, note, anchor, search, presence and export endpoint,
+  and reported by `/api/v1/me`.
+- MCP tool `wiki.list_spaces`, and a `space` argument for `wiki.search`,
+  `wiki.list_pages`, `wiki.get_presence` and path lookups in `wiki.get_page`.
+- Web UI for spaces: the space list on the home page, space overview and
+  settings, a parent picker with a path preview for new pages, "Add child
+  page", breadcrumbs, a space switcher, space filters on presence and search,
+  and a "Spaces" section in the guide. Old `/pages/{id}` links redirect.
 - Docker image and `docker-compose.yml` for a two-container deployment
   (application + PostgreSQL 16), plus a `docker-smoke` CI job that builds
   the image and walks the full first-run path over HTTP.

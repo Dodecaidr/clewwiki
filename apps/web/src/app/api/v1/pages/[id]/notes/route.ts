@@ -8,7 +8,7 @@ import {
   serviceErrorResponse,
   validationError,
 } from '@/lib/api-response';
-import { requireWorkspace } from '@/lib/api-auth';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
 import { getActiveNotesForPage, getClaimById, postNote, MAX_NOTE_LENGTH } from '@/lib/claims/service';
 import { toClaimNoteResource } from '@/lib/claims/serialize';
 import { authorizePagesRequest, claimActorOf, READ_SCOPES, WRITE_SCOPES } from '@/lib/pages-api';
@@ -55,6 +55,8 @@ export async function POST(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
     const claim = await getClaimById(auth.workspaceId, parsed.data.claim_id);
     if (!claim) return apiError(404, 'not_found', 'Claim not found');
@@ -95,6 +97,8 @@ export async function GET(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
     const notes = await getActiveNotesForPage(auth.workspaceId, page.id);
     return apiJson({ notes: notes.map(toClaimNoteResource) }, auth.headers);

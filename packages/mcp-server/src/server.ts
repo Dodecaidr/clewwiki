@@ -8,7 +8,7 @@ import { TOOLS } from './tools.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
 
 /**
- * Builds the MCP server: the eleven tools of `docs/mcp.md`, each wired to the
+ * Builds the MCP server: the twelve tools of `docs/mcp.md`, each wired to the
  * REST client it calls through.
  *
  * The same function serves both transports. stdio hands it a client pointed at
@@ -21,6 +21,11 @@ import { MCP_SERVER_VERSION } from './version.ts';
 
 const SERVER_INSTRUCTIONS = [
   'clewwiki is a wiki that people and AI coding agents write to at the same time.',
+  '',
+  'The wiki is divided into spaces, one per project or product area. Call',
+  'wiki.list_spaces first, find the space for the project at hand, and pass its key',
+  'as space to wiki.search, wiki.list_pages, wiki.get_page (with a path) and',
+  'wiki.get_presence.',
   '',
   'Writing is a four-step protocol and skipping a step is refused, not merged:',
   'wiki.get_page to read the body and its content hash, wiki.claim to take a lease,',

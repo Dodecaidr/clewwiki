@@ -27,8 +27,9 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the eleven tools docs/mcp.md names', () => {
+  it('registers exactly the twelve tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
+      'wiki.list_spaces',
       'wiki.search',
       'wiki.get_page',
       'wiki.list_pages',
@@ -46,6 +47,7 @@ describe('tool surface', () => {
   it('names every tool whose result carries text written by others', () => {
     expect([...CONTENT_RETURNING_TOOLS].sort()).toEqual(
       [
+        'wiki.list_spaces',
         'wiki.search',
         'wiki.get_page',
         'wiki.list_pages',
@@ -78,6 +80,7 @@ describe('tool surface', () => {
       (definition) => definition.name,
     );
     expect(readOnly).toEqual([
+      'wiki.list_spaces',
       'wiki.search',
       'wiki.get_page',
       'wiki.list_pages',
@@ -113,6 +116,21 @@ describe('input validation', () => {
     await expect(tool('wiki.get_page').run(clientWith(never), {})).rejects.toMatchObject({
       code: 'VALIDATION',
     });
+  });
+
+  it('refuses a get_page by path without the space the path is in', async () => {
+    await expect(
+      tool('wiki.get_page').run(clientWith(never), { path: '/backend/auth' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+
+  it('refuses a space key that is not one', async () => {
+    await expect(
+      tool('wiki.search').run(clientWith(never), { query: 'auth', space: 'not a key!' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(
+      tool('wiki.list_pages').run(clientWith(never), { space: 'X' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 
   it('refuses a write with no base hash', async () => {
@@ -187,26 +205,94 @@ describe('REST calls', () => {
     expect(result.page_id).toBe(page.page_id);
   });
 
-  it('resolves a path to a page id with one extra read', async () => {
+  it('resolves a path to a page id inside the space, with one extra read', async () => {
     const pageId = '11111111-1111-4111-8111-111111111111';
     const fetchMock = vi
       .fn<FetchLike>()
       .mockResolvedValueOnce(jsonResponse(200, { nodes: [{ page_id: pageId }] }))
-      .mockResolvedValueOnce(jsonResponse(200, { page_id: pageId, kind: 'technical', body: 'x' }));
+      .mockResolvedValueOnce(
+        jsonResponse(200, { page_id: pageId, kind: 'technical', body: 'x', space: { key: 'API', name: 'API' } }),
+      );
 
     const result = (await tool('wiki.get_page').run(clientWith(fetchMock), {
+      space: 'API',
       path: '/backend/auth',
     })) as Record<string, unknown>;
 
     expect(result.page_id).toBe(pageId);
-    expect(fetchMock.mock.calls[0]?.[0]).toContain('/api/v1/pages?path=%2Fbackend%2Fauth');
+    expect(result.space).toEqual({ key: 'API', name: 'API' });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://wiki.example.com/api/v1/pages?space=API&path=%2Fbackend%2Fauth&depth=1',
+    );
   });
 
-  it('answers NOT_FOUND for a path nothing sits at', async () => {
+  it('answers NOT_FOUND for a path nothing sits at, naming the space', async () => {
     const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { nodes: [] }));
-    await expect(
-      tool('wiki.get_page').run(clientWith(fetchMock), { path: '/nowhere' }),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const failure = await tool('wiki.get_page')
+      .run(clientWith(fetchMock), { space: 'API', path: '/nowhere' })
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'NOT_FOUND', details: { space: 'API', path: '/nowhere' } });
+  });
+
+  it('lists spaces with the fields an agent chooses one by', async () => {
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(
+      jsonResponse(200, {
+        spaces: [
+          {
+            key: 'MOBILE',
+            name: 'Mobile app',
+            description: 'The iOS and Android apps.',
+            icon: '📱',
+            page_count: 12,
+            archived: false,
+            has_repository: true,
+            created_at: '2030-01-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+    const result = await tool('wiki.list_spaces').run(clientWith(fetchMock), {});
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://wiki.example.com/api/v1/spaces');
+    expect(result).toEqual({
+      spaces: [
+        {
+          key: 'MOBILE',
+          name: 'Mobile app',
+          description: 'The iOS and Android apps.',
+          icon: '📱',
+          page_count: 12,
+          archived: false,
+        },
+      ],
+    });
+  });
+
+  it('asks for archived spaces only when told to', async () => {
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { spaces: [] }));
+    await tool('wiki.list_spaces').run(clientWith(fetchMock), { include_archived: true });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://wiki.example.com/api/v1/spaces?include_archived=true',
+    );
+  });
+
+  it('passes space through to search, the tree and presence', async () => {
+    const fetchMock = vi
+      .fn<FetchLike>()
+      .mockResolvedValueOnce(jsonResponse(200, { results: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, { nodes: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, { claims: [] }));
+    const client = clientWith(fetchMock);
+
+    await tool('wiki.search').run(client, { query: 'auth', space: 'API' });
+    await tool('wiki.list_pages').run(client, { space: 'API' });
+    await tool('wiki.get_presence').run(client, { space: 'API' });
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'https://wiki.example.com/api/v1/search?q=auth&space=API',
+      'https://wiki.example.com/api/v1/pages?space=API&depth=1',
+      'https://wiki.example.com/api/v1/claims?space=API',
+    ]);
   });
 });
 

@@ -70,6 +70,11 @@ const tsvector = customType<{ data: string; driverData: string }>({
  * is read as a whole with the workspace row, none is queried on its own, and a
  * new knob must not be a migration. A value that ever needs an index or a
  * foreign key graduates to a column of its own.
+ *
+ * The source repository used to live here too. It moved to the space in
+ * migration `0004_spaces`, because each project has its own code; the
+ * migration copies the value onto the space it creates and removes it from the
+ * workspace, and nothing reads it here any more.
  */
 export interface WorkspaceSettings {
   /**
@@ -78,8 +83,15 @@ export interface WorkspaceSettings {
    * within the bounds the claim service enforces.
    */
   claim_ttl_seconds?: number;
-  /** The source repository this workspace's anchors are checked against. */
-  repository?: WorkspaceRepositorySettings;
+}
+
+/**
+ * Per-space knobs, kept as JSON for the same reason as the workspace's: read
+ * with the row, queried on their own by nothing.
+ */
+export interface SpaceSettings {
+  /** The source repository this space's anchors are checked against. */
+  repository?: RepositorySettings;
 }
 
 /**
@@ -87,11 +99,11 @@ export interface WorkspaceSettings {
  *
  * `auth_token_env` names an environment variable, never a token: a credential
  * written into a settings row would be readable by anything that can read the
- * workspace, would survive in database backups, and would have to be redacted
+ * space, would survive in database backups, and would have to be redacted
  * from every API response that carries settings. The operator sets the variable
  * on the process; the application only ever learns its name.
  */
-export interface WorkspaceRepositorySettings {
+export interface RepositorySettings {
   /** `https://…`, `ssh://…` or `file://…` for a local or test repository. */
   url: string;
   /** The ref checked by default: a branch name, a tag, or a commit. */
@@ -209,6 +221,13 @@ export const agentTokens = pgTable(
     prefix: text('prefix').notNull().unique(),
     tokenHash: text('token_hash').notNull(),
     scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
+    /**
+     * The spaces this token may reach, by id. `null` means every space in the
+     * workspace, which is what every token issued before spaces existed has.
+     * A list is a restriction the handlers enforce the same way they enforce
+     * the workspace: a page in a space outside it answers `404`.
+     */
+    spaceIds: jsonb('space_ids').$type<string[] | null>(),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
@@ -244,6 +263,52 @@ export const auditLog = pgTable(
 );
 
 /**
+ * Spaces: one area of the wiki per project or product, the way Confluence
+ * divides a site.
+ *
+ * Every page belongs to exactly one space, and a page's path is unique within
+ * its space rather than within the workspace, so two projects can each have a
+ * `/backend`. The key is the short, stable handle people and agents type
+ * (`MOBILE`, `API2`): 2–10 uppercase letters or digits, unique per workspace,
+ * and never changed after creation, because it is in every URL and every agent
+ * prompt that names the space.
+ *
+ * A space is archived rather than deleted. Its pages stay readable; it drops
+ * out of the default listings and takes no new pages.
+ */
+export const spaces = pgTable(
+  'spaces',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    name: text('name').notNull(),
+    /** Short Markdown shown on the space overview and in the space list. */
+    description: text('description').notNull().default(''),
+    /** One emoji or a few characters. */
+    icon: text('icon'),
+    /** The page shown as the space overview, when one is chosen. */
+    homePageId: uuid('home_page_id').references((): AnyPgColumn => pages.id, {
+      onDelete: 'set null',
+    }),
+    settings: jsonb('settings').$type<SpaceSettings>().notNull().default({}),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('spaces_workspace_key_key').on(table.workspaceId, table.key),
+    check('spaces_key_format', sql`${table.key} ~ '^[A-Z0-9]{2,10}$'`),
+    check('spaces_name_length', sql`char_length(${table.name}) between 1 and 100`),
+    check('spaces_description_length', sql`char_length(${table.description}) <= 2000`),
+    check('spaces_icon_length', sql`${table.icon} is null or char_length(${table.icon}) <= 16`),
+  ],
+);
+
+/**
  * Wiki pages.
  *
  * The tree is stored twice on purpose: `parent_id` is the edge a move has to
@@ -254,7 +319,8 @@ export const auditLog = pgTable(
  *
  * Deletion is a soft delete: `deleted_at` is set and the row stays, so its
  * revision history survives. The uniqueness of `path` is therefore scoped to
- * live rows, which is what lets a path be reused after its page is deleted.
+ * live rows, which is what lets a path be reused after its page is deleted —
+ * and to the page's space, so the same path can exist once per space.
  */
 export const pages = pgTable(
   'pages',
@@ -263,6 +329,10 @@ export const pages = pgTable(
     workspaceId: uuid('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** The space the page lives in. A page never changes space. */
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
     parentId: uuid('parent_id').references((): AnyPgColumn => pages.id, {
       onDelete: 'set null',
     }),
@@ -297,11 +367,12 @@ export const pages = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex('pages_workspace_path_key')
-      .on(table.workspaceId, table.path)
+    uniqueIndex('pages_space_path_key')
+      .on(table.spaceId, table.path)
       .where(isNull(table.deletedAt)),
-    index('pages_workspace_parent_idx').on(table.workspaceId, table.parentId),
-    index('pages_workspace_path_idx').on(table.workspaceId, table.path),
+    index('pages_space_parent_idx').on(table.spaceId, table.parentId),
+    index('pages_space_path_idx').on(table.spaceId, table.path),
+    index('pages_workspace_updated_idx').on(table.workspaceId, table.updatedAt),
     index('pages_search_idx').using('gin', table.searchVector),
   ],
 );
@@ -514,6 +585,8 @@ export const anchors = pgTable(
 );
 
 export type Workspace = typeof workspaces.$inferSelect;
+export type Space = typeof spaces.$inferSelect;
+export type NewSpace = typeof spaces.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
 export type MembershipRole = (typeof membershipRole.enumValues)[number];

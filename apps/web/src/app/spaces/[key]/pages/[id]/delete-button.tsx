@@ -2,8 +2,8 @@
 
 import { useActionState } from 'react';
 
-import { deletePageAction } from '../actions';
-import type { PageFormState } from '../actions';
+import { deletePageAction } from '@/app/pages/actions';
+import type { PageFormState } from '@/app/pages/actions';
 import { Button } from '@/components/ui/button';
 
 const initialState: PageFormState = {};

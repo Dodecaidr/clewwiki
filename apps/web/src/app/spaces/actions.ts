@@ -1,0 +1,279 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import { z } from 'zod';
+
+import { recordAudit } from '@/lib/audit';
+import { isPageServiceError } from '@/lib/pages/errors';
+import { probeRepository } from '@/lib/repository/git';
+import { repositorySettingsSchema } from '@/lib/repository/settings';
+import { getSessionContext } from '@/lib/session';
+import {
+  spaceDescriptionSchema,
+  spaceIconSchema,
+  spaceKeyInputSchema,
+  spaceNameSchema,
+} from '@/lib/spaces/keys';
+import { createSpace, getSpaceByKey, setSpaceArchived, updateSpace } from '@/lib/spaces/service';
+import { spaceHref, spaceSettingsHref } from '@/lib/spaces/urls';
+
+/**
+ * The administrator's actions on spaces: create one, change it, link its
+ * repository, archive it.
+ *
+ * Every one re-reads the session and checks the role itself — a form post
+ * reaches an action directly, never through the page that rendered the form —
+ * and every one goes through the same service the REST endpoints use, so a
+ * space changed here is audited exactly like one changed over the API.
+ */
+
+export interface SpaceFormState {
+  error?: string;
+  message?: string;
+  saved?: boolean;
+  /** Which field the message is about, when the service or the schema said. */
+  field?: string;
+}
+
+function formText(formData: FormData, key: string): string {
+  const value = formData.get(key);
+  return typeof value === 'string' ? value : '';
+}
+
+async function requireAdmin() {
+  const session = await getSessionContext();
+  if (!session || session.role !== 'admin') return null;
+  return session;
+}
+
+function toFormState(error: unknown): SpaceFormState {
+  if (isPageServiceError(error)) return { error: error.code, message: error.message };
+  console.error('[spaces] action failed', error);
+  return { error: 'generic' };
+}
+
+const createSchema = z.object({
+  key: spaceKeyInputSchema,
+  name: spaceNameSchema,
+  description: spaceDescriptionSchema,
+  icon: spaceIconSchema,
+});
+
+export async function createSpaceAction(
+  _previous: SpaceFormState,
+  formData: FormData,
+): Promise<SpaceFormState> {
+  const session = await requireAdmin();
+  if (!session) return { error: 'forbidden' };
+
+  const parsed = createSchema.safeParse({
+    key: formText(formData, 'key'),
+    name: formText(formData, 'name'),
+    description: formText(formData, 'description'),
+    icon: formText(formData, 'icon'),
+  });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return { error: 'validation', message: issue?.message, field: String(issue?.path[0] ?? '') };
+  }
+
+  let key: string;
+  try {
+    const space = await createSpace({
+      workspaceId: session.workspace.id,
+      actor: { type: 'user', id: session.userId },
+      key: parsed.data.key,
+      name: parsed.data.name,
+      description: parsed.data.description,
+      icon: parsed.data.icon,
+    });
+    key = space.key;
+  } catch (error) {
+    return toFormState(error);
+  }
+
+  revalidatePath('/', 'layout');
+  redirect(spaceHref(key));
+}
+
+const updateSchema = z.object({
+  spaceKey: z.string().min(1).max(20),
+  name: spaceNameSchema,
+  description: spaceDescriptionSchema,
+  icon: spaceIconSchema,
+  homePageId: z.union([z.uuid(), z.literal('')]),
+});
+
+export async function updateSpaceAction(
+  _previous: SpaceFormState,
+  formData: FormData,
+): Promise<SpaceFormState> {
+  const session = await requireAdmin();
+  if (!session) return { error: 'forbidden' };
+
+  const parsed = updateSchema.safeParse({
+    spaceKey: formText(formData, 'spaceKey'),
+    name: formText(formData, 'name'),
+    description: formText(formData, 'description'),
+    icon: formText(formData, 'icon'),
+    homePageId: formText(formData, 'homePageId'),
+  });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return { error: 'validation', message: issue?.message, field: String(issue?.path[0] ?? '') };
+  }
+
+  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  if (!space) return { error: 'not_found' };
+
+  try {
+    await updateSpace({
+      workspaceId: session.workspace.id,
+      spaceId: space.id,
+      actor: { type: 'user', id: session.userId },
+      name: parsed.data.name,
+      description: parsed.data.description,
+      icon: parsed.data.icon,
+      homePageId: parsed.data.homePageId === '' ? null : parsed.data.homePageId,
+    });
+  } catch (error) {
+    return toFormState(error);
+  }
+
+  revalidatePath('/', 'layout');
+  return { saved: true };
+}
+
+export async function setSpaceArchivedAction(
+  _previous: SpaceFormState,
+  formData: FormData,
+): Promise<SpaceFormState> {
+  const session = await requireAdmin();
+  if (!session) return { error: 'forbidden' };
+
+  const parsed = z
+    .object({ spaceKey: z.string().min(1).max(20), archived: z.enum(['true', 'false']) })
+    .safeParse({ spaceKey: formText(formData, 'spaceKey'), archived: formText(formData, 'archived') });
+  if (!parsed.success) return { error: 'validation' };
+
+  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  if (!space) return { error: 'not_found' };
+
+  try {
+    await setSpaceArchived({
+      workspaceId: session.workspace.id,
+      spaceId: space.id,
+      actor: { type: 'user', id: session.userId },
+      archived: parsed.data.archived === 'true',
+    });
+  } catch (error) {
+    return toFormState(error);
+  }
+
+  revalidatePath('/', 'layout');
+  redirect(spaceSettingsHref(space.key));
+}
+
+/* ------------------------------------------------------------------ */
+/* Repository                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A space's repository setting, edited by an administrator.
+ *
+ * Linking a repository decides what every anchor in the space is checked
+ * against, so it is a human role check rather than a scope: an agent token
+ * carries scopes but no role, and no scope set makes it an administrator.
+ */
+
+export interface RepositoryFormState {
+  saved?: boolean;
+  error?: string;
+  message?: string;
+  probe?: { ok: boolean; refs?: number; commit?: string; error?: string };
+}
+
+function readRepositoryForm(formData: FormData) {
+  return {
+    url: String(formData.get('url') ?? ''),
+    default_ref: String(formData.get('default_ref') ?? ''),
+    auth_token_env: String(formData.get('auth_token_env') ?? '').trim() || undefined,
+  };
+}
+
+export async function saveRepositoryAction(
+  _previous: RepositoryFormState,
+  formData: FormData,
+): Promise<RepositoryFormState> {
+  const session = await requireAdmin();
+  if (!session) return { error: 'forbidden' };
+
+  const space = await getSpaceByKey(session.workspace.id, formText(formData, 'spaceKey'));
+  if (!space) return { error: 'not_found' };
+
+  const parsed = repositorySettingsSchema.safeParse(readRepositoryForm(formData));
+  if (!parsed.success) {
+    return { error: 'validation', message: parsed.error.issues[0]?.message };
+  }
+
+  try {
+    // Audited as `space.repository_set` by the service, in the same
+    // transaction as the change.
+    await updateSpace({
+      workspaceId: session.workspace.id,
+      spaceId: space.id,
+      actor: { type: 'user', id: session.userId },
+      repository: parsed.data,
+    });
+  } catch (error) {
+    const state = toFormState(error);
+    return { error: state.error, message: state.message };
+  }
+
+  revalidatePath('/', 'layout');
+  return { saved: true };
+}
+
+/**
+ * Checks the URL, the ref and the token without cloning anything.
+ *
+ * `ls-remote` needs no disk, so an administrator finds out that a token is
+ * missing here rather than from a failed check on somebody else's page.
+ */
+export async function testRepositoryAction(
+  _previous: RepositoryFormState,
+  formData: FormData,
+): Promise<RepositoryFormState> {
+  const session = await requireAdmin();
+  if (!session) return { error: 'forbidden' };
+
+  const space = await getSpaceByKey(session.workspace.id, formText(formData, 'spaceKey'));
+  if (!space) return { error: 'not_found' };
+
+  const parsed = repositorySettingsSchema.safeParse(readRepositoryForm(formData));
+  if (!parsed.success) {
+    return { error: 'validation', message: parsed.error.issues[0]?.message };
+  }
+
+  const probe = await probeRepository(parsed.data);
+
+  // Testing reaches out to the URL with the named credential, which is as much
+  // an act as saving the setting is, so it leaves the same kind of record.
+  await recordAudit({
+    workspaceId: session.workspace.id,
+    actorType: 'user',
+    actorId: session.userId,
+    action: 'space.repository_tested',
+    target: space.id,
+    metadata: {
+      key: space.key,
+      url: parsed.data.url,
+      default_ref: parsed.data.default_ref,
+      auth_token_env: parsed.data.auth_token_env ?? null,
+      ok: probe.ok,
+    },
+  });
+
+  return { probe };
+}

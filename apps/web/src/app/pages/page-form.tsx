@@ -11,22 +11,28 @@ import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/card';
 import { Field, Input, Label, Select } from '@/components/ui/field';
 import { PageBody } from '@/components/page-body';
+import { lastSegment, slugifySegment } from '@/lib/pages/paths';
 import { cn, formatDateTime } from '@/lib/utils';
 
 export interface PageFormParent {
   id: string;
   title: string;
   path: string;
+  /** How deep the page sits in the tree, for indenting the picker. */
+  depth: number;
 }
 
 export interface PageFormProps {
   mode: 'create' | 'edit';
+  /** The space the page is created in; pages never change space. */
+  spaceKey: string;
   parents: PageFormParent[];
   initial: {
     pageId?: string;
     baseContentHash?: string;
     title: string;
-    path: string;
+    /** The page's current last path segment when editing; empty when creating. */
+    segment: string;
     parentId: string;
     kind: 'technical' | 'human';
     summary: string;
@@ -45,7 +51,25 @@ const initialState: PageFormState = {};
  * what is stored, and the stored form is what agents read and what exports
  * carry.
  */
-export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) {
+/**
+ * The path a page will get, as the server will build it: the parent's path, then
+ * the typed segment or, failing that, the fallback made into one. `null` when
+ * the fallback has nothing a segment can be made of — a title in Cyrillic, say —
+ * and no segment was typed.
+ */
+function previewPath(
+  parents: PageFormParent[],
+  parentId: string,
+  segment: string,
+  fallback: string,
+): string | null {
+  const parent = parents.find((candidate) => candidate.id === parentId);
+  const last = slugifySegment(segment) || slugifySegment(fallback);
+  if (last === '') return null;
+  return `${parent ? parent.path : ''}/${last}`;
+}
+
+export function PageForm({ mode, spaceKey, parents, initial, cancelHref }: PageFormProps) {
   const t = useTranslations('editor');
   const tc = useTranslations('common');
   const format = useFormatter();
@@ -60,6 +84,17 @@ export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) 
   const blocked = mode === 'edit' && (lease.status === 'conflict' || lease.status === 'lost');
 
   const [body, setBody] = useState(initial.body);
+  const [title, setTitle] = useState(initial.title);
+  const [parentId, setParentId] = useState(initial.parentId);
+  const [segment, setSegment] = useState(initial.segment);
+  // An edit with the segment cleared keeps the page's current segment, which is
+  // what the server does too; a new page falls back to its title.
+  const resultingPath = previewPath(
+    parents,
+    parentId,
+    segment,
+    mode === 'edit' ? initial.segment : title,
+  );
   const [showPreview, setShowPreview] = useState(false);
   const [preview, setPreview] = useState('');
   const [rendering, startRendering] = useTransition();
@@ -109,6 +144,7 @@ export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) 
       ) : null}
 
       <form action={formAction} className="grid gap-5">
+        {mode === 'create' ? <input type="hidden" name="spaceKey" value={spaceKey} /> : null}
         {initial.pageId ? <input type="hidden" name="pageId" value={initial.pageId} /> : null}
         {initial.baseContentHash ? (
           <input type="hidden" name="baseContentHash" value={initial.baseContentHash} />
@@ -118,16 +154,29 @@ export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) 
         {mode === 'edit' ? <input type="hidden" name="claimId" value={lease.claimId ?? ''} /> : null}
 
         <Field label={t('title')} htmlFor="title">
-          <Input id="title" name="title" defaultValue={initial.title} required maxLength={300} />
+          <Input
+            id="title"
+            name="title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            required
+            maxLength={300}
+          />
         </Field>
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label={t('parent')} htmlFor="parentId" hint={t('parentHint')}>
-            <Select id="parentId" name="parentId" defaultValue={initial.parentId}>
+            <Select
+              id="parentId"
+              name="parentId"
+              value={parentId}
+              onChange={(event) => setParentId(event.target.value)}
+            >
               <option value="">{t('parentNone')}</option>
               {parents.map((parent) => (
                 <option key={parent.id} value={parent.id}>
-                  {parent.path}
+                  {/* Indented by depth, so the picker reads as the tree it is. */}
+                  {`${'\u00a0\u00a0'.repeat(parent.depth)}${parent.title} (${lastSegment(parent.path)})`}
                 </option>
               ))}
             </Select>
@@ -141,16 +190,30 @@ export function PageForm({ mode, parents, initial, cancelHref }: PageFormProps) 
           </Field>
         </div>
 
-        <Field label={t('path')} htmlFor="path" hint={t('pathHint')}>
+        <Field label={t('segment')} htmlFor="segment" hint={t('segmentHint')}>
           <Input
-            id="path"
-            name="path"
-            defaultValue={initial.path}
-            maxLength={512}
-            placeholder="/backend/auth"
+            id="segment"
+            name="segment"
+            value={segment}
+            onChange={(event) => setSegment(event.target.value)}
+            maxLength={80}
+            placeholder={slugifySegment(title) || 'auth'}
             className="font-mono text-xs"
           />
         </Field>
+
+        <p className="text-xs text-muted-foreground" aria-live="polite">
+          {resultingPath === null ? (
+            t('resultingPathUnknown')
+          ) : (
+            <>
+              {t('resultingPath')}{' '}
+              <code className="font-mono text-foreground">
+                {spaceKey}:{resultingPath}
+              </code>
+            </>
+          )}
+        </p>
 
         <Field label={t('summary')} htmlFor="summary" hint={t('summaryHint')}>
           <Input id="summary" name="summary" defaultValue={initial.summary} maxLength={2000} />

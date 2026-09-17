@@ -2,7 +2,8 @@
  * The statement `docs/mcp.md` requires, verbatim, in the description of every
  * tool whose result carries text written by someone other than the caller:
  * page bodies, titles and summaries (`wiki.search`, `wiki.get_page`,
- * `wiki.list_pages`, `wiki.write_page`), claim notes and holder names
+ * `wiki.list_pages`, `wiki.write_page`), space names and descriptions
+ * (`wiki.list_spaces`), claim notes and holder names
  * (`wiki.get_presence`, `wiki.post_note`, `wiki.claim`), and names read out of
  * repository code (`wiki.check_anchors`).
  *

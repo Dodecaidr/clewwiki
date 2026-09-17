@@ -38,10 +38,11 @@ function baseFilename(page: PageRecord): string {
  * metadata a reader needs to put the file back where it came from. The body is
  * not reformatted — an export that rewrites content is not a copy of it.
  */
-export function exportPageMarkdown(page: PageRecord): ExportedPage {
+export function exportPageMarkdown(page: PageRecord, space?: { key: string }): ExportedPage {
   const frontMatter = [
     '---',
     `title: ${yamlString(page.title)}`,
+    ...(space ? [`space: ${yamlString(space.key)}`] : []),
     `path: ${yamlString(page.path)}`,
     `kind: ${page.kind}`,
     `version: ${page.version}`,
@@ -121,6 +122,10 @@ ${rendered}
   };
 }
 
-export async function exportPage(page: PageRecord, format: ExportFormat): Promise<ExportedPage> {
-  return format === 'md' ? exportPageMarkdown(page) : exportPageHtml(page);
+export async function exportPage(
+  page: PageRecord,
+  format: ExportFormat,
+  space?: { key: string },
+): Promise<ExportedPage> {
+  return format === 'md' ? exportPageMarkdown(page, space) : exportPageHtml(page);
 }

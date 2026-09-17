@@ -23,6 +23,11 @@ export interface UserIdentity {
   role: MembershipRole;
   workspaceId: string;
   workspace: Workspace;
+  /**
+   * Always `null` for a person: accounts reach every space of their workspace,
+   * and their role, not a space list, is what governs what they may do.
+   */
+  spaceIds: null;
 }
 
 export interface AgentIdentity {
@@ -32,6 +37,13 @@ export interface AgentIdentity {
   scopes: AgentScope[];
   workspaceId: string;
   workspace: Workspace;
+  /**
+   * The spaces the token is limited to, or `null` for every space in the
+   * workspace. Enforced by the handlers next to the workspace check: a page in
+   * a space outside the list answers `404`, exactly like a page in another
+   * workspace.
+   */
+  spaceIds: string[] | null;
 }
 
 export type ApiIdentity = UserIdentity | AgentIdentity;
@@ -123,6 +135,7 @@ async function authenticateSession(request: Request): Promise<AuthResult> {
       role: membership.role,
       workspaceId: workspace.id,
       workspace,
+      spaceIds: null,
     },
   };
 }
@@ -214,6 +227,7 @@ async function authenticateAgent(request: Request, presented: string): Promise<A
       scopes: lookup.scopes,
       workspaceId: workspace.id,
       workspace,
+      spaceIds: lookup.spaceIds,
     },
   };
 }
@@ -241,5 +255,22 @@ export function requireWorkspace(
   resourceWorkspaceId: string,
 ): NextResponse | null {
   if (identity.workspaceId === resourceWorkspaceId) return null;
+  return errorResponse(404, 'not_found', 'Resource not found');
+}
+
+/** True when the caller may reach resources in the space `spaceId`. */
+export function canSeeSpace(identity: ApiIdentity, spaceId: string): boolean {
+  return identity.spaceIds === null || identity.spaceIds.includes(spaceId);
+}
+
+/**
+ * Explicit space-scoping gate, the companion of `requireWorkspace`. Handlers
+ * call it with the space of the page (or of the page behind a claim or an
+ * anchor) they are about to touch. A token limited to other spaces is answered
+ * `404`, not `403`, for the same reason: the response must not confirm that the
+ * resource exists somewhere the caller cannot see.
+ */
+export function requireSpace(identity: ApiIdentity, resourceSpaceId: string): NextResponse | null {
+  if (canSeeSpace(identity, resourceSpaceId)) return null;
   return errorResponse(404, 'not_found', 'Resource not found');
 }

@@ -5,7 +5,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import type { WorkspaceRepositorySettings } from '@clewwiki/db';
+import type { RepositorySettings } from '@clewwiki/db';
 
 import { areFileRepositoriesAllowed, getReposDir, getRepositoryToken } from '../env';
 import { PageServiceError } from '../pages/errors';
@@ -14,7 +14,7 @@ import { isSafeRef, isSafeRepoPath } from './settings';
 const run = promisify(execFile);
 
 /**
- * Read-only access to a workspace's source repository.
+ * Read-only access to a space's source repository.
  *
  * Three rules shape everything here.
  *
@@ -27,7 +27,7 @@ const run = promisify(execFile);
  *    `execFile`. Refs and paths are validated against a narrow pattern before
  *    they get there, so neither a crafted branch name nor a crafted file path
  *    can turn into an option or a second command.
- * 3. **Credentials come from the process environment.** The workspace setting
+ * 3. **Credentials come from the process environment.** The space setting
  *    names an environment variable; the token is passed to git through
  *    `GIT_CONFIG_*` environment entries rather than in the URL or in `argv`,
  *    where `ps` would show it to every account on the host.
@@ -75,7 +75,7 @@ export function credentialConfigKey(url: string): string | null {
   return `http.${parsed.origin}/.extraHeader`;
 }
 
-export function gitEnvironment(settings: WorkspaceRepositorySettings): GitEnvironment {
+export function gitEnvironment(settings: RepositorySettings): GitEnvironment {
   const entries: Array<[string, string]> = [['core.hooksPath', '/dev/null']];
 
   const token = getRepositoryToken(settings.auth_token_env);
@@ -144,7 +144,7 @@ function repositoryError(message: string, error: unknown): PageServiceError {
 
 async function git(
   args: readonly string[],
-  settings: WorkspaceRepositorySettings,
+  settings: RepositorySettings,
   cwd?: string,
   maxBuffer: number = GIT_MAX_BUFFER,
 ): Promise<string> {
@@ -163,29 +163,29 @@ async function git(
 }
 
 /* ------------------------------------------------------------------ */
-/* Per-workspace serialisation                                         */
+/* Per-space serialisation                                             */
 /* ------------------------------------------------------------------ */
 
 const locks = new Map<string, Promise<unknown>>();
 
 /**
- * Serialises work on one workspace's clone.
+ * Serialises work on one space's clone.
  *
  * Two concurrent `check` calls would otherwise fetch into the same directory
  * at the same time, and git's answer to that is a lock file error rather than
- * a merge. The queue is per workspace, so one workspace's slow fetch does not
- * hold up another's.
+ * a merge. The queue is per space — the unit that owns a repository — so one
+ * project's slow fetch does not hold up another's.
  */
 export async function withRepositoryLock<T>(
-  workspaceId: string,
+  spaceId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const previous = locks.get(workspaceId) ?? Promise.resolve();
+  const previous = locks.get(spaceId) ?? Promise.resolve();
   const next = previous.then(fn, fn);
   // Keep the chain alive even when a link rejects, or the next caller inherits
   // an unhandled rejection that has nothing to do with it.
   locks.set(
-    workspaceId,
+    spaceId,
     next.then(
       () => undefined,
       () => undefined,
@@ -198,13 +198,18 @@ export async function withRepositoryLock<T>(
 /* The mirror                                                          */
 /* ------------------------------------------------------------------ */
 
-export function repositoryDirectory(workspaceId: string): string {
-  return path.join(getReposDir(), `${workspaceId}.git`);
+/**
+ * One mirror per space, named by the space id. Mirrors kept per workspace
+ * before `0004_spaces` are named by the workspace id and are simply no longer
+ * read; the first check in a space clones afresh.
+ */
+export function repositoryDirectory(spaceId: string): string {
+  return path.join(getReposDir(), `${spaceId}.git`);
 }
 
 async function currentRemote(
   dir: string,
-  settings: WorkspaceRepositorySettings,
+  settings: RepositorySettings,
 ): Promise<string | null> {
   try {
     return (await git(['config', '--get', 'remote.origin.url'], settings, dir)).trim();
@@ -214,17 +219,17 @@ async function currentRemote(
 }
 
 /**
- * Makes sure the workspace's mirror exists and is up to date.
+ * Makes sure the space's mirror exists and is up to date.
  *
  * A clone whose origin no longer matches the configured URL is discarded
  * rather than re-pointed: the two repositories share no history, and a stale
  * object database would answer questions about the wrong code.
  */
 export async function syncRepository(
-  workspaceId: string,
-  settings: WorkspaceRepositorySettings,
+  spaceId: string,
+  settings: RepositorySettings,
 ): Promise<string> {
-  const dir = repositoryDirectory(workspaceId);
+  const dir = repositoryDirectory(spaceId);
 
   try {
     await mkdir(getReposDir(), { recursive: true });
@@ -259,11 +264,11 @@ export async function syncRepository(
   return dir;
 }
 
-/** Resolves a ref to the commit it names, inside the workspace's mirror. */
+/** Resolves a ref to the commit it names, inside the space's mirror. */
 export async function resolveCommit(
   dir: string,
   ref: string,
-  settings: WorkspaceRepositorySettings,
+  settings: RepositorySettings,
 ): Promise<string> {
   if (!isSafeRef(ref)) {
     throw new PageServiceError('validation', `Unsupported ref: ${ref}`);
@@ -293,7 +298,7 @@ export interface TreeEntry {
 export async function listTree(
   dir: string,
   commit: string,
-  settings: WorkspaceRepositorySettings,
+  settings: RepositorySettings,
 ): Promise<TreeEntry[]> {
   try {
     const stdout = await git(['ls-tree', '-r', '-z', '-l', commit], settings, dir);
@@ -327,7 +332,7 @@ export async function readBlob(
   dir: string,
   commit: string,
   filePath: string,
-  settings: WorkspaceRepositorySettings,
+  settings: RepositorySettings,
 ): Promise<string | null> {
   if (!isSafeRepoPath(filePath)) {
     throw new PageServiceError('validation', `Unsupported repository path: ${filePath}`);
@@ -357,7 +362,7 @@ export interface ConnectionProbe {
  * runs and before anything is written under `REPOS_DIR`.
  */
 export async function probeRepository(
-  settings: WorkspaceRepositorySettings,
+  settings: RepositorySettings,
 ): Promise<ConnectionProbe> {
   if (!isSafeRef(settings.default_ref)) {
     return { ok: false, error: `Unsupported ref: ${settings.default_ref}` };

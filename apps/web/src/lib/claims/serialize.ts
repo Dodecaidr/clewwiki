@@ -31,6 +31,7 @@ export interface ClaimResource {
   since: string;
   expires_at: string;
   base_content_hash: string;
+  space?: { key: string; name: string };
   path?: string;
   title?: string;
   notes?: ClaimNoteResource[];
@@ -48,6 +49,7 @@ export function toClaimNoteResource(note: ClaimNoteRecord): ClaimNoteResource {
 }
 
 export interface ClaimResourceExtras {
+  space?: { key: string; name: string };
   path?: string;
   title?: string;
   notes?: ClaimNoteRecord[];
@@ -72,6 +74,7 @@ export function toClaimResource(
   // contract spells the field `section_id?`, and "absent" is what a page-level
   // claim means.
   if (claim.sectionId !== null) resource.section_id = claim.sectionId;
+  if (extras.space !== undefined) resource.space = { key: extras.space.key, name: extras.space.name };
   if (extras.path !== undefined) resource.path = extras.path;
   if (extras.title !== undefined) resource.title = extras.title;
   if (extras.notes !== undefined) resource.notes = extras.notes.map(toClaimNoteResource);
@@ -80,6 +83,7 @@ export function toClaimResource(
 
 export function toPresenceResource(entry: PresenceEntry): ClaimResource {
   return toClaimResource(entry.claim, {
+    space: { key: entry.spaceKey, name: entry.spaceName },
     path: entry.path,
     title: entry.title,
     notes: entry.notes,

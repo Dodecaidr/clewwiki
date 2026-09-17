@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 import { apiError, apiJson, readJsonBody, serviceErrorResponse, validationError } from '@/lib/api-response';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
 import { authorizePagesRequest, WRITE_SCOPES } from '@/lib/pages-api';
-import { linkPages } from '@/lib/pages/service';
+import { getPageById, linkPages } from '@/lib/pages/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,8 @@ const bodySchema = z.object({ linked_page_id: z.uuid().nullable() });
  *
  * Both rows are written in one transaction, so the pair is either visible from
  * both sides or from neither. The two pages must be of different kinds — a
- * pair of two technical pages is not the relationship this models.
+ * pair of two technical pages is not the relationship this models. Both pages
+ * must be in the same space; a counterpart anywhere else is not found.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await authorizePagesRequest(request, WRITE_SCOPES);
@@ -35,6 +37,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!parsed.success) return validationError(parsed.error);
 
   try {
+    const page = await getPageById(auth.workspaceId, parsedParams.data.id);
+    if (!page) return apiError(404, 'not_found', 'Page not found');
+    const mismatch = requireWorkspace(auth.identity, page.workspaceId);
+    if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
+
+    // The service looks the counterpart up inside this page's space, so a
+    // token that can see this page cannot reach a page in a space it cannot.
     const result = await linkPages({
       workspaceId: auth.workspaceId,
       pageId: parsedParams.data.id,

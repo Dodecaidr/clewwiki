@@ -26,7 +26,7 @@ export const runtime = 'nodejs';
  * The transport runs stateless — a server instance per request, no session
  * store — because a Next route handler is not a long-lived connection and a
  * session map in a module would be per-replica state pretending to be shared.
- * The eleven tools are request/response, so nothing is lost: there are no
+ * The twelve tools are request/response, so nothing is lost: there are no
  * server-initiated notifications to keep a stream open for, and `GET` and
  * `DELETE` say so with 405 rather than pretending to hold a session.
  *

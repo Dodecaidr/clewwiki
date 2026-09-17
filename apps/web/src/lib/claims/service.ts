@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { and, asc, desc, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
-import { claimNotes, claims, pages } from '@clewwiki/db';
+import { claimNotes, claims, pages, spaces } from '@clewwiki/db';
 import type { SQL } from 'drizzle-orm';
 import type { ActorKind, ClaimReleaseReason, WorkspaceSettings } from '@clewwiki/db';
 
@@ -302,9 +302,18 @@ export async function getActiveClaimsByPage(
 
 export interface PresenceEntry {
   claim: ClaimRecord;
+  spaceId: string;
+  spaceKey: string;
+  spaceName: string;
   path: string;
   title: string;
   notes: ClaimNoteRecord[];
+}
+
+export interface PresenceOptions {
+  /** Only claims on pages in these spaces; omit for every space. */
+  spaceIds?: readonly string[] | null;
+  now?: Date;
 }
 
 /**
@@ -316,16 +325,31 @@ export interface PresenceEntry {
  */
 export async function getPresence(
   workspaceId: string,
-  now: Date = new Date(),
+  options: PresenceOptions = {},
 ): Promise<PresenceEntry[]> {
+  const now = options.now ?? new Date();
+  if (options.spaceIds && options.spaceIds.length === 0) return [];
   const db = getDatabase();
 
   const rows = await db
-    .select({ claim: claimColumns, path: pages.path, title: pages.title })
+    .select({
+      claim: claimColumns,
+      path: pages.path,
+      title: pages.title,
+      spaceId: spaces.id,
+      spaceKey: spaces.key,
+      spaceName: spaces.name,
+    })
     .from(claims)
     .innerJoin(pages, eq(pages.id, claims.pageId))
+    .innerJoin(spaces, eq(spaces.id, pages.spaceId))
     .where(
-      and(eq(claims.workspaceId, workspaceId), isNull(pages.deletedAt), activeClaimFilter(now)),
+      and(
+        eq(claims.workspaceId, workspaceId),
+        isNull(pages.deletedAt),
+        activeClaimFilter(now),
+        options.spaceIds ? inArray(pages.spaceId, [...options.spaceIds]) : undefined,
+      ),
     )
     .orderBy(desc(claims.createdAt));
 
@@ -355,6 +379,9 @@ export async function getPresence(
 
   return rows.map((row) => ({
     claim: row.claim,
+    spaceId: row.spaceId,
+    spaceKey: row.spaceKey,
+    spaceName: row.spaceName,
     path: row.path,
     title: row.title,
     notes: notesByClaim.get(row.claim.id) ?? [],

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
 import { createAgentTokenAction } from './actions';
@@ -15,10 +15,17 @@ const initialState: TokenFormState = {};
 
 const EXPIRY_CHOICES = [7, 30, 90, 365] as const;
 
-export function TokenForm() {
+export interface TokenFormSpace {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export function TokenForm({ spaces }: { spaces: TokenFormSpace[] }) {
   const t = useTranslations('tokens');
   const tc = useTranslations('common');
   const [state, action, pending] = useActionState(createAgentTokenAction, initialState);
+  const [spaceAccess, setSpaceAccess] = useState<'all' | 'selected'>('all');
 
   return (
     <div className="grid gap-5">
@@ -48,6 +55,7 @@ export function TokenForm() {
       {state.error === 'forbidden' ? <Alert tone="error">{t('adminOnly')}</Alert> : null}
       {state.error === 'name' ? <Alert tone="error">{t('errorName')}</Alert> : null}
       {state.error === 'scopes' ? <Alert tone="error">{t('errorScopes')}</Alert> : null}
+      {state.error === 'spaces' ? <Alert tone="error">{t('errorSpaces')}</Alert> : null}
       {state.error === 'generic' ? <Alert tone="error">{t('errorGeneric')}</Alert> : null}
 
       <form action={action} className="grid gap-5">
@@ -88,6 +96,56 @@ export function TokenForm() {
             ))}
           </div>
           <p className="text-xs text-muted-foreground">{t('scopesHint')}</p>
+        </fieldset>
+
+        <fieldset className="grid gap-2">
+          <legend className="text-sm font-medium">{t('spaceAccess')}</legend>
+          <div className="flex flex-wrap gap-4">
+            <div className="flex items-center gap-2">
+              <input
+                id="space-access-all"
+                type="radio"
+                name="spaceAccess"
+                value="all"
+                checked={spaceAccess === 'all'}
+                onChange={() => setSpaceAccess('all')}
+                className="size-4"
+              />
+              <Label htmlFor="space-access-all">{t('spaceAccessAll')}</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="space-access-selected"
+                type="radio"
+                name="spaceAccess"
+                value="selected"
+                checked={spaceAccess === 'selected'}
+                onChange={() => setSpaceAccess('selected')}
+                disabled={spaces.length === 0}
+                className="size-4"
+              />
+              <Label htmlFor="space-access-selected">{t('spaceAccessSelected')}</Label>
+            </div>
+          </div>
+          {spaceAccess === 'selected' ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {spaces.map((space) => (
+                <div key={space.id} className="flex items-center gap-2">
+                  <input
+                    id={`space-${space.id}`}
+                    type="checkbox"
+                    name="spaceIds"
+                    value={space.id}
+                    className="size-4"
+                  />
+                  <Label htmlFor={`space-${space.id}`}>
+                    {space.name} <span className="font-mono text-xs text-muted-foreground">{space.key}</span>
+                  </Label>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <p className="text-xs text-muted-foreground">{t('spaceAccessHint')}</p>
         </fieldset>
 
         <div>

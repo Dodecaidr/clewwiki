@@ -1,8 +1,9 @@
 # @clewwiki/mcp-server
 
 The MCP server for [clewwiki](https://github.com/Dodecaidr/clewwiki): the
-eleven wiki tools an AI coding agent calls, wrapping a clewwiki instance's
-REST API with an agent token.
+twelve wiki tools an AI coding agent calls, wrapping a clewwiki instance's
+REST API with an agent token. An agent starts with `wiki.list_spaces` and
+works inside its project's space.
 
 ```sh
 CLEWWIKI_URL=https://wiki.example.com CLEWWIKI_TOKEN=cww_... clewwiki-mcp

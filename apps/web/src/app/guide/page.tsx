@@ -39,10 +39,23 @@ const SECTIONS: Section[] = [
     blocks: [p('p1'), p('p2'), ul('kindTechnical', 'kindHuman'), p('p3'), p('p4')],
   },
   {
+    id: 'spaces',
+    blocks: [
+      p('p1'),
+      ul('space', 'section', 'page'),
+      p('p2'),
+      ul('structureOne', 'structureSections', 'structurePairs'),
+      code('example'),
+      p('p3'),
+      p('p4'),
+      p('p5'),
+    ],
+  },
+  {
     id: 'writing',
     blocks: [
       p('p1'),
-      ul('path', 'parent', 'kind', 'title', 'body'),
+      ul('parent', 'titleField', 'segment', 'kind', 'body'),
       p('p2'),
       code('mermaidExample'),
       p('p3'),
@@ -68,6 +81,7 @@ const SECTIONS: Section[] = [
       ul('scopeIdentity', 'scopePagesRead', 'scopePagesWrite', 'scopePagesDelete', 'scopeAudit'),
       p('p3'),
       p('p4'),
+      p('pSpaces'),
       p('p5'),
       ul('comboRead', 'comboWrite', 'comboCi'),
       p('p6'),
@@ -75,7 +89,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'roles',
-    blocks: [p('p1'), ul('admin', 'editor'), p('p2')],
+    blocks: [p('p1'), ul('admin', 'editor'), p('p2'), p('p3')],
   },
   {
     id: 'more',
@@ -99,9 +113,8 @@ const richTags = {
     <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">{chunks}</code>
   ),
   strong: (chunks: ReactNode) => <strong className="font-semibold text-foreground">{chunks}</strong>,
-  newPageLink: inlineLink('/pages/new'),
+  spacesLink: inlineLink('/'),
   presenceLink: inlineLink('/presence'),
-  repositoryLink: inlineLink('/settings/repository'),
   tokensLink: inlineLink('/tokens'),
   connectLink: inlineLink('/connect'),
 };

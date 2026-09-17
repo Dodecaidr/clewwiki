@@ -91,14 +91,14 @@ describe.skipIf(!probe.reachable)('subtree delete, restore and cookie-authentica
     const root = await pagesRoute.POST(
       bearer(deleter, '/api/v1/pages', {
         method: 'POST',
-        body: JSON.stringify({ title: `Root ${prefix}`, path: rootPath }),
+        body: JSON.stringify({ space: 'MAIN', title: `Root ${prefix}`, path: rootPath }),
       }),
     );
     const rootJson = (await root.json()) as JsonRecord;
     const child = await pagesRoute.POST(
       bearer(deleter, '/api/v1/pages', {
         method: 'POST',
-        body: JSON.stringify({ title: `Child ${prefix}`, path: `${rootPath}/child` }),
+        body: JSON.stringify({ space: 'MAIN', title: `Child ${prefix}`, path: `${rootPath}/child` }),
       }),
     );
     const childJson = (await child.json()) as JsonRecord;
@@ -137,6 +137,7 @@ describe.skipIf(!probe.reachable)('subtree delete, restore and cookie-authentica
       .values({ name: `Safety ${suiteTag}`, slug: `${suiteTag}-ws` })
       .returning({ id: schema.workspaces.id });
     workspaceId = workspace!.id;
+    await db.insert(schema.spaces).values({ workspaceId, key: 'MAIN', name: 'Main' });
 
     deleter = (await seedToken('deleter', ['pages:read', 'pages:write', 'pages:delete'])).token;
     otherAgent = (await seedToken('other-agent', ['pages:read', 'pages:write'])).token;
@@ -253,7 +254,7 @@ describe.skipIf(!probe.reachable)('subtree delete, restore and cookie-authentica
       const squatter = await pagesRoute.POST(
         bearer(deleter, '/api/v1/pages', {
           method: 'POST',
-          body: JSON.stringify({ title: 'Squatter', path: `${rootPath}/child` }),
+          body: JSON.stringify({ space: 'MAIN', title: 'Squatter', path: `${rootPath}/child` }),
         }),
       );
       expect(squatter.status).toBe(201);
@@ -274,7 +275,7 @@ describe.skipIf(!probe.reachable)('subtree delete, restore and cookie-authentica
   });
 
   describe('cookie-authenticated writes', () => {
-    const body = () => JSON.stringify({ title: 'Cookie page', path: `/${suiteTag}-cookie-${randomUUID().slice(0, 6)}` });
+    const body = () => JSON.stringify({ space: 'MAIN', title: 'Cookie page', path: `/${suiteTag}-cookie-${randomUUID().slice(0, 6)}` });
 
     it('accepts a same-origin JSON request', async () => {
       const response = await pagesRoute.POST(

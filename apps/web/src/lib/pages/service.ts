@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
-import { claims, pageRevisions, pages } from '@clewwiki/db';
+import { claims, pageRevisions, pages, spaces } from '@clewwiki/db';
 import type { SQL } from 'drizzle-orm';
 import type { ActorKind, PageKind } from '@clewwiki/db';
 
@@ -37,6 +37,12 @@ import type { DbExecutor } from '../db';
  * Every function takes the caller's `workspaceId` as its first argument and
  * puts it in the SQL predicate rather than checking it afterwards, so a page
  * belonging to another workspace is invisible rather than merely forbidden.
+ *
+ * Pages belong to exactly one space, and everything that works on a tree — a
+ * path lookup, a move, a subtree delete or restore, a pairing — stays inside
+ * the page's space, because the same path can exist once per space. A page is
+ * found by id across the workspace; whether the caller may see that page's
+ * space is the handler's check, written out next to the workspace check.
  */
 
 export interface PageActor {
@@ -47,6 +53,7 @@ export interface PageActor {
 export interface PageRecord {
   id: string;
   workspaceId: string;
+  spaceId: string;
   parentId: string | null;
   path: string;
   title: string;
@@ -72,6 +79,7 @@ export interface PageRecord {
 const pageColumns = {
   id: pages.id,
   workspaceId: pages.workspaceId,
+  spaceId: pages.spaceId,
   parentId: pages.parentId,
   path: pages.path,
   title: pages.title,
@@ -143,6 +151,7 @@ export async function getPageById(
 
 export async function getPageByPath(
   workspaceId: string,
+  spaceId: string,
   path: string,
   executor: DbExecutor = getDatabase(),
 ): Promise<PageRecord | null> {
@@ -157,10 +166,64 @@ export async function getPageByPath(
     .select(pageColumns)
     .from(pages)
     .where(
-      and(eq(pages.path, normalized), eq(pages.workspaceId, workspaceId), isNull(pages.deletedAt)),
+      and(
+        eq(pages.path, normalized),
+        eq(pages.workspaceId, workspaceId),
+        eq(pages.spaceId, spaceId),
+        isNull(pages.deletedAt),
+      ),
     )
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * The space a page belongs to, deleted or not. Handlers that reach a page
+ * through something else — a claim, an anchor — use it to apply the space
+ * check to the page behind the resource.
+ */
+export async function getPageSpaceId(
+  workspaceId: string,
+  pageId: string,
+  executor: DbExecutor = getDatabase(),
+): Promise<string | null> {
+  const [row] = await executor
+    .select({ spaceId: pages.spaceId })
+    .from(pages)
+    .where(and(eq(pages.id, pageId), eq(pages.workspaceId, workspaceId)))
+    .limit(1);
+  return row?.spaceId ?? null;
+}
+
+/**
+ * The live pages above `page`, root first. One query over the path prefixes,
+ * for breadcrumbs.
+ */
+export async function getAncestors(
+  workspaceId: string,
+  page: Pick<PageRecord, 'spaceId' | 'path'>,
+): Promise<Array<Pick<PageRecord, 'id' | 'title' | 'path'>>> {
+  const prefixes: string[] = [];
+  let current = parentPathOf(page.path);
+  while (current !== null) {
+    prefixes.push(current);
+    current = parentPathOf(current);
+  }
+  if (prefixes.length === 0) return [];
+
+  const db = getDatabase();
+  const rows = await db
+    .select({ id: pages.id, title: pages.title, path: pages.path })
+    .from(pages)
+    .where(
+      and(
+        eq(pages.workspaceId, workspaceId),
+        eq(pages.spaceId, page.spaceId),
+        isNull(pages.deletedAt),
+        inArray(pages.path, prefixes),
+      ),
+    );
+  return rows.sort((a, b) => a.path.length - b.path.length);
 }
 
 /** Loads a page or fails with the `not_found` the handlers hand straight back. */
@@ -177,19 +240,28 @@ export async function requirePage(
 }
 
 export interface ListPagesOptions {
-  /** `null` lists the roots; omit to list the whole workspace. */
+  /** Only pages in this space. */
+  spaceId?: string;
+  /** Only pages in these spaces; an empty list matches nothing. */
+  spaceIds?: readonly string[];
+  /** `null` lists the roots; omit to list every page. */
   parentId?: string | null;
   kind?: PageKind;
   limit?: number;
+  /** Path order (the default, a parent before its children) or newest first. */
+  orderBy?: 'path' | 'updated';
 }
 
 export async function listPages(
   workspaceId: string,
   options: ListPagesOptions = {},
 ): Promise<PageRecord[]> {
+  if (options.spaceIds && options.spaceIds.length === 0) return [];
   const db = getDatabase();
   const filters = [eq(pages.workspaceId, workspaceId), isNull(pages.deletedAt)];
 
+  if (options.spaceId) filters.push(eq(pages.spaceId, options.spaceId));
+  if (options.spaceIds) filters.push(inArray(pages.spaceId, [...options.spaceIds]));
   if (options.parentId === null) {
     filters.push(isNull(pages.parentId));
   } else if (typeof options.parentId === 'string') {
@@ -203,12 +275,13 @@ export async function listPages(
     .select(pageColumns)
     .from(pages)
     .where(and(...filters))
-    .orderBy(asc(pages.path))
+    .orderBy(options.orderBy === 'updated' ? desc(pages.updatedAt) : asc(pages.path))
     .limit(options.limit ?? 500);
 }
 
 export interface PageTreeNode {
   id: string;
+  spaceId: string;
   parentId: string | null;
   path: string;
   title: string;
@@ -218,15 +291,16 @@ export interface PageTreeNode {
 }
 
 /**
- * The page tree.
+ * The page tree of one space.
  *
- * One flat query plus an in-memory assembly, not a recursive CTE: a v1
- * workspace holds a few hundred pages at most, and the flat read is also what
- * the sidebar needs. Ordering by path means a parent is always seen before its
- * children, so a single pass builds the nesting.
+ * One flat query plus an in-memory assembly, not a recursive CTE: a space holds
+ * a few hundred pages at most, and the flat read is also what the sidebar
+ * needs. Ordering by path means a parent is always seen before its children, so
+ * a single pass builds the nesting.
  */
 export async function getPageTree(
   workspaceId: string,
+  spaceId: string,
   rootId: string | null = null,
 ): Promise<PageTreeNode[]> {
   const db = getDatabase();
@@ -234,12 +308,16 @@ export async function getPageTree(
   if (rootId !== null) {
     // Resolved through the workspace predicate, so asking for the subtree of
     // another workspace's page is a 404 rather than an empty answer.
-    await requirePage(workspaceId, rootId);
+    const root = await requirePage(workspaceId, rootId);
+    if (root.spaceId !== spaceId) {
+      throw new PageServiceError('not_found', 'Page not found');
+    }
   }
 
   const rows = await db
     .select({
       id: pages.id,
+      spaceId: pages.spaceId,
       parentId: pages.parentId,
       path: pages.path,
       title: pages.title,
@@ -247,7 +325,9 @@ export async function getPageTree(
       updatedAt: pages.updatedAt,
     })
     .from(pages)
-    .where(and(eq(pages.workspaceId, workspaceId), isNull(pages.deletedAt)))
+    .where(
+      and(eq(pages.workspaceId, workspaceId), eq(pages.spaceId, spaceId), isNull(pages.deletedAt)),
+    )
     .orderBy(asc(pages.path));
 
   const byId = new Map<string, PageTreeNode>();
@@ -317,6 +397,8 @@ export async function listRevisions(
 
 export interface CreatePageInput {
   workspaceId: string;
+  /** The space the page is created in. Parents are looked up inside it. */
+  spaceId: string;
   actor: PageActor;
   title: string;
   body?: string;
@@ -333,6 +415,11 @@ async function resolveCreationPath(
 ): Promise<{ path: string; parentId: string | null }> {
   const parent =
     typeof input.parentId === 'string' ? await requirePage(workspaceId, input.parentId) : null;
+  if (parent && parent.spaceId !== input.spaceId) {
+    // Answered as "not found" rather than "in another space", so the refusal
+    // says nothing about a space the caller may not be able to see.
+    throw new PageServiceError('not_found', 'Parent page not found');
+  }
 
   try {
     if (input.path) {
@@ -345,7 +432,9 @@ async function resolveCreationPath(
       // Without an explicit parent, the path decides: attach to whatever page
       // already occupies the path above, if any.
       const parentPath = parentPathOf(normalized);
-      const implied = parentPath ? await getPageByPath(workspaceId, parentPath) : null;
+      const implied = parentPath
+        ? await getPageByPath(workspaceId, input.spaceId, parentPath)
+        : null;
       return { path: normalized, parentId: implied?.id ?? null };
     }
 
@@ -371,10 +460,24 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
     throw new PageServiceError('validation', 'Title must not be empty');
   }
 
+  const db = getDatabase();
+  const [space] = await db
+    .select({ id: spaces.id, key: spaces.key, archivedAt: spaces.archivedAt })
+    .from(spaces)
+    .where(and(eq(spaces.id, input.spaceId), eq(spaces.workspaceId, input.workspaceId)))
+    .limit(1);
+  if (!space) {
+    throw new PageServiceError('not_found', 'Space not found');
+  }
+  if (space.archivedAt !== null) {
+    throw new PageServiceError('conflict', 'This space is archived and takes no new pages', {
+      space: space.key,
+    });
+  }
+
   const { path, parentId } = await resolveCreationPath(input.workspaceId, input);
   const body = input.body ?? '';
   const contentHash = computeContentHash(body);
-  const db = getDatabase();
 
   try {
     return await db.transaction(async (tx) => {
@@ -382,6 +485,7 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
         .insert(pages)
         .values({
           workspaceId: input.workspaceId,
+          spaceId: space.id,
           parentId,
           path,
           title,
@@ -419,7 +523,7 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
           actorId: input.actor.id,
           action: 'page.created',
           target: created.id,
-          metadata: { path: created.path, kind: created.kind, version: 1 },
+          metadata: { space: space.key, path: created.path, kind: created.kind, version: 1 },
         },
         tx,
       );
@@ -428,7 +532,10 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
     });
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw new PageServiceError('conflict', `A page already exists at ${path}`, { path });
+      throw new PageServiceError('conflict', `A page already exists at ${path} in this space`, {
+        path,
+        space: space.key,
+      });
     }
     throw error;
   }
@@ -589,6 +696,7 @@ async function runUpdatePage(input: UpdatePageInput): Promise<PageRecord> {
         set path = ${path}::text || substring(path from ${current.path.length + 1}::int),
             updated_at = ${now.toISOString()}::timestamptz
         where workspace_id = ${input.workspaceId}::uuid
+          and space_id = ${current.spaceId}::uuid
           and deleted_at is null
           and path like ${likePrefixPattern(current.path)}::text escape '\\'
       `);
@@ -662,6 +770,7 @@ async function resolveMoveTarget(
             and(
               eq(pages.path, parentPath),
               eq(pages.workspaceId, current.workspaceId),
+              eq(pages.spaceId, current.spaceId),
               isNull(pages.deletedAt),
             ),
           )
@@ -679,6 +788,8 @@ async function resolveMoveTarget(
           and(
             eq(pages.id, input.parentId),
             eq(pages.workspaceId, current.workspaceId),
+            // A page moves inside its space only.
+            eq(pages.spaceId, current.spaceId),
             isNull(pages.deletedAt),
           ),
         );
@@ -754,7 +865,9 @@ export async function deletePage(input: DeletePageInput): Promise<{ deleted: num
       }
 
       const now = new Date();
-      const subtree = sql`(${pages.id} = ${current.id} or ${pages.path} like ${likePrefixPattern(current.path)} escape '\\')`;
+      // The same path exists once per space, so the subtree is the prefix match
+      // inside the page's own space and nowhere else.
+      const subtree = sql`(${pages.spaceId} = ${current.spaceId} and (${pages.id} = ${current.id} or ${pages.path} like ${likePrefixPattern(current.path)} escape '\\'))`;
 
       if (!input.overrideClaims) {
         const held = await tx
@@ -930,6 +1043,7 @@ export async function restorePage(input: RestorePageInput): Promise<{ restored: 
         .where(
           and(
             eq(pages.workspaceId, input.workspaceId),
+            eq(pages.spaceId, current.spaceId),
             eq(pages.deletedAt, current.deletedAt),
             sql`(${pages.id} = ${current.id} or ${pages.path} like ${likePrefixPattern(current.path)} escape '\\')`,
           ),
@@ -942,6 +1056,7 @@ export async function restorePage(input: RestorePageInput): Promise<{ restored: 
         .where(
           and(
             eq(pages.workspaceId, input.workspaceId),
+            eq(pages.spaceId, current.spaceId),
             isNull(pages.deletedAt),
             inArray(pages.path, paths),
           ),
@@ -1070,6 +1185,9 @@ export async function linkPages(
         and(
           eq(pages.id, input.linkedPageId),
           eq(pages.workspaceId, input.workspaceId),
+          // A pair lives in one space: the technical and the human page of
+          // one subject belong to the same project.
+          eq(pages.spaceId, page.spaceId),
           isNull(pages.deletedAt),
         ),
       )
@@ -1121,12 +1239,21 @@ export async function linkPages(
 
 export interface SearchOptions {
   query: string;
+  /**
+   * The spaces to search. Always explicit: the handler decides what "all
+   * spaces" means for its caller — every visible, unarchived space — and an
+   * empty list finds nothing.
+   */
+  spaceIds: readonly string[];
   limit?: number;
   kind?: PageKind;
 }
 
 export interface SearchHit {
   pageId: string;
+  spaceId: string;
+  spaceKey: string;
+  spaceName: string;
   path: string;
   title: string;
   kind: PageKind;
@@ -1145,6 +1272,9 @@ function plainSnippet(value: string): string {
 
 interface SearchRow extends Record<string, unknown> {
   id: string;
+  space_id: string;
+  space_key: string;
+  space_name: string;
   path: string;
   title: string;
   kind: PageKind;
@@ -1169,16 +1299,21 @@ function toPrefixQuery(query: string): string | null {
 }
 
 /**
- * Full-text search over title, summary and body, ranked and scoped to one
- * workspace. Nothing here reaches outside PostgreSQL: at one-workspace scale a
- * separate search service would be a dependency bought for nothing.
+ * Full-text search over title, summary and body, ranked, scoped to one
+ * workspace and to the spaces the caller names. Nothing here reaches outside
+ * PostgreSQL: at one-workspace scale a separate search service would be a
+ * dependency bought for nothing.
  */
 export async function searchPages(
   workspaceId: string,
   options: SearchOptions,
 ): Promise<SearchHit[]> {
   const query = options.query.trim();
-  if (query.length === 0) return [];
+  if (query.length === 0 || options.spaceIds.length === 0) return [];
+  const spaceFilter = sql.join(
+    options.spaceIds.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
 
   const limit = Math.min(Math.max(options.limit ?? 10, 1), 50);
   const db = getDatabase();
@@ -1187,6 +1322,9 @@ export async function searchPages(
     const kindFilter = options.kind ? sql`and p.kind = ${options.kind}::page_kind` : sql``;
     const result = await db.execute<SearchRow>(sql`
       select p.id,
+             p.space_id,
+             s.key as space_key,
+             s.name as space_name,
              p.path,
              p.title,
              p.kind,
@@ -1198,8 +1336,11 @@ export async function searchPages(
                q.query,
                ${HEADLINE_OPTIONS}
              ) as snippet
-      from pages p, ${tsquery} as q(query)
+      from pages p
+      join spaces s on s.id = p.space_id and s.workspace_id = p.workspace_id,
+      ${tsquery} as q(query)
       where p.workspace_id = ${workspaceId}
+        and p.space_id in (${spaceFilter})
         and p.deleted_at is null
         and p.search_vector @@ q.query
         ${kindFilter}
@@ -1210,6 +1351,9 @@ export async function searchPages(
     const rows = Array.isArray(result) ? (result as SearchRow[]) : [];
     return rows.map((row) => ({
       pageId: row.id,
+      spaceId: row.space_id,
+      spaceKey: row.space_key,
+      spaceName: row.space_name,
       path: row.path,
       title: row.title,
       kind: row.kind,

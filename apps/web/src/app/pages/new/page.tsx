@@ -1,60 +1,23 @@
 import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
-import type { Metadata } from 'next';
 
-import { PageForm } from '../page-form';
-import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
-import { listPages } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
+import { legacyPageLocation } from '@/lib/spaces/legacy';
 
 export const dynamic = 'force-dynamic';
 
-export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslations('editor');
-  return { title: t('newTitle') };
-}
-
-export default async function NewPage({
+/**
+ * `/pages/new?parent={id}` from before spaces: a new child of that page, in the
+ * page's space. Without a parent there is no space to put a page in, so the
+ * space list is where to choose one.
+ */
+export default async function LegacyNewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ parent?: string; kind?: string }>;
-}) {
+  searchParams: Promise<{ parent?: string }>;
+}): Promise<never> {
   const session = await getSessionContext();
-  if (!session) {
-    redirect('/login');
-  }
-
-  const t = await getTranslations('editor');
-  const query = await searchParams;
-  const candidates = await listPages(session.workspace.id, { limit: 500 });
-
-  return (
-    <div className="grid gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight">{t('newTitle')}</h1>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('newHeading')}</CardTitle>
-        </CardHeader>
-        <CardBody>
-          <PageForm
-            mode="create"
-            cancelHref="/pages"
-            parents={candidates.map((page) => ({
-              id: page.id,
-              title: page.title,
-              path: page.path,
-            }))}
-            initial={{
-              title: '',
-              path: '',
-              parentId: query.parent ?? '',
-              kind: query.kind === 'human' ? 'human' : 'technical',
-              summary: '',
-              body: '',
-            }}
-          />
-        </CardBody>
-      </Card>
-    </div>
-  );
+  if (!session) redirect('/login');
+  const { parent } = await searchParams;
+  const location = parent ? await legacyPageLocation(session.workspace.id, parent, 'new-child') : null;
+  redirect(location ?? '/');
 }

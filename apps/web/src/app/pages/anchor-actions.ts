@@ -80,7 +80,6 @@ export async function createAnchorAction(
       workspaceId: session.workspace.id,
       pageId: parsed.data.pageId,
       actor: actorOf(session),
-      workspaceSettings: session.workspace.settings,
       file: parsed.data.file,
       qualifiedName: range ? null : target || null,
       lineStart: range ? Number.parseInt(range[1] ?? '', 10) : null,
@@ -91,8 +90,7 @@ export async function createAnchorAction(
     return toFailure(error);
   }
 
-  revalidatePath(`/pages/${parsed.data.pageId}`);
-  revalidatePath('/pages');
+  revalidatePath('/', 'layout');
   return { ok: true };
 }
 
@@ -114,14 +112,12 @@ export async function checkAnchorsAction(
       workspaceId: session.workspace.id,
       pageId: parsed.data.pageId,
       actor: actorOf(session),
-      workspaceSettings: session.workspace.settings,
     });
   } catch (error) {
     return toFailure(error);
   }
 
-  revalidatePath(`/pages/${parsed.data.pageId}`);
-  revalidatePath('/pages');
+  revalidatePath('/', 'layout');
   return { ok: true };
 }
 
@@ -136,24 +132,20 @@ export async function confirmAnchorAction(
   const parsed = anchorIdSchema.safeParse({ anchorId: formData.get('anchorId') });
   if (!parsed.success) return { ok: false, error: 'validation' };
 
-  let pageId: string | null = null;
   try {
     const anchor = await getAnchorById(session.workspace.id, parsed.data.anchorId);
     if (!anchor) return { ok: false, error: 'not_found' };
-    pageId = anchor.pageId;
 
     await confirmAnchor({
       workspaceId: session.workspace.id,
       anchorId: parsed.data.anchorId,
       actor: actorOf(session),
-      workspaceSettings: session.workspace.settings,
     });
   } catch (error) {
     return toFailure(error);
   }
 
-  if (pageId) revalidatePath(`/pages/${pageId}`);
-  revalidatePath('/pages');
+  revalidatePath('/', 'layout');
   return { ok: true };
 }
 
@@ -168,19 +160,16 @@ export async function deleteAnchorAction(
   const parsed = anchorIdSchema.safeParse({ anchorId: formData.get('anchorId') });
   if (!parsed.success) return { ok: false, error: 'validation' };
 
-  let pageId: string | null = null;
   try {
-    const removed = await deleteAnchor({
+    await deleteAnchor({
       workspaceId: session.workspace.id,
       anchorId: parsed.data.anchorId,
       actor: actorOf(session),
     });
-    pageId = removed.pageId;
   } catch (error) {
     return toFailure(error);
   }
 
-  if (pageId) revalidatePath(`/pages/${pageId}`);
-  revalidatePath('/pages');
+  revalidatePath('/', 'layout');
   return { ok: true };
 }

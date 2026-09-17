@@ -9,11 +9,13 @@
  *   2. checks the public sign-up route is closed, submits the first-run /setup
  *      form with a wrong setup token (refused) and then the right one, and
  *      checks /setup has become a 404;
- *   3. signs in through the /login form and issues an agent token through the
- *      /tokens form, reading the one-time secret out of the rendered page;
- *   4. with that token: /api/v1/me, create a page, claim it, write it under the
- *      claim, release the claim, export it as Markdown and as HTML;
- *   5. MCP over streamable HTTP: initialize, then tools/list must name eleven
+ *   3. signs in through the /login form, creates a space through the
+ *      /spaces/new form, and issues an agent token through the /tokens form,
+ *      reading the one-time secret out of the rendered page;
+ *   4. with that token: /api/v1/me, the space list, create a page in the space,
+ *      claim it, write it under the claim, release the claim, export it as
+ *      Markdown and as HTML, and export the whole space as a ZIP;
+ *   5. MCP over streamable HTTP: initialize, then tools/list must name twelve
  *      tools (requires MCP_HTTP_ENABLED=true on the instance).
  *
  * The forms are submitted the way a browser without JavaScript submits them:
@@ -40,7 +42,8 @@ import { randomBytes } from 'node:crypto';
 const BASE_URL = (process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const ORIGIN = new URL(BASE_URL).origin;
 const HEALTH_TIMEOUT_MS = Number.parseInt(process.env.SMOKE_HEALTH_TIMEOUT_SECONDS ?? '180', 10) * 1000;
-const EXPECTED_MCP_TOOLS = 11;
+const EXPECTED_MCP_TOOLS = 12;
+const SPACE_KEY = 'SMOKE';
 
 const admin = {
   workspaceName: 'Smoke test',
@@ -272,6 +275,23 @@ async function signIn() {
   pass('signed in through the login form');
 }
 
+async function createSpace() {
+  const response = await submitForm('/spaces/new', 'key', [
+    ['name', 'Smoke test space'],
+    ['key', SPACE_KEY],
+    ['icon', ''],
+    ['description', 'Created by the container smoke test.'],
+  ]);
+  const location = response.headers.get('location') ?? '';
+  expect(
+    response.status >= 300 && response.status < 400 && location.endsWith(`/spaces/${SPACE_KEY}`),
+    `space form answered ${response.status} (location "${location}"), expected a redirect to /spaces/${SPACE_KEY}`,
+  );
+  const overview = await browserFetch(`/spaces/${SPACE_KEY}`);
+  expect(overview.status === 200, `GET /spaces/${SPACE_KEY} answered ${overview.status}, expected 200`);
+  pass('created a space through the space form');
+}
+
 async function issueToken() {
   const response = await submitForm('/tokens', 'expiresInDays', [
     ['name', 'smoke-test'],
@@ -294,8 +314,17 @@ async function wikiRoundTrip(token) {
   expect(me.json?.actor?.type === 'agent', `GET /api/v1/me did not identify an agent: ${me.text}`);
   pass('GET /api/v1/me answers 200 for the agent token');
 
+  const spaces = await api('GET', '/api/v1/spaces', token);
+  expect(spaces.status === 200, `GET /api/v1/spaces: ${describe(spaces)}`);
+  expect(
+    Array.isArray(spaces.json?.spaces) && spaces.json.spaces.some((space) => space.key === SPACE_KEY),
+    `GET /api/v1/spaces does not list ${SPACE_KEY}: ${spaces.text}`,
+  );
+  pass('GET /api/v1/spaces lists the new space');
+
   const suffix = randomBytes(3).toString('hex');
   const created = await api('POST', '/api/v1/pages', token, {
+    space: SPACE_KEY,
     title: `Smoke ${suffix}`,
     path: `/smoke-${suffix}`,
     kind: 'technical',
@@ -344,6 +373,19 @@ async function wikiRoundTrip(token) {
   expect(html.text.includes(marker), 'html export lacks the written body');
   expect(html.text.includes('@media print'), 'html export carries no print stylesheet');
   pass('exported the page as HTML');
+
+  const zip = await fetch(`${BASE_URL}/api/v1/spaces/${SPACE_KEY}/export?format=md`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const archive = Buffer.from(await zip.arrayBuffer());
+  expect(zip.status === 200, `export space: ${zip.status}`);
+  expect((zip.headers.get('content-type') ?? '') === 'application/zip', 'space export content type');
+  expect(
+    archive.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) &&
+      archive.includes(Buffer.from(`${SPACE_KEY}/smoke-${suffix}.md`)),
+    'space export is not a ZIP holding the page',
+  );
+  pass('exported the space as a ZIP of Markdown');
 }
 
 async function mcp(token, id, method, params) {
@@ -401,6 +443,7 @@ async function main() {
   await signUpIsClosed();
   await firstRunSetup();
   await signIn();
+  await createSpace();
   const token = await issueToken();
   await wikiRoundTrip(token);
   await mcpOverHttp(token);

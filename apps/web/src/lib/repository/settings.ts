@@ -1,18 +1,18 @@
 import { z } from 'zod';
 
-import type { WorkspaceRepositorySettings, WorkspaceSettings } from '@clewwiki/db';
+import type { RepositorySettings, SpaceSettings } from '@clewwiki/db';
 
 import { areFileRepositoriesAllowed, REPOSITORY_TOKEN_ENV_PATTERN } from '../env';
 import { PageServiceError } from '../pages/errors';
 
 /**
- * The workspace's link to a source repository.
+ * A space's link to a source repository.
  *
- * It lives in the workspace's `settings` JSON rather than in a table of its
- * own for the reason `docs/architecture.md` gives: it is policy, it is read
- * with the workspace row, and nothing queries it on its own. If a second
- * repository per workspace ever becomes a requirement it graduates to a table
- * then, with a migration, rather than pre-emptively now.
+ * It lives in the space's `settings` JSON rather than in a table of its own
+ * for the reason `docs/architecture.md` gives: it is policy, it is read with
+ * the space row, and nothing queries it on its own. It used to be one setting
+ * per workspace; each project has its own code, so since `0004_spaces` it is
+ * one per space, and the workspace no longer carries one at all.
  */
 
 /**
@@ -66,7 +66,7 @@ export function repositoryUrlProblem(value: string): string | null {
     return 'Use an https:// repository URL';
   }
 
-  // A credential typed into the URL would be stored in the workspace settings,
+  // A credential typed into the URL would be stored in the space settings,
   // copied into the audit log and shown back in the form. The token belongs in
   // the environment, named by the access token variable.
   if (url.password !== '') return 'Remove the credentials from the URL; use the access token variable';
@@ -122,8 +122,8 @@ export const repositorySettingsSchema = z.object({
 export type RepositorySettingsInput = z.infer<typeof repositorySettingsSchema>;
 
 export function readRepositorySettings(
-  settings: WorkspaceSettings | null | undefined,
-): WorkspaceRepositorySettings | null {
+  settings: SpaceSettings | null | undefined,
+): RepositorySettings | null {
   const candidate = settings?.repository;
   if (!candidate) return null;
   const parsed = repositorySettingsSchema.safeParse(candidate);
@@ -132,18 +132,15 @@ export function readRepositorySettings(
 
 /**
  * The same read, but for a caller that cannot proceed without a repository.
- * A workspace with none configured is a `validation` failure rather than a
- * server error: the fix is an administrator filling in the setting.
+ * A space with none configured is a `validation` failure rather than a server
+ * error: the fix is an administrator filling in the setting.
  */
 export function requireRepositorySettings(
-  settings: WorkspaceSettings | null | undefined,
-): WorkspaceRepositorySettings {
+  settings: SpaceSettings | null | undefined,
+): RepositorySettings {
   const repository = readRepositorySettings(settings);
   if (!repository) {
-    throw new PageServiceError(
-      'validation',
-      'This workspace has no source repository configured',
-    );
+    throw new PageServiceError('validation', 'This space has no source repository configured');
   }
   return repository;
 }

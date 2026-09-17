@@ -6,6 +6,7 @@ import type { AnchorRecord } from '../anchors/service';
 import { toClaimResource } from '../claims/serialize';
 import type { ClaimResource } from '../claims/serialize';
 import type { ClaimRecord } from '../claims/service';
+import type { SpaceRef } from '../spaces/service';
 import type { PageRecord, PageTreeNode, SearchHit } from './service';
 
 /**
@@ -25,8 +26,19 @@ export interface ActorResource {
   id: string;
 }
 
+/** The space a page, a hit or a claim belongs to. */
+export interface SpaceRefResource {
+  key: string;
+  name: string;
+}
+
+export function toSpaceRefResource(space: Pick<SpaceRef, 'key' | 'name'>): SpaceRefResource {
+  return { key: space.key, name: space.name };
+}
+
 export interface PageResource {
   page_id: string;
+  space: SpaceRefResource;
   parent_id: string | null;
   path: string;
   title: string;
@@ -54,6 +66,7 @@ export interface PageResource {
 
 export interface PageNodeResource {
   page_id: string;
+  space: SpaceRefResource;
   parent_id: string | null;
   path: string;
   title: string;
@@ -73,6 +86,7 @@ export interface PageNodeResource {
 
 export interface SearchHitResource {
   page_id: string;
+  space: SpaceRefResource;
   path: string;
   title: string;
   kind: PageKind;
@@ -89,12 +103,18 @@ export interface SerializePageOptions {
   anchors?: readonly AnchorRecord[];
 }
 
+/**
+ * `space` is the page's own space. A linked page is serialised with the same
+ * one: a pair never spans two spaces.
+ */
 export function toPageResource(
   page: PageRecord,
+  space: Pick<SpaceRef, 'key' | 'name'>,
   options: SerializePageOptions = {},
 ): PageResource {
   const resource: PageResource = {
     page_id: page.id,
+    space: toSpaceRefResource(space),
     parent_id: page.parentId,
     path: page.path,
     title: page.title,
@@ -114,7 +134,7 @@ export function toPageResource(
   }
   if (options.linkedPage !== undefined) {
     resource.linked_page = options.linkedPage
-      ? toPageResource(options.linkedPage, { includeBody: false })
+      ? toPageResource(options.linkedPage, space, { includeBody: false })
       : null;
   }
   if (options.claim !== undefined) {
@@ -125,12 +145,14 @@ export function toPageResource(
 
 export function toPageNodeResource(
   page: PageRecord,
+  space: Pick<SpaceRef, 'key' | 'name'>,
   hasChildren: boolean,
   claimed = false,
   staleAnchorCount = 0,
 ): PageNodeResource {
   return {
     page_id: page.id,
+    space: toSpaceRefResource(space),
     parent_id: page.parentId,
     path: page.path,
     title: page.title,
@@ -149,11 +171,13 @@ export function toPageNodeResource(
  */
 export function toTreeResource(
   node: PageTreeNode,
+  space: Pick<SpaceRef, 'key' | 'name'>,
   claimedPageIds: ReadonlySet<string> = new Set(),
   staleAnchorCounts: ReadonlyMap<string, number> = new Map(),
 ): PageNodeResource {
   return {
     page_id: node.id,
+    space: toSpaceRefResource(space),
     parent_id: node.parentId,
     path: node.path,
     title: node.title,
@@ -163,7 +187,7 @@ export function toTreeResource(
     stale_anchor_count: staleAnchorCounts.get(node.id) ?? 0,
     claimed: claimedPageIds.has(node.id),
     children: node.children.map((child) =>
-      toTreeResource(child, claimedPageIds, staleAnchorCounts),
+      toTreeResource(child, space, claimedPageIds, staleAnchorCounts),
     ),
   };
 }
@@ -171,6 +195,7 @@ export function toTreeResource(
 export function toSearchHitResource(hit: SearchHit): SearchHitResource {
   return {
     page_id: hit.pageId,
+    space: { key: hit.spaceKey, name: hit.spaceName },
     path: hit.path,
     title: hit.title,
     kind: hit.kind,

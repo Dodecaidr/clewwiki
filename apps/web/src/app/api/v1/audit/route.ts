@@ -22,8 +22,9 @@ const querySchema = z.object({
  * force-release all leave a row, which is what makes the log usable after an
  * incident rather than only during one.
  *
- * Readable by a workspace administrator, or by a token holding `audit:read` —
- * an editor account cannot read who did what across the whole workspace.
+ * Readable by a workspace administrator, or by a token holding `audit:read`
+ * and no space restriction — an editor account cannot read who did what across
+ * the whole workspace, and neither can a token limited to some spaces.
  */
 export async function GET(request: Request) {
   const auth = await authenticateRequest(request);
@@ -34,6 +35,17 @@ export async function GET(request: Request) {
 
   if (auth.identity.type === 'user' && !isWorkspaceAdmin(auth.identity)) {
     return apiError(403, 'forbidden', 'Only a workspace administrator can read the audit log');
+  }
+
+  // The log is workspace-wide: its rows name pages, paths and claims in every
+  // space. A token limited to some spaces would read about the others through
+  // it, so it cannot read the log at all, whatever its scopes.
+  if (auth.identity.spaceIds !== null) {
+    return apiError(
+      403,
+      'forbidden',
+      'The audit log covers every space; a token limited to some spaces cannot read it',
+    );
   }
 
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams));

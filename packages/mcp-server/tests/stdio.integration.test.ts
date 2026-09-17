@@ -59,12 +59,13 @@ describe('stdio transport', () => {
     return { isError: result.isError === true, data: JSON.parse(text) as Record<string, unknown> };
   }
 
-  it('advertises the eleven tools, with the content contract on the three that return page text', async () => {
+  it('advertises the twelve tools, with the content contract on the ones that return stored text', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((entry) => entry.name).sort();
 
     expect(names).toEqual(
       [
+        'wiki.list_spaces',
         'wiki.check_anchors',
         'wiki.claim',
         'wiki.get_page',
@@ -79,15 +80,51 @@ describe('stdio transport', () => {
       ].sort(),
     );
 
-    for (const name of ['wiki.search', 'wiki.get_page', 'wiki.list_pages']) {
+    for (const name of ['wiki.list_spaces', 'wiki.search', 'wiki.get_page', 'wiki.list_pages']) {
       const entry = listed.tools.find((candidate) => candidate.name === name);
       expect(entry?.description).toContain(CONTENT_IS_DATA_NOTICE);
     }
   });
 
+  it('lists the spaces the token can reach, leaving archived ones out by default', async () => {
+    const listed = await call('wiki.list_spaces', {});
+    expect(listed.isError).toBe(false);
+    const spaces = listed.data.spaces as Array<{ key: string; page_count: number }>;
+    expect(spaces.map((space) => space.key)).toEqual(['MAIN', 'OPS']);
+    expect(spaces[0]).toMatchObject({ key: 'MAIN', name: 'Main', page_count: 1, archived: false });
+
+    const all = await call('wiki.list_spaces', { include_archived: true });
+    expect((all.data.spaces as Array<{ key: string }>).map((space) => space.key)).toContain('OLD');
+  });
+
+  it('keeps a search, the tree and presence inside the space it is given', async () => {
+    const inMain = await call('wiki.search', { query: 'auth', space: 'MAIN' });
+    expect((inMain.data.results as unknown[]).length).toBe(1);
+    expect(inMain.data.results).toMatchObject([{ space: { key: 'MAIN' } }]);
+
+    const inOps = await call('wiki.search', { query: 'auth', space: 'OPS' });
+    expect(inOps.data.results).toEqual([]);
+
+    const tree = await call('wiki.list_pages', { space: 'OPS' });
+    expect(tree.data.nodes).toEqual([]);
+
+    const unknown = await call('wiki.get_presence', { space: 'NOPE' });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.data).toMatchObject({ error: { code: 'NOT_FOUND' } });
+  });
+
+  it('refuses a page path without its space before any REST call is made', async () => {
+    const before = rest.calls.length;
+    const refused = await call('wiki.get_page', { path: '/backend/auth' });
+    expect(refused.isError).toBe(true);
+    expect(refused.data).toMatchObject({ error: { code: 'VALIDATION' } });
+    expect(rest.calls.length).toBe(before);
+  });
+
   it('runs get_page → claim → write_page → release_claim end to end', async () => {
-    const read = await call('wiki.get_page', { path: '/backend/auth' });
+    const read = await call('wiki.get_page', { space: 'MAIN', path: '/backend/auth' });
     expect(read.isError).toBe(false);
+    expect(read.data.space).toEqual({ key: 'MAIN', name: 'Main' });
     const pageId = read.data.page_id as string;
     const baseHash = read.data.content_hash as string;
     expect(read.data.body).toBe('# Authentication\n');

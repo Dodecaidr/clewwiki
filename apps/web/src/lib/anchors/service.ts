@@ -1,8 +1,8 @@
 import 'server-only';
 
 import { and, asc, eq, ne, sql } from 'drizzle-orm';
-import { anchors, pages } from '@clewwiki/db';
-import type { ActorKind, AnchorStateValue, WorkspaceSettings } from '@clewwiki/db';
+import { anchors, pages, spaces } from '@clewwiki/db';
+import type { ActorKind, AnchorStateValue, SpaceSettings } from '@clewwiki/db';
 import {
   buildFileIndex,
   extractDeclarations,
@@ -49,6 +49,11 @@ import { isSafeRepoPath } from '../repository/settings';
  * Every function takes the caller's `workspaceId` and puts it in the SQL
  * predicate, so an anchor belonging to another workspace is invisible rather
  * than merely forbidden.
+ *
+ * The repository an anchor is checked against is the one linked to the space
+ * of the anchor's page. It is read here, from the page, rather than handed in
+ * by the caller, so an anchor can never be checked against another project's
+ * code by passing the wrong settings.
  */
 
 export interface AnchorActor {
@@ -267,19 +272,23 @@ export async function getStaleAnchorCounts(workspaceId: string): Promise<Map<str
 export interface FallbackShare {
   total: number;
   fallback: number;
-  /** Between 0 and 1; zero when the workspace has no anchors at all. */
+  /** Between 0 and 1; zero when the space has no anchors at all. */
   share: number;
 }
 
 /**
- * The share of a workspace's anchors sitting on the line-range fallback.
+ * The share of a space's anchors sitting on the line-range fallback. Per space,
+ * because the share describes one repository.
  *
  * Reported rather than merely recorded: a line range does not survive an edit
  * above it, so a repository where this number climbs is a repository where the
  * staleness badge is on its way to being noise. It is the early warning the
  * mechanism's design calls for.
  */
-export async function getFallbackShare(workspaceId: string): Promise<FallbackShare> {
+export async function getFallbackShare(
+  workspaceId: string,
+  spaceId: string,
+): Promise<FallbackShare> {
   const db = getDatabase();
   const [row] = await db
     .select({
@@ -287,7 +296,8 @@ export async function getFallbackShare(workspaceId: string): Promise<FallbackSha
       fallback: sql<number>`count(*) filter (where ${anchors.fallback})::int`,
     })
     .from(anchors)
-    .where(eq(anchors.workspaceId, workspaceId));
+    .innerJoin(pages, eq(pages.id, anchors.pageId))
+    .where(and(eq(anchors.workspaceId, workspaceId), eq(pages.spaceId, spaceId)));
 
   const total = row?.total ?? 0;
   const fallback = row?.fallback ?? 0;
@@ -305,14 +315,30 @@ interface RepositoryContext {
   settings: ReturnType<typeof requireRepositorySettings>;
 }
 
-async function openRepository(
+/** The space a page belongs to, with its settings, or `not_found`. */
+async function spaceOfPage(
   workspaceId: string,
-  workspaceSettings: WorkspaceSettings | null | undefined,
+  pageId: string,
+): Promise<{ id: string; settings: SpaceSettings }> {
+  const db = getDatabase();
+  const [row] = await db
+    .select({ id: spaces.id, settings: spaces.settings })
+    .from(pages)
+    .innerJoin(spaces, eq(spaces.id, pages.spaceId))
+    .where(and(eq(pages.id, pageId), eq(pages.workspaceId, workspaceId)))
+    .limit(1);
+  if (!row) throw new PageServiceError('not_found', 'Page not found');
+  return row;
+}
+
+async function openRepository(
+  spaceId: string,
+  spaceSettings: SpaceSettings | null | undefined,
   requestedRef?: string | null,
 ): Promise<RepositoryContext> {
-  const settings = requireRepositorySettings(workspaceSettings);
+  const settings = requireRepositorySettings(spaceSettings);
   const ref = requestedRef && requestedRef.trim() !== '' ? requestedRef.trim() : settings.default_ref;
-  const dir = await syncRepository(workspaceId, settings);
+  const dir = await syncRepository(spaceId, settings);
   const commit = await resolveCommit(dir, ref, settings);
   return { dir, commit, ref, settings };
 }
@@ -382,7 +408,6 @@ export interface CreateAnchorInput {
   workspaceId: string;
   pageId: string;
   actor: AnchorActor;
-  workspaceSettings: WorkspaceSettings | null | undefined;
   file: string;
   qualifiedName?: string | null;
   kind?: string | null;
@@ -445,8 +470,9 @@ export async function createAnchor(input: CreateAnchorInput): Promise<AnchorReco
   }
 
   const [page] = await db
-    .select({ id: pages.id })
+    .select({ id: pages.id, spaceId: spaces.id, settings: spaces.settings })
     .from(pages)
+    .innerJoin(spaces, eq(spaces.id, pages.spaceId))
     .where(
       and(
         eq(pages.workspaceId, input.workspaceId),
@@ -457,8 +483,8 @@ export async function createAnchor(input: CreateAnchorInput): Promise<AnchorReco
     .limit(1);
   if (!page) throw new PageServiceError('not_found', 'Page not found');
 
-  const values = await withRepositoryLock(input.workspaceId, async () => {
-    const context = await openRepository(input.workspaceId, input.workspaceSettings, input.ref);
+  const values = await withRepositoryLock(page.spaceId, async () => {
+    const context = await openRepository(page.spaceId, page.settings, input.ref);
     const source = await readSource(context, input.file);
     if (source === null) {
       throw new PageServiceError('validation', `File not found at ${context.ref}: ${input.file}`);
@@ -653,7 +679,6 @@ export interface CheckAnchorsInput {
   workspaceId: string;
   pageId: string;
   actor: AnchorActor;
-  workspaceSettings: WorkspaceSettings | null | undefined;
   ref?: string | null;
   /** Overrides parts of `DEFAULT_CHECK_BUDGET`; tests use it to hit a limit. */
   budget?: Partial<CheckBudget>;
@@ -683,25 +708,26 @@ export interface CheckAnchorsResult {
  */
 export async function checkPageAnchors(input: CheckAnchorsInput): Promise<CheckAnchorsResult> {
   const db = getDatabase();
+  const space = await spaceOfPage(input.workspaceId, input.pageId);
   const existing = await listAnchorsForPage(input.workspaceId, input.pageId);
   const budgetLimits: CheckBudget = { ...DEFAULT_CHECK_BUDGET, ...input.budget };
 
   if (existing.length === 0) {
-    const settings = requireRepositorySettings(input.workspaceSettings);
+    const settings = requireRepositorySettings(space.settings);
     return {
       checkedAt: new Date(),
       ref: input.ref?.trim() || settings.default_ref,
       commit: '',
       anchors: [],
-      fallbackShare: await getFallbackShare(input.workspaceId),
+      fallbackShare: await getFallbackShare(input.workspaceId, space.id),
       complete: true,
       uncheckedAnchorIds: [],
       budget: { filesRead: 0, bytesRead: 0, elapsedMs: 0, limit: null },
     };
   }
 
-  const { context, resolutions, usage } = await withRepositoryLock(input.workspaceId, async () => {
-    const opened = await openRepository(input.workspaceId, input.workspaceSettings, input.ref);
+  const { context, resolutions, usage } = await withRepositoryLock(space.id, async () => {
+    const opened = await openRepository(space.id, space.settings, input.ref);
     const budget = new ReadBudget(budgetLimits);
 
     const hinted = [...new Set(existing.map((anchor) => anchor.fileHint))];
@@ -797,7 +823,7 @@ export async function checkPageAnchors(input: CheckAnchorsInput): Promise<CheckA
     ref: context.ref,
     commit: context.commit,
     anchors: updated,
-    fallbackShare: await getFallbackShare(input.workspaceId),
+    fallbackShare: await getFallbackShare(input.workspaceId, space.id),
     complete,
     uncheckedAnchorIds: [...uncheckedIds],
     budget: usage,
@@ -812,7 +838,6 @@ export interface ConfirmAnchorInput {
   workspaceId: string;
   anchorId: string;
   actor: AnchorActor;
-  workspaceSettings: WorkspaceSettings | null | undefined;
   ref?: string | null;
 }
 
@@ -829,9 +854,10 @@ export async function confirmAnchor(input: ConfirmAnchorInput): Promise<AnchorRe
   const db = getDatabase();
   const anchor = await getAnchorById(input.workspaceId, input.anchorId);
   if (!anchor) throw new PageServiceError('not_found', 'Anchor not found');
+  const space = await spaceOfPage(input.workspaceId, anchor.pageId);
 
-  const rebaselined = await withRepositoryLock(input.workspaceId, async () => {
-    const context = await openRepository(input.workspaceId, input.workspaceSettings, input.ref);
+  const rebaselined = await withRepositoryLock(space.id, async () => {
+    const context = await openRepository(space.id, space.settings, input.ref);
 
     // Where to look now: the file the last check found it in, falling back to
     // the file the anchor still names.

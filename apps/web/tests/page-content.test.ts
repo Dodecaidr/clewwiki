@@ -10,6 +10,7 @@ function page(overrides: Partial<PageRecord> = {}): PageRecord {
   return {
     id: '00000000-0000-4000-8000-000000000001',
     workspaceId: '00000000-0000-4000-8000-0000000000ff',
+    spaceId: '00000000-0000-4000-8000-0000000000aa',
     parentId: null,
     path: '/backend/auth',
     title: 'Auth',

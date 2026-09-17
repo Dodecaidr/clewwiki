@@ -160,7 +160,6 @@ export async function forceReleaseClaimAction(
     return { error: 'generic' };
   }
 
-  revalidatePath('/presence');
-  revalidatePath('/pages');
+  revalidatePath('/', 'layout');
   return { released: true };
 }

@@ -123,6 +123,7 @@ describe('onboarding prompt', () => {
     expect(prompt).toContain(primarySnippet('claude-code', enabled).code);
     expect(prompt).toContain('`CLEWWIKI_TOKEN`');
     for (const tool of [
+      'wiki.list_spaces',
       'wiki.search',
       'wiki.list_pages',
       'wiki.get_page',

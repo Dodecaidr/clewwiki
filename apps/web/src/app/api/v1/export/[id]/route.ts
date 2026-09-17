@@ -1,10 +1,11 @@
 import { z } from 'zod';
 
 import { apiError, serviceErrorResponse, validationError } from '@/lib/api-response';
-import { requireWorkspace } from '@/lib/api-auth';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
 import { authorizePagesRequest, READ_SCOPES } from '@/lib/pages-api';
 import { exportPage } from '@/lib/pages/export';
 import { getPageById } from '@/lib/pages/service';
+import { getSpaceById } from '@/lib/spaces/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,8 +38,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
-    const exported = await exportPage(page, parsedQuery.data.format);
+    const space = await getSpaceById(auth.workspaceId, page.spaceId);
+    const exported = await exportPage(page, parsedQuery.data.format, space ?? undefined);
 
     return new Response(exported.body, {
       status: 200,

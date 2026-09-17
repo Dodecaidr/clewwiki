@@ -7,8 +7,10 @@ import { z } from 'zod';
 import { acquireClaim, releaseClaim } from '@/lib/claims/service';
 import { isPageServiceError } from '@/lib/pages/errors';
 import { renderMarkdown } from '@/lib/pages/markdown';
-import { createPage, deletePage, linkPages, updatePage } from '@/lib/pages/service';
+import { createPage, deletePage, getPageById, linkPages, updatePage } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
+import { getSpaceById, getSpaceByKey } from '@/lib/spaces/service';
+import { spaceHref, spacePageHref } from '@/lib/spaces/urls';
 
 /**
  * The write actions behind the page forms.
@@ -16,6 +18,10 @@ import { getSessionContext } from '@/lib/session';
  * Each one re-checks the session itself. The redirect a page component
  * performs is a UI affordance; the check here is the control, because a form
  * post arrives at the action directly and never passes through the page.
+ *
+ * A page is placed by choosing its parent from its space's tree; the form sends
+ * at most one path segment, never a whole path, so a subsection is made by
+ * picking where it goes rather than by typing where it is.
  */
 
 export interface PageFormState {
@@ -26,16 +32,21 @@ export interface PageFormState {
 
 const kindSchema = z.enum(['technical', 'human']);
 
-const createSchema = z.object({
+const fieldsSchema = z.object({
   title: z.string().trim().min(1).max(300),
-  path: z.string().trim().max(512).optional(),
+  /** One path segment. Empty means "derive it from the title" on create, "keep it" on edit. */
+  segment: z.string().trim().max(80).optional(),
   parentId: z.uuid().optional(),
   kind: kindSchema,
   summary: z.string().trim().max(2_000).optional(),
   body: z.string().max(1_000_000),
 });
 
-const updateSchema = createSchema.extend({
+const createSchema = fieldsSchema.extend({
+  spaceKey: z.string().trim().min(1).max(20),
+});
+
+const updateSchema = fieldsSchema.extend({
   pageId: z.uuid(),
   baseContentHash: z.string().length(64),
   /**
@@ -56,8 +67,9 @@ function formString(formData: FormData, key: string): string | undefined {
 async function requireWriter() {
   const session = await getSessionContext();
   if (!session) return null;
-  // Both v1 roles may write. The distinction that exists today is token
-  // issuance, which stays with admins.
+  // Both roles may write, in every space. Per-space permissions are a later
+  // step; today the distinctions are token issuance and space administration,
+  // which stay with admins.
   return session;
 }
 
@@ -69,6 +81,11 @@ function toFormState(error: unknown): PageFormState {
   return { error: 'generic' };
 }
 
+/** Every route renders on request; this drops any cached render of them at once. */
+function revalidateWiki(): void {
+  revalidatePath('/', 'layout');
+}
+
 export async function createPageAction(
   _prevState: PageFormState,
   formData: FormData,
@@ -77,8 +94,9 @@ export async function createPageAction(
   if (!session) return { error: 'forbidden' };
 
   const parsed = createSchema.safeParse({
+    spaceKey: formData.get('spaceKey'),
     title: formData.get('title'),
-    path: formString(formData, 'path'),
+    segment: formString(formData, 'segment'),
     parentId: formString(formData, 'parentId'),
     kind: formData.get('kind') ?? 'technical',
     summary: formString(formData, 'summary'),
@@ -89,13 +107,19 @@ export async function createPageAction(
     return { error: 'validation' };
   }
 
+  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  if (!space) return { error: 'not_found' };
+
   let created: { id: string };
   try {
     created = await createPage({
       workspaceId: session.workspace.id,
+      spaceId: space.id,
       actor: { type: 'user', id: session.userId },
       title: parsed.data.title,
-      path: parsed.data.path,
+      // With a parent, the service joins this one segment onto the parent's
+      // path; without one, it becomes a top-level path.
+      path: parsed.data.segment,
       parentId: parsed.data.parentId ?? null,
       kind: parsed.data.kind,
       body: parsed.data.body,
@@ -105,8 +129,8 @@ export async function createPageAction(
     return toFormState(error);
   }
 
-  revalidatePath('/pages');
-  redirect(`/pages/${created.id}`);
+  revalidateWiki();
+  redirect(spacePageHref(space.key, created.id));
 }
 
 export async function updatePageAction(
@@ -121,7 +145,7 @@ export async function updatePageAction(
     baseContentHash: formData.get('baseContentHash'),
     claimId: formString(formData, 'claimId'),
     title: formData.get('title'),
-    path: formString(formData, 'path'),
+    segment: formString(formData, 'segment'),
     parentId: formString(formData, 'parentId'),
     kind: formData.get('kind') ?? 'technical',
     summary: formString(formData, 'summary'),
@@ -140,6 +164,7 @@ export async function updatePageAction(
   // someone else is holding the page rather than quietly overwriting them.
   let claimId = parsed.data.claimId ?? null;
   let takenHere = false;
+  let spaceId: string;
 
   try {
     if (!claimId) {
@@ -153,12 +178,12 @@ export async function updatePageAction(
       takenHere = true;
     }
 
-    await updatePage({
+    const updated = await updatePage({
       workspaceId: session.workspace.id,
       pageId: parsed.data.pageId,
       actor: { type: 'user', id: session.userId },
       title: parsed.data.title,
-      path: parsed.data.path,
+      path: parsed.data.segment,
       parentId: parsed.data.parentId ?? null,
       kind: parsed.data.kind,
       body: parsed.data.body,
@@ -168,6 +193,7 @@ export async function updatePageAction(
       // page someone else has since changed is refused rather than winning.
       baseContentHash: parsed.data.baseContentHash,
     });
+    spaceId = updated.spaceId;
   } catch (error) {
     // A lease taken for this save alone goes back even when the save failed;
     // one the editor was already holding stays, so the author can fix the
@@ -182,10 +208,9 @@ export async function updatePageAction(
   // out its TTL while nobody is editing.
   await releaseClaimQuietly(session.workspace.id, claimId, actor);
 
-  revalidatePath('/pages');
-  revalidatePath('/presence');
-  revalidatePath(`/pages/${parsed.data.pageId}`);
-  redirect(`/pages/${parsed.data.pageId}`);
+  const space = await getSpaceById(session.workspace.id, spaceId);
+  revalidateWiki();
+  redirect(space ? spacePageHref(space.key, parsed.data.pageId) : '/');
 }
 
 /**
@@ -217,6 +242,10 @@ export async function deletePageAction(
   const parsed = z.object({ pageId: z.uuid() }).safeParse({ pageId: formData.get('pageId') });
   if (!parsed.success) return { error: 'validation' };
 
+  const page = await getPageById(session.workspace.id, parsed.data.pageId);
+  if (!page) return { error: 'not_found' };
+  const space = await getSpaceById(session.workspace.id, page.spaceId);
+
   try {
     await deletePage({
       workspaceId: session.workspace.id,
@@ -228,8 +257,8 @@ export async function deletePageAction(
     return toFormState(error);
   }
 
-  revalidatePath('/pages');
-  redirect('/pages');
+  revalidateWiki();
+  redirect(space ? spaceHref(space.key) : '/');
 }
 
 export async function linkPageAction(
@@ -258,7 +287,7 @@ export async function linkPageAction(
     return toFormState(error);
   }
 
-  revalidatePath(`/pages/${parsed.data.pageId}`);
+  revalidateWiki();
   return {};
 }
 

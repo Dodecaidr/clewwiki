@@ -7,7 +7,8 @@ import {
   serviceErrorResponse,
   validationError,
 } from '@/lib/api-response';
-import { requireWorkspace } from '@/lib/api-auth';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
+import { getPageSpaceId } from '@/lib/pages/service';
 import { getClaimById, releaseClaim, renewClaim } from '@/lib/claims/service';
 import { toClaimResource } from '@/lib/claims/serialize';
 import { MAX_CLAIM_TTL_SECONDS, MIN_CLAIM_TTL_SECONDS } from '@/lib/claims/ttl';
@@ -65,6 +66,11 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, existing.workspaceId);
     if (mismatch) return mismatch;
+    // A claim belongs to the space of the page it is on.
+    const spaceId = await getPageSpaceId(auth.workspaceId, existing.pageId);
+    if (!spaceId || requireSpace(auth.identity, spaceId)) {
+      return apiError(404, 'not_found', 'Claim not found');
+    }
 
     const claim = await renewClaim({
       workspaceId: auth.workspaceId,
@@ -106,6 +112,11 @@ export async function DELETE(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, existing.workspaceId);
     if (mismatch) return mismatch;
+    // A claim belongs to the space of the page it is on.
+    const spaceId = await getPageSpaceId(auth.workspaceId, existing.pageId);
+    if (!spaceId || requireSpace(auth.identity, spaceId)) {
+      return apiError(404, 'not_found', 'Claim not found');
+    }
 
     const result = await releaseClaim({
       workspaceId: auth.workspaceId,

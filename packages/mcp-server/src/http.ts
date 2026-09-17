@@ -10,7 +10,7 @@ import { createClewwikiMcpServer } from './server.ts';
  * Stateless on purpose. The HTTP transport is mounted inside the Next
  * application, where a handler is a function call rather than a connection: a
  * session map held in a module would be state that one replica has and the
- * next does not, which is worse than no sessions at all. The eleven tools are
+ * next does not, which is worse than no sessions at all. The twelve tools are
  * request/response, so there is nothing a session would carry.
  *
  * This lives in the package rather than in the route handler so that the SDK

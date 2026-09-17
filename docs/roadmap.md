@@ -378,8 +378,9 @@ first green `docker-smoke` run on CI. Until then Phase 7 does not start.
   `docker compose up -d --build --wait`, then `scripts/smoke-test.mjs` walks
   the first-run path over plain HTTP: the health endpoint, the `/setup` form
   and its 404 afterwards, the login form, the agent-token form, `/api/v1/me`,
-  create → claim → write → release, Markdown and HTML export, and MCP
-  `initialize` plus `tools/list` returning eleven tools. The forms are
+  a space created through the space form, create → claim → write → release in
+  it, Markdown and HTML export, the space ZIP export, and MCP `initialize` plus
+  `tools/list` returning twelve tools. The forms are
   submitted the way a browser without JavaScript submits them — the hidden
   server-action fields React rendered are sent back with the visible ones —
   so no test-only endpoint and no seeded account exist. The job then checks
@@ -508,6 +509,59 @@ changing the export contract. `docker compose up` on a clean machine bringing
 up a working instance from the README alone is exercised by `docker-smoke` on
 every push; its first green run on CI is part of closing this phase, along
 with the security review.
+
+## Spaces — **complete**
+
+Confluence-style areas per project: a workspace holds spaces, a space holds a
+page tree, top-level pages act as sections.
+
+**Exit criteria**: an existing database migrates with its pages, history,
+claims, anchors and repository setting intact; the same path can exist in two
+spaces and not twice in one; a token limited to one space gets `404` for pages,
+claims, anchors and exports in another and sees only its space in listings,
+search and presence; anchors are checked against the repository of their
+page's space; agents can list spaces over MCP and pass a space to search, the
+tree, presence and path lookups; old page URLs keep working.
+
+**Status**: met.
+
+- `spaces` and `agent_tokens.space_ids` ship in migration `0004_spaces`, which
+  also moves existing data: a `MAIN` space per workspace that had pages or a
+  repository, every page assigned to it, path uniqueness moved from
+  `(workspace_id, path)` to `(space_id, path)`, and the repository setting
+  copied onto the space and removed from the workspace. There is no fallback
+  read of the old location — the migration is the transition. An integration
+  test applies `0000`–`0003`, seeds a tree, a deleted page, a revision, a live
+  claim with a note, an anchor, a pair, a token and a workspace repository, then
+  applies `0004` and checks each of them.
+- REST: `GET`/`POST /api/v1/spaces`, `GET`/`PATCH /api/v1/spaces/{key}`,
+  `POST /api/v1/spaces/{key}/archive` and `…/unarchive`, and
+  `GET /api/v1/spaces/{key}/export` (a ZIP of Markdown files mirroring the
+  tree, written by a small stored-entry ZIP writer rather than a new
+  dependency). `POST /api/v1/pages` requires `space`; `GET /api/v1/pages`,
+  search and presence take it; a path lookup needs it. Pages, hits, tree nodes
+  and claims carry `space: {key, name}`; `/api/v1/me` carries `space_access`.
+- MCP: `wiki.list_spaces` is the twelfth tool; `wiki.search`,
+  `wiki.list_pages` and `wiki.get_presence` take `space`, and `wiki.get_page`
+  by path requires it. The onboarding prompt on `/connect` tells an agent to
+  list spaces first and work inside its project's space.
+- UI: the home page lists spaces; each space has an overview (its home page, or
+  its description and recent changes), its page tree, "New page" with a parent
+  picker and a preview of the resulting path, "Add child page" on every page,
+  breadcrumbs, and settings for administrators — name, description, icon, home
+  page, repository, archive. Old `/pages/{id}` URLs redirect. Presence and
+  search filter by space. The token form offers "All spaces" or a selection.
+
+Three decisions worth recording. Roles stay workspace-wide: an editor edits in
+every space, and only agent tokens can be limited to spaces — per-space
+permissions for people are the next step. A token limited to some spaces cannot
+read the audit log, because the log is workspace-wide and would describe the
+other spaces. And archiving hides a space and stops new pages in it but does
+not freeze existing pages; a read-only archive is a later refinement if it is
+wanted.
+
+**Next: per-space permissions.** Membership per space (viewer, editor, admin),
+spaces an account cannot see, and the UI and REST checks that follow from it.
 
 ## Phase 7 — Launch
 

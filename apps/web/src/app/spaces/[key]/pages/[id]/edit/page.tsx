@@ -1,0 +1,131 @@
+import Link from 'next/link';
+import { notFound, redirect } from 'next/navigation';
+import { getFormatter, getTranslations } from 'next-intl/server';
+import type { Metadata } from 'next';
+
+import { PageForm } from '@/app/pages/page-form';
+import { buttonVariants } from '@/components/ui/button';
+import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
+import { getActiveClaimsForPage } from '@/lib/claims/service';
+import { lastSegment } from '@/lib/pages/paths';
+import { getPageById, getPageTree } from '@/lib/pages/service';
+import { getSessionContext } from '@/lib/session';
+import { getSpaceById } from '@/lib/spaces/service';
+import { flattenTree, subtreeIds } from '@/lib/spaces/tree';
+import { spacePageEditHref, spacePageHref } from '@/lib/spaces/urls';
+import { formatDateTime } from '@/lib/utils';
+import { assertSameWorkspace } from '@/lib/workspace';
+
+export const dynamic = 'force-dynamic';
+
+type Props = { params: Promise<{ key: string; id: string }> };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations('editor');
+  return { title: t('editTitle') };
+}
+
+export default async function EditPage({ params }: Props) {
+  const session = await getSessionContext();
+  if (!session) {
+    redirect('/login');
+  }
+
+  const { key, id } = await params;
+  if (!UUID_PATTERN.test(id)) {
+    notFound();
+  }
+
+  const page = await getPageById(session.workspace.id, id);
+  if (!page) {
+    notFound();
+  }
+  assertSameWorkspace(session.workspace.id, page.workspaceId);
+  const space = await getSpaceById(session.workspace.id, page.spaceId);
+  if (!space) {
+    notFound();
+  }
+  if (key !== space.key) {
+    redirect(spacePageEditHref(space.key, page.id));
+  }
+
+  const t = await getTranslations('editor');
+  const format = await getFormatter();
+  const [tree, activeClaims] = await Promise.all([
+    getPageTree(session.workspace.id, space.id),
+    getActiveClaimsForPage(session.workspace.id, page.id),
+  ]);
+
+  // Whoever holds the page decides whether this screen is an editor at all.
+  // The form takes its own lease when it mounts and would find this out a
+  // moment later anyway; deciding here means the author is told before typing
+  // rather than after.
+  const heldByOther = activeClaims.find(
+    (claim) => claim.holderType !== 'user' || claim.holderId !== session.userId,
+  );
+
+  if (heldByOther) {
+    return (
+      <div className="grid gap-6">
+        <h1 className="text-2xl font-semibold tracking-tight">{t('editTitle')}</h1>
+        <Alert tone="error">
+          {t('claimHeldByOther', {
+            name: heldByOther.holderLabel,
+            since: formatDateTime(format, heldByOther.createdAt) ?? '—',
+          })}
+        </Alert>
+        <Card>
+          <CardHeader>
+            <CardTitle>{page.title}</CardTitle>
+          </CardHeader>
+          <CardBody className="grid justify-items-start gap-4">
+            <p className="text-sm text-muted-foreground">{t('claimBlockedHint')}</p>
+            <Link
+              href={spacePageHref(space.key, page.id)}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              {t('claimReadOnly')}
+            </Link>
+          </CardBody>
+        </Card>
+      </div>
+    );
+  }
+
+  // A page cannot move below itself; the service refuses that too, and the
+  // picker simply does not offer it.
+  const excluded = subtreeIds(tree, page.id);
+
+  return (
+    <div className="grid gap-6">
+      <h1 className="text-2xl font-semibold tracking-tight">{t('editTitle')}</h1>
+      <Card>
+        <CardHeader>
+          <CardTitle>{page.title}</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <PageForm
+            mode="edit"
+            spaceKey={space.key}
+            cancelHref={spacePageHref(space.key, page.id)}
+            parents={flattenTree(tree).filter((entry) => !excluded.has(entry.id))}
+            initial={{
+              pageId: page.id,
+              // Carried through the form so the save is refused if someone
+              // else writes to the page while it is open.
+              baseContentHash: page.contentHash,
+              title: page.title,
+              segment: lastSegment(page.path),
+              parentId: page.parentId ?? '',
+              kind: page.kind,
+              summary: page.summary ?? '',
+              body: page.body,
+            }}
+          />
+        </CardBody>
+      </Card>
+    </div>
+  );
+}

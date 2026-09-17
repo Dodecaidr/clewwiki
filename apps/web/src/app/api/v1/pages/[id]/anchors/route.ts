@@ -8,7 +8,7 @@ import {
   serviceErrorResponse,
   validationError,
 } from '@/lib/api-response';
-import { requireWorkspace } from '@/lib/api-auth';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
 import { createAnchor, getFallbackShare, listAnchorsForPage } from '@/lib/anchors/service';
 import { toAnchorResource, toFallbackShareResource } from '@/lib/anchors/serialize';
 import { authorizePagesRequest, READ_SCOPES, WRITE_SCOPES } from '@/lib/pages-api';
@@ -31,8 +31,8 @@ const createBodySchema = z.object({
 type RouteContext = { params: Promise<{ id: string }> };
 
 /**
- * Anchors a page, or one of its sections, to a declaration in the workspace's
- * source repository.
+ * Anchors a page, or one of its sections, to a declaration in the source
+ * repository linked to the page's space.
  *
  * The declaration is resolved against the repository before the row is
  * written, so an anchor never starts life pointing at nothing: a misspelled
@@ -63,12 +63,13 @@ export async function POST(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
     const anchor = await createAnchor({
       workspaceId: auth.workspaceId,
       pageId: page.id,
       actor: auth.actor,
-      workspaceSettings: auth.identity.workspace.settings,
       file: parsed.data.file,
       qualifiedName: parsed.data.qualified_name,
       kind: parsed.data.kind,
@@ -98,10 +99,12 @@ export async function GET(request: Request, context: RouteContext) {
 
     const mismatch = requireWorkspace(auth.identity, page.workspaceId);
     if (mismatch) return mismatch;
+    const hidden = requireSpace(auth.identity, page.spaceId);
+    if (hidden) return apiError(404, 'not_found', 'Page not found');
 
     const [pageAnchors, fallbackShare] = await Promise.all([
       listAnchorsForPage(auth.workspaceId, page.id),
-      getFallbackShare(auth.workspaceId),
+      getFallbackShare(auth.workspaceId, page.spaceId),
     ]);
 
     return apiJson(

@@ -1,14 +1,22 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 
+import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { getSessionContext } from '@/lib/session';
+import { listSpaceSummaries } from '@/lib/spaces/service';
+import { spaceHref } from '@/lib/spaces/urls';
+import { formatDateTime } from '@/lib/utils';
 import { hasAnyUser } from '@/lib/workspace';
 
 export const dynamic = 'force-dynamic';
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ archived?: string }>;
+}) {
   // A fresh instance has no accounts, so the first visit goes to setup. This is
   // the only path by which an administrator account comes into existence.
   if (!(await hasAnyUser())) {
@@ -18,60 +26,13 @@ export default async function HomePage() {
   const session = await getSessionContext();
   const t = await getTranslations('home');
 
-  return (
-    <div className="grid gap-8">
-      <div className="grid gap-3">
-        <h1 className="text-3xl font-semibold tracking-tight">{t('title')}</h1>
-        <p className="max-w-2xl text-muted-foreground">{t('tagline')}</p>
-      </div>
-
-      {session ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>{session.workspace.name}</CardTitle>
-          </CardHeader>
-          <CardBody className="grid gap-4 text-sm">
-            <dl className="grid gap-2 sm:grid-cols-2">
-              <div>
-                <dt className="text-muted-foreground">{t('workspaceLabel')}</dt>
-                <dd className="font-medium">{session.workspace.name}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">{t('roleLabel')}</dt>
-                <dd className="font-medium">
-                  {session.role === 'admin' ? t('role_admin') : t('role_editor')}
-                </dd>
-              </div>
-            </dl>
-            <div className="flex flex-wrap gap-4">
-              <Link
-                href="/pages"
-                className="text-sm underline underline-offset-2 hover:text-foreground"
-              >
-                {t('browsePages')}
-              </Link>
-              <Link
-                href="/tokens"
-                className="text-sm underline underline-offset-2 hover:text-foreground"
-              >
-                {t('manageTokens')}
-              </Link>
-              <Link
-                href="/connect"
-                className="text-sm underline underline-offset-2 hover:text-foreground"
-              >
-                {t('connectAgent')}
-              </Link>
-              <Link
-                href="/guide"
-                className="text-sm underline underline-offset-2 hover:text-foreground"
-              >
-                {t('readGuide')}
-              </Link>
-            </div>
-          </CardBody>
-        </Card>
-      ) : (
+  if (!session) {
+    return (
+      <div className="grid gap-8">
+        <div className="grid gap-3">
+          <h1 className="text-3xl font-semibold tracking-tight">{t('title')}</h1>
+          <p className="max-w-2xl text-muted-foreground">{t('tagline')}</p>
+        </div>
         <Card>
           <CardBody className="text-sm text-muted-foreground">
             <p>
@@ -82,7 +43,104 @@ export default async function HomePage() {
             </p>
           </CardBody>
         </Card>
+      </div>
+    );
+  }
+
+  const format = await getFormatter();
+  const showArchived = (await searchParams).archived === '1';
+  const isAdmin = session.role === 'admin';
+  const spaces = await listSpaceSummaries(session.workspace.id, { includeArchived: showArchived });
+
+  return (
+    <div className="grid gap-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="grid gap-2">
+          <h1 className="text-3xl font-semibold tracking-tight">{t('spacesHeading')}</h1>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            {t('spacesIntro', { workspace: session.workspace.name })}
+          </p>
+        </div>
+        {isAdmin ? (
+          <Link href="/spaces/new" className={buttonVariants({ size: 'sm' })}>
+            {t('createSpace')}
+          </Link>
+        ) : null}
+      </div>
+
+      {spaces.length === 0 ? (
+        <Card>
+          <CardBody className="grid justify-items-start gap-3 text-sm text-muted-foreground">
+            <p>{isAdmin ? t('spacesEmptyAdmin') : t('spacesEmptyEditor')}</p>
+            <Link href="/guide#spaces" className="underline underline-offset-2 hover:text-foreground">
+              {t('readGuide')}
+            </Link>
+          </CardBody>
+        </Card>
+      ) : (
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {spaces.map((space) => (
+            <li key={space.id}>
+              <Card className="h-full">
+                <CardBody className="grid gap-2">
+                  <div className="flex items-start gap-3">
+                    {space.icon ? (
+                      <span aria-hidden className="text-2xl leading-none">
+                        {space.icon}
+                      </span>
+                    ) : null}
+                    <div className="grid min-w-0 gap-0.5">
+                      <Link
+                        href={spaceHref(space.key)}
+                        className="truncate font-semibold underline-offset-2 hover:underline"
+                      >
+                        {space.name}
+                      </Link>
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {space.key}
+                        {space.archivedAt ? ` · ${t('archivedBadge')}` : ''}
+                      </span>
+                    </div>
+                  </div>
+                  {space.description ? (
+                    <p className="line-clamp-3 text-sm text-muted-foreground">{space.description}</p>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    {t('pageCount', { count: space.pageCount })}
+                    {' · '}
+                    {space.lastUpdatedAt
+                      ? t('lastUpdated', {
+                          at: formatDateTime(format, space.lastUpdatedAt) ?? '—',
+                          name:
+                            space.lastUpdatedBy?.name ??
+                            (space.lastUpdatedBy?.type === 'agent' ? t('someAgent') : t('someone')),
+                        })
+                      : t('neverUpdated')}
+                  </p>
+                </CardBody>
+              </Card>
+            </li>
+          ))}
+        </ul>
       )}
+
+      <div className="flex flex-wrap gap-4 text-sm">
+        <Link
+          href={showArchived ? '/' : '/?archived=1'}
+          className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          {showArchived ? t('hideArchived') : t('showArchived')}
+        </Link>
+        <Link href="/tokens" className="text-muted-foreground underline underline-offset-2 hover:text-foreground">
+          {t('manageTokens')}
+        </Link>
+        <Link href="/connect" className="text-muted-foreground underline underline-offset-2 hover:text-foreground">
+          {t('connectAgent')}
+        </Link>
+        <Link href="/guide" className="text-muted-foreground underline underline-offset-2 hover:text-foreground">
+          {t('readGuide')}
+        </Link>
+      </div>
 
       <Card>
         <CardHeader>
@@ -100,7 +158,11 @@ export default async function HomePage() {
               <dd className="text-muted-foreground">{t('apiMe')}</dd>
             </div>
             <div>
-              <dt className="font-mono text-xs">GET, POST /api/v1/pages</dt>
+              <dt className="font-mono text-xs">GET, POST /api/v1/spaces</dt>
+              <dd className="text-muted-foreground">{t('apiSpaces')}</dd>
+            </div>
+            <div>
+              <dt className="font-mono text-xs">GET, POST /api/v1/pages?space=KEY</dt>
               <dd className="text-muted-foreground">{t('apiPages')}</dd>
             </div>
             <div>
@@ -108,11 +170,11 @@ export default async function HomePage() {
               <dd className="text-muted-foreground">{t('apiClaims')}</dd>
             </div>
             <div>
-              <dt className="font-mono text-xs">GET /api/v1/claims</dt>
+              <dt className="font-mono text-xs">GET /api/v1/claims?space=KEY</dt>
               <dd className="text-muted-foreground">{t('apiPresence')}</dd>
             </div>
             <div>
-              <dt className="font-mono text-xs">GET /api/v1/search?q=</dt>
+              <dt className="font-mono text-xs">GET /api/v1/search?q=&amp;space=KEY</dt>
               <dd className="text-muted-foreground">{t('apiSearch')}</dd>
             </div>
           </dl>

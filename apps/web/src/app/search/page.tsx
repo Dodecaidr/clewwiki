@@ -3,11 +3,14 @@ import { redirect } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
+import { SpaceFilterSelect } from '@/components/space-filter';
 import { Card, CardBody } from '@/components/ui/card';
 import { Input } from '@/components/ui/field';
 import { Button } from '@/components/ui/button';
 import { searchPages } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
+import { listSpaces } from '@/lib/spaces/service';
+import { spacePageHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +23,7 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; space?: string }>;
 }) {
   const session = await getSessionContext();
   if (!session) {
@@ -30,8 +33,19 @@ export default async function SearchPage({
   const t = await getTranslations('search');
   const tp = await getTranslations('pages');
   const format = await getFormatter();
-  const query = (await searchParams).q?.trim() ?? '';
-  const results = query === '' ? [] : await searchPages(session.workspace.id, { query, limit: 25 });
+  const params = await searchParams;
+  const query = params.q?.trim() ?? '';
+  const requested = params.space?.trim().toUpperCase() ?? '';
+
+  const spaces = await listSpaces(session.workspace.id, { includeArchived: true });
+  const selected = spaces.find((space) => space.key === requested) ?? null;
+  // "All spaces" is every space in use; an archived one is searched when it is
+  // picked by name.
+  const spaceIds = selected
+    ? [selected.id]
+    : spaces.filter((space) => space.archivedAt === null).map((space) => space.id);
+
+  const results = query === '' ? [] : await searchPages(session.workspace.id, { query, spaceIds, limit: 25 });
 
   return (
     <div className="grid gap-6">
@@ -53,6 +67,13 @@ export default async function SearchPage({
           maxLength={200}
           className="max-w-md"
         />
+        <SpaceFilterSelect
+          id="search-space"
+          label={t('spaceFilter')}
+          allLabel={t('allSpaces')}
+          spaces={spaces.map((space) => ({ key: space.key, name: space.name }))}
+          value={selected?.key ?? ''}
+        />
         <Button type="submit">{t('submit')}</Button>
       </form>
 
@@ -71,12 +92,14 @@ export default async function SearchPage({
             {results.map((hit) => (
               <li key={hit.pageId} className="grid gap-1">
                 <Link
-                  href={`/pages/${hit.pageId}`}
+                  href={spacePageHref(hit.spaceKey, hit.pageId)}
                   className="font-medium underline-offset-2 hover:underline"
                 >
                   {hit.title}
                 </Link>
-                <span className="font-mono text-xs text-muted-foreground">{hit.path}</span>
+                <span className="font-mono text-xs text-muted-foreground">
+                  {hit.spaceName} · {hit.path}
+                </span>
                 {/* Rendered as text, never as markup: a snippet is a fragment
                     of stored page content, not a piece of the interface. */}
                 <p className="text-sm text-muted-foreground">{hit.snippet}</p>

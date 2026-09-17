@@ -93,8 +93,13 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
     token: string,
     body: Record<string, unknown>,
   ): Promise<{ status: number; json: JsonRecord }> {
+    // Every page lives in a space; these tests work in the one each workspace
+    // was given in `beforeAll`, both of which carry the key MAIN.
     const response = await pagesRoute.POST(
-      request(token, '/api/v1/pages', { method: 'POST', body: JSON.stringify(body) }),
+      request(token, '/api/v1/pages', {
+        method: 'POST',
+        body: JSON.stringify({ space: 'MAIN', ...body }),
+      }),
     );
     return { status: response.status, json: await response.json() };
   }
@@ -139,6 +144,10 @@ describe.skipIf(!probe.reachable)('pages REST API', () => {
     workspaceId = primary!.id;
     otherWorkspaceId = other!.id;
     workspaceIds.push(workspaceId, otherWorkspaceId);
+    await db.insert(schema.spaces).values([
+      { workspaceId, key: 'MAIN', name: 'Main' },
+      { workspaceId: otherWorkspaceId, key: 'MAIN', name: 'Main' },
+    ]);
 
     readWrite = await seedToken({
       workspaceId,

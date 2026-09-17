@@ -157,13 +157,14 @@ line-range anchors produced ~50%):
   so that the runtime image stays a plain `node:22-slim` with no compiler
   toolchain in it — a native grammar would mean `node-gyp` in the image
   and a rebuild on every Node upgrade, for a parser that is read-only.
-- **The repository is read, never run.** The server keeps a bare mirror
-  per workspace, fetches it under a per-workspace lock, and reads blobs
-  with `git show`. There is no working tree, so nothing from a repository
+- **The repository is read, never run.** Each space links its own
+  repository — one project, one code base. The server keeps a bare mirror
+  per space, fetches it under a per-space lock, and reads blobs with
+  `git show`. There is no working tree, so nothing from a repository
   is ever laid out on disk in a form something could execute, and no
   build, install script or hook runs at any point. Repository content is
   data — the same rule page bodies are held to. The credential for a
-  private repository is named by environment variable in the workspace's
+  private repository is named by environment variable in the space's
   settings rather than stored in them, so it never reaches the database,
   a backup, or an API response. The name must be `CLEWWIKI_GIT_TOKEN` or
   `CLEWWIKI_GIT_TOKEN_<NAME>`, so the setting cannot reach any other
@@ -188,6 +189,7 @@ lives in the implementation, not here):
 - `workspaces`
 - `users`
 - `agent_tokens`
+- `spaces`
 - `pages`
 - `page_revisions`
 - `claims`
@@ -211,6 +213,46 @@ default claim TTL, today — lives in a `settings` JSON column on
 nothing, and a new knob must not be a migration. A value that ever needs
 an index or a reference graduates to a column of its own.
 
+### Spaces
+
+A workspace is divided into **spaces**, one per project or product area, the
+way Confluence divides a site. A space row carries a `key` (2–10 uppercase
+letters or digits, unique per workspace, enforced by a CHECK constraint and a
+unique index, and never updated), a name, a short Markdown description, an
+icon, an optional `home_page_id`, its creator and timestamps, `archived_at`,
+and its own `settings` JSON — which is where the source repository link lives
+now. The repository used to be a workspace setting; it moved to the space
+because each project has its own code, and a space is the unit that owns a
+page tree.
+
+Every page belongs to exactly one space (`pages.space_id`, not null), and
+everything that works on the tree stays inside it. The partial unique index on
+live paths is on `(space_id, path)`, so `/backend` can exist once per space. A
+move, a subtree delete and a restore match descendants by path prefix *within
+the page's space*; a parent must be in the same space; a technical/human pair
+is always within one space. A page never changes space. Claims, notes, anchors
+and revisions hang on page ids and needed no change: the space of any of them
+is the space of its page.
+
+Space membership is not a table. Roles stay workspace-wide in this version —
+an editor can edit in every space — and the only per-space access control is
+on agent tokens: `agent_tokens.space_ids` is a JSON list of space ids, or
+`null` for every space. The handlers check it next to the workspace check,
+explicitly, on every endpoint that reaches a page, a claim, an anchor, a
+search, presence or an export, and answer `404` for anything outside the list.
+Lists and searches use the list as their filter rather than filtering
+afterwards.
+
+Archiving is a timestamp, not a deletion: an archived space keeps its pages
+readable, leaves the space list and "all spaces" search, and refuses new pages.
+
+Migration `0004_spaces` moved existing data in one transaction: a `MAIN` space
+per workspace that had pages or a repository, every page (soft-deleted ones
+included) assigned to it, uniqueness moved to `(space_id, path)`, the
+repository copied onto the space and removed from the workspace — the code has
+no fallback to the old location — and `space_ids` added to tokens as `null`,
+so no existing token lost access.
+
 A page belongs to one of the two document types through its `kind`
 (`technical` or `human`) and points at its counterpart through a nullable
 `linked_page_id` on the same row, rather than through a separate link
@@ -228,4 +270,5 @@ the two representations cannot drift apart.
 Full-text search is a generated `tsvector` column on `pages`, weighted
 title over summary over body, with a GIN index — inside the same
 PostgreSQL instance as everything else, because a workspace at v1 scale
-does not justify a second system to keep in sync.
+does not justify a second system to keep in sync. A search names the spaces it
+covers explicitly: one space, or every unarchived space the caller can see.

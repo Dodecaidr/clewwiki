@@ -7,7 +7,8 @@ import {
   serviceErrorResponse,
   validationError,
 } from '@/lib/api-response';
-import { requireWorkspace } from '@/lib/api-auth';
+import { requireSpace, requireWorkspace } from '@/lib/api-auth';
+import { getPageSpaceId } from '@/lib/pages/service';
 import { confirmAnchor, getAnchorById } from '@/lib/anchors/service';
 import { toAnchorResource } from '@/lib/anchors/serialize';
 import { authorizePagesRequest, WRITE_SCOPES } from '@/lib/pages-api';
@@ -52,12 +53,16 @@ export async function POST(
 
     const mismatch = requireWorkspace(auth.identity, existing.workspaceId);
     if (mismatch) return mismatch;
+    // An anchor belongs to the space of the page it is on.
+    const spaceId = await getPageSpaceId(auth.workspaceId, existing.pageId);
+    if (!spaceId || requireSpace(auth.identity, spaceId)) {
+      return apiError(404, 'not_found', 'Anchor not found');
+    }
 
     const anchor = await confirmAnchor({
       workspaceId: auth.workspaceId,
       anchorId: parsedParams.data.anchorId,
       actor: auth.actor,
-      workspaceSettings: auth.identity.workspace.settings,
       ref: parsed.data.ref,
     });
 

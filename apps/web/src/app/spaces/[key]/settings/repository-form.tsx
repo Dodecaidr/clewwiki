@@ -2,8 +2,8 @@
 
 import { useActionState } from 'react';
 
-import { saveRepositoryAction, testRepositoryAction } from './actions';
-import type { RepositoryFormState } from './actions';
+import { saveRepositoryAction, testRepositoryAction } from '@/app/spaces/actions';
+import type { RepositoryFormState } from '@/app/spaces/actions';
 import { Alert } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
@@ -30,13 +30,15 @@ export interface RepositoryFormLabels {
  * One form with two submit buttons: save the setting, or test it first.
  *
  * Testing before saving is the useful order — an operator pasting a URL and a
- * branch wants to know the token works before every anchor in the workspace
+ * branch wants to know the token works before every anchor in the space
  * starts being checked against it.
  */
 export function RepositoryForm({
+  spaceKey,
   labels,
   initial,
 }: {
+  spaceKey: string;
   labels: RepositoryFormLabels;
   initial: { url: string; defaultRef: string; authTokenEnv: string };
 }) {
@@ -48,6 +50,7 @@ export function RepositoryForm({
 
   return (
     <form className="grid gap-4">
+      <input type="hidden" name="spaceKey" value={spaceKey} />
       <Field label={labels.url} htmlFor="repository-url" hint={labels.urlHint}>
         <Input
           id="repository-url"

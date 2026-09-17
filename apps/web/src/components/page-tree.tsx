@@ -33,17 +33,19 @@ function TreeLevel({
   nodes,
   activeId,
   depth,
+  hrefBase,
 }: {
   nodes: PageTreeItem[];
   activeId: string | null;
   depth: number;
+  hrefBase: string;
 }) {
   return (
     <ul className={cn('grid gap-0.5', depth > 0 && 'ml-2 border-l border-border pl-2')}>
       {nodes.map((node) => (
         <li key={node.id} className="grid gap-0.5">
           <Link
-            href={`/pages/${node.id}`}
+            href={`${hrefBase}/${node.id}`}
             aria-current={node.id === activeId ? 'page' : undefined}
             title={node.path}
             className={cn(
@@ -77,7 +79,7 @@ function TreeLevel({
             ) : null}
           </Link>
           {node.children.length > 0 ? (
-            <TreeLevel nodes={node.children} activeId={activeId} depth={depth + 1} />
+            <TreeLevel nodes={node.children} activeId={activeId} depth={depth + 1} hrefBase={hrefBase} />
           ) : null}
         </li>
       ))}
@@ -91,13 +93,22 @@ function TreeLevel({
  * from a prop, so the tree can live in the layout and survive navigation
  * between pages without being re-fetched.
  */
-export function PageTree({ nodes, emptyLabel }: { nodes: PageTreeItem[]; emptyLabel: string }) {
+export function PageTree({
+  nodes,
+  emptyLabel,
+  hrefBase,
+}: {
+  nodes: PageTreeItem[];
+  emptyLabel: string;
+  /** Where a page of this tree lives, without the id: `/spaces/KEY/pages`. */
+  hrefBase: string;
+}) {
   const pathname = usePathname();
-  const match = /^\/pages\/([0-9a-f-]{36})/.exec(pathname ?? '');
+  const match = /\/pages\/([0-9a-f-]{36})(?:\/|$)/.exec(pathname ?? '');
   const activeId = match?.[1] ?? null;
 
   if (nodes.length === 0) {
     return <p className="px-2 py-1 text-sm text-muted-foreground">{emptyLabel}</p>;
   }
-  return <TreeLevel nodes={nodes} activeId={activeId} depth={0} />;
+  return <TreeLevel nodes={nodes} activeId={activeId} depth={0} hrefBase={hrefBase} />;
 }

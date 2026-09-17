@@ -104,7 +104,10 @@ describe.skipIf(!probe.reachable)('claims, presence and notes', () => {
 
   async function createPage(token: string, body: Record<string, unknown>): Promise<Answer> {
     const response = await pagesRoute.POST(
-      request(token, '/api/v1/pages', { method: 'POST', body: JSON.stringify(body) }),
+      request(token, '/api/v1/pages', {
+        method: 'POST',
+        body: JSON.stringify({ space: 'MAIN', ...body }),
+      }),
     );
     return { status: response.status, json: await response.json() };
   }
@@ -221,6 +224,10 @@ describe.skipIf(!probe.reachable)('claims, presence and notes', () => {
     workspaceId = primary!.id;
     otherWorkspaceId = other!.id;
     workspaceIds.push(workspaceId, otherWorkspaceId);
+    await db.insert(schema.spaces).values([
+      { workspaceId, key: 'MAIN', name: 'Main' },
+      { workspaceId: otherWorkspaceId, key: 'MAIN', name: 'Main' },
+    ]);
 
     adminUserId = `user-${randomUUID()}`;
     await db.insert(schema.users).values({
