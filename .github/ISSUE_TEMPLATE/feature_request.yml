@@ -1,0 +1,60 @@
+name: Feature request
+description: Suggest an idea or improvement for clewwiki.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Take a look at `docs/roadmap.md` first —
+        your idea may already be planned for a later phase, in which case a
+        comment on the relevant discussion is more useful than a duplicate
+        request.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation or limitation that prompted this request.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you would like to see happen. Sketch the behavior, API shape, or UI if you have one in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, and why you prefer the one above.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of clewwiki does this mostly touch?
+      options:
+        - Web UI
+        - REST API
+        - MCP server
+        - Claims / leases
+        - Anchors (doc↔code staleness)
+        - Docker / deployment
+        - Documentation
+        - Other / not sure
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, screenshots, or related issues.
+    validations:
+      required: false

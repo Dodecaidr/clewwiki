@@ -1,0 +1,14 @@
+# Override for building the image from source instead of pulling the
+# published one. Layer it on top of the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# This is what CI's docker-smoke job uses, so every push keeps testing the
+# source tree rather than whatever tag happens to be published.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    pull_policy: build

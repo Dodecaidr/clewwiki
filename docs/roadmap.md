@@ -516,3 +516,26 @@ Public launch of the repository.
 **Exit criteria**: the repository is public with a complete README,
 license, and documentation set; the Phase 6 security review pass is
 complete.
+
+**Release checklist**, in order:
+
+- [ ] UI design pass.
+- [ ] Community files done: `SECURITY.md`, `CONTRIBUTING.md`,
+      `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, issue and pull request
+      templates.
+- [ ] Release workflow done: `.github/workflows/release.yml` builds and
+      publishes the container image to GHCR, publishes
+      `@clewwiki/mcp-server` to npm, and creates the GitHub Release, all on
+      a `v*.*.*` tag push.
+- [ ] Owner adds the `NPM_TOKEN` secret to the repository (Settings →
+      Secrets and variables → Actions), so the `npm` job in the release
+      workflow can publish instead of skipping with a notice.
+- [ ] Owner sets the `ghcr.io/dodecaidr/clewwiki` package to public after
+      the first successful push from the release workflow — a newly
+      created GHCR package defaults to private, and `docker compose pull`
+      against a private package fails for anyone without registry access.
+- [ ] Tag `v0.1.0`.
+- [ ] Verify `docker compose pull && docker compose up -d` and `npx -y
+      @clewwiki/mcp-server` both work from a clean machine, against the
+      just-published image and package — not a local build.
+- [ ] Launch posts.

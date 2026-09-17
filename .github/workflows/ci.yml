@@ -108,6 +108,13 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      # Build from source rather than pulling ghcr.io/dodecaidr/clewwiki, so
+      # this job keeps testing the tree being pushed, not whatever is
+      # published. docker-compose.build.yml layers a `build:` section onto
+      # the base file's `image:`; every `docker compose` below picks both up
+      # from this variable, no `-f` flags needed.
+      COMPOSE_FILE: docker-compose.yml:docker-compose.build.yml
 
     steps:
       - name: Checkout

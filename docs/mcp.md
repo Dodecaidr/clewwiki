@@ -357,17 +357,44 @@ once, in the REST handlers.
 
 ## Configuration for common agent hosts
 
-The stdio server is the `@clewwiki/mcp-server` package in this repository.
-Until it is published to npm, build it from a checkout and point the agent
-host at the built entry point:
+The stdio server is the `@clewwiki/mcp-server` package in this repository,
+published to npm as of the first tagged release. **`npx -y
+@clewwiki/mcp-server`** is the primary way to run it — it needs nothing
+installed ahead of time beyond Node.js 22.
+
+Claude Code (`.mcp.json` in the project, or the user configuration):
+
+```json
+{
+  "mcpServers": {
+    "clewwiki": {
+      "command": "npx",
+      "args": ["-y", "@clewwiki/mcp-server"],
+      "env": { "CLEWWIKI_URL": "https://wiki.example.com", "CLEWWIKI_TOKEN": "${CLEWWIKI_TOKEN}" }
+    }
+  }
+}
+```
+
+Cursor (`.cursor/mcp.json` in the project) takes the same `mcpServers`
+object. Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.clewwiki]
+command = "npx"
+args = ["-y", "@clewwiki/mcp-server"]
+env = { CLEWWIKI_URL = "https://wiki.example.com", CLEWWIKI_TOKEN = "..." }
+```
+
+**Alternative: build from a checkout.** Before the first release, or if you
+would rather not fetch from npm, build the package from the repository and
+point the agent host at the built entry point instead:
 
 ```sh
 pnpm install
 pnpm --filter @clewwiki/mcp-server build
 # entry point: packages/mcp-server/dist/bin.js
 ```
-
-Claude Code (`.mcp.json` in the project, or the user configuration):
 
 ```json
 {
@@ -381,18 +408,12 @@ Claude Code (`.mcp.json` in the project, or the user configuration):
 }
 ```
 
-Cursor (`.cursor/mcp.json` in the project) takes the same `mcpServers`
-object. Codex (`~/.codex/config.toml`):
-
 ```toml
 [mcp_servers.clewwiki]
 command = "node"
 args = ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"]
 env = { CLEWWIKI_URL = "https://wiki.example.com", CLEWWIKI_TOKEN = "..." }
 ```
-
-Once the package is published, `"command": "npx", "args": ["-y",
-"@clewwiki/mcp-server"]` replaces the path.
 
 The stdio server refuses a plain `http://` `CLEWWIKI_URL` unless the host is
 `localhost` or `127.0.0.1`: the token is sent on every call, and over plain

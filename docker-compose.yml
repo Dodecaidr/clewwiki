@@ -33,9 +33,12 @@ services:
     # compose network.
 
   web:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    # Published from the first tagged release: ghcr.io/dodecaidr/clewwiki.
+    # Pin CLEWWIKI_VERSION to a specific tag in production rather than
+    # tracking `latest`. To build from source instead, layer
+    # docker-compose.build.yml on top of this file — see README, "Deploy".
+    image: ghcr.io/dodecaidr/clewwiki:${CLEWWIKI_VERSION:-latest}
+    pull_policy: missing
     restart: unless-stopped
     depends_on:
       postgres:

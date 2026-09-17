@@ -1,5 +1,8 @@
 # clewwiki
 
+[![CI](https://github.com/Dodecaidr/clewwiki/actions/workflows/ci.yml/badge.svg)](https://github.com/Dodecaidr/clewwiki/actions/workflows/ci.yml)
+[![License: AGPL-3.0-or-later](https://img.shields.io/github/license/Dodecaidr/clewwiki)](LICENSE)
+
 **Status: pre-alpha, under active development**
 
 A self-hosted knowledge base for humans and AI coding agents to write in,
@@ -131,9 +134,15 @@ password manager: it is not in any backup the commands below make.
 docker compose up -d
 ```
 
-The first run builds the image, which takes a few minutes. Compose then starts
-PostgreSQL, waits for its healthcheck, and starts the application, which
-applies its own database migrations before serving the first request.
+The first run pulls the published image
+(`ghcr.io/dodecaidr/clewwiki:latest`), starts PostgreSQL, waits for its
+healthcheck, and starts the application, which applies its own database
+migrations before serving the first request. **Pin a version in production**
+rather than tracking `latest` — set `CLEWWIKI_VERSION` in `.env` to a specific
+release tag (e.g. `0.1.0`) so an upgrade is a deliberate `docker compose pull`
+rather than whatever `latest` happens to point at that day. Images and the npm
+package are published starting with the first tagged release; before that,
+[build from source](#build-from-source) instead.
 
 ```sh
 docker compose ps          # both services should reach "healthy"
@@ -260,6 +269,23 @@ WWW-Authenticate: Bearer realm="clewwiki"
 below. Then go through the [Security checklist](#security-checklist) before
 anyone else starts using the instance.
 
+### Build from source
+
+The alternative to pulling the published image: build it yourself from a
+checkout, the way CI's `docker-smoke` job does. Layer
+`docker-compose.build.yml` on top of the base compose file, which trades the
+`image:` directive for a `build:` one:
+
+```sh
+git clone https://github.com/Dodecaidr/clewwiki.git
+cd clewwiki
+cp .env.example .env   # then fill it in as in step 2 above
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+Everything else in this section — setup, the reverse proxy, agent tokens —
+is unchanged; only where the image comes from differs.
+
 ### Connecting an AI coding agent (MCP)
 
 Agents talk to clewwiki through the Model Context Protocol with eleven
@@ -270,16 +296,20 @@ MCP server is a REST client of your instance: it holds an agent token and
 has no other way in, so every tool call gets the same scope checks, rate
 limits and audit rows as a direct REST request.
 
-Most agents run on a developer's machine and start the MCP server
-themselves, over stdio. That machine needs Node.js 22 and pnpm 10 — the
-server host does not.
-
 **1. Issue a token** on the **Agent tokens** page (step 7 above). Give it
 `pages:read` for an agent that only reads, and `pages:write` as well for one
 that edits.
 
-**2. Build the stdio server** from a checkout on the machine the agent runs
-on (it is not on npm yet):
+**2. Run the stdio server.** Once `@clewwiki/mcp-server` is published, this is
+the primary path and needs nothing installed ahead of time beyond Node.js 22:
+
+```sh
+npx -y @clewwiki/mcp-server
+```
+
+The alternative — before the first release, or if you would rather not fetch
+from npm — is building it from a checkout, on the machine the agent runs on
+(that machine needs Node.js 22 and pnpm 10; the server host does not):
 
 ```sh
 git clone https://github.com/Dodecaidr/clewwiki.git
@@ -290,6 +320,24 @@ pnpm --filter @clewwiki/mcp-server build
 
 **3. Register it with your agent host.** Claude Code, in `.mcp.json` at the
 root of the project the agent works on:
+
+```json
+{
+  "mcpServers": {
+    "clewwiki": {
+      "command": "npx",
+      "args": ["-y", "@clewwiki/mcp-server"],
+      "env": {
+        "CLEWWIKI_URL": "https://wiki.example.com",
+        "CLEWWIKI_TOKEN": "${CLEWWIKI_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Building from a checkout instead, point `command`/`args` at the built entry
+point:
 
 ```json
 {
@@ -311,15 +359,16 @@ Cursor reads the same object from `.cursor/mcp.json`. Codex reads
 
 ```toml
 [mcp_servers.clewwiki]
-command = "node"
-args = ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"]
+command = "npx"
+args = ["-y", "@clewwiki/mcp-server"]
 env = { CLEWWIKI_URL = "https://wiki.example.com", CLEWWIKI_TOKEN = "..." }
 ```
 
 Keep the token out of files you commit: export `CLEWWIKI_TOKEN` in your
 shell and let the host expand it where it supports that.
 
-**4. Check it.** `node packages/mcp-server/dist/bin.js --help` prints the
+**4. Check it.** `npx -y @clewwiki/mcp-server --help` (or `node
+packages/mcp-server/dist/bin.js --help` from a checkout) prints the
 variables it needs. A missing or malformed `CLEWWIKI_URL` or
 `CLEWWIKI_TOKEN` stops it at start-up with a message naming the variable. So
 does a plain `http://` URL for anything other than `localhost` or `127.0.0.1`,
@@ -553,8 +602,10 @@ Each line is pass or fail, not a matter of judgement.
 - [ ] **Backups run and have been restored once.** The `postgres-data` volume
       holds every account, page, token digest and audit row, and
       `docker compose down -v` deletes it permanently. See [Backups](#backups).
-- [ ] **Image and dependencies are current.** `docker compose build --pull` then
-      `docker compose up -d` picks up base-image security updates.
+- [ ] **Image and dependencies are current.** `docker compose pull` then
+      `docker compose up -d` picks up base-image and dependency security
+      updates from the published image (`docker compose build --pull` instead,
+      when building from source).
 
 ### Configuration reference
 
@@ -576,6 +627,7 @@ container.
 | `TRUSTED_CLIENT_IP_HEADER` | no | `x-real-ip` | Header the reverse proxy overwrites with the client address. Login rate limits key on it; without it all clients share one bucket. |
 | `AGENT_TOKEN_RATE_LIMIT_MAX` | no | `60` | Requests allowed per token per window. |
 | `AGENT_TOKEN_RATE_LIMIT_WINDOW` | no | `60` | Window length in seconds. |
+| `CLEWWIKI_VERSION` | no | `latest` | Which published tag of `ghcr.io/dodecaidr/clewwiki` to run. Pin a version in production. Ignored when building from source. |
 | `WEB_BIND_ADDRESS` | no | `127.0.0.1` | Host interface compose publishes the app on. Change it only for a proxy on another machine, and then to a private address. |
 | `WEB_PORT` | no | `3000` | Host port compose publishes the app on. |
 | `MCP_HTTP_ENABLED` | no | `false` | Mounts the streamable HTTP MCP endpoint at `/mcp`. While off, `/mcp` answers 404. |
@@ -661,16 +713,18 @@ docker compose exec -T postgres sh -c \
   'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
   > "clewwiki-db-$(date +%F).dump"
 
-git pull
-docker compose build --pull
+docker compose pull
 docker compose up -d
 ```
 
-`--pull` refreshes the base images as well, which is how security updates to
-Node, Debian and git reach the instance. Pending migrations are applied by the
+(Building from source: `git pull && docker compose -f docker-compose.yml -f
+docker-compose.build.yml up -d --build`.)
+
+`--pull`/`pull` refreshes the image, which is how security updates to Node,
+Debian and git reach the instance. Pending migrations are applied by the
 application when it starts; several replicas starting at once are safe, because
 an advisory lock lets the first one migrate while the rest wait. Read the
-release notes before pulling across a version that says it changes
+release notes before upgrading across a version that says it changes
 `.env.example` or `docker-compose.yml`.
 
 The compose file pins PostgreSQL to major version 16. Moving to another major
@@ -1143,6 +1197,10 @@ They apply migrations themselves, create their own workspaces, and delete them
 afterwards, so an existing database is not disturbed — but point them at a
 scratch database anyway.
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full contributor workflow —
+what a pull request must pass, commit conventions, and how contributions are
+licensed.
+
 ## Security model
 
 clewwiki is designed for an operator with no dedicated security team and
@@ -1165,7 +1223,22 @@ an edge case. The security model includes:
   responsibility; worked examples for Caddy, Traefik, and nginx are in
   [Reverse proxy](#reverse-proxy) above.
 
-A full write-up lives in `docs/security.md`.
+A full write-up lives in `docs/security.md`. See [`SECURITY.md`](SECURITY.md)
+for how to report a vulnerability.
+
+## Contributing
+
+Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
+development setup, what a pull request needs to pass, and how contributions
+are licensed, and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) for the
+community standards that apply to this project.
+
+## Security
+
+See [`SECURITY.md`](SECURITY.md) to report a vulnerability (GitHub private
+vulnerability reporting — do not open a public issue) and for the supported
+versions and scope, and `docs/security.md` for the full threat model and
+control write-up.
 
 ## Roadmap
 
