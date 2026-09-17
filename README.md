@@ -54,24 +54,24 @@ code↔doc drift also watches drift between the two linked bodies.
 
 ## Deploy
 
-What is here today: the database schema, credential login, scoped agent tokens,
-a container that builds, the wiki core — pages, a page tree, Markdown and
-Mermaid rendering, full-text search, revision history, and Markdown/HTML
-export — and the conflict-safe write protocol: claims on a page or a section,
-a presence board, ephemeral notes, and an audit log that records refused
-attempts as well as successful ones. All of it over both the web UI and the
-REST API. Anchoring and the MCP server are not here yet. What follows works
-today, verbatim, on a clean machine.
+clewwiki runs as two containers — the application and PostgreSQL 16 — started
+by one `docker compose` command, with no reverse proxy bundled. This section
+takes a clean Linux server with Docker to a working instance with an agent
+connected, in order. Every command is meant to be pasted as it is.
 
 ### Prerequisites
 
-- Docker Engine 24 or newer with the Compose plugin (`docker compose version`).
-- Roughly 1 GB of free disk for the image and the database volume.
-- A machine you can reach on port 3000, or a reverse proxy in front of it.
-- `openssl`, for generating secrets. Any CSPRNG will do.
-
-Nothing else: no Node.js, no PostgreSQL, no package manager on the host. Those
-are only needed for development, covered further down.
+- **Docker Engine 24 or newer with the Compose plugin, v2.24 or newer.**
+  Check with `docker version` and `docker compose version`. Docker's own
+  install instructions for your distribution are the right way to get both.
+- **git** and **openssl** on the host. Nothing else: no Node.js, no
+  PostgreSQL, no package manager. Those are only needed for development.
+- **About 2 GB of RAM and 5 GB of free disk.** The image is built on the
+  server the first time, and the build is the hungriest thing the instance
+  ever does. Running, it needs far less.
+- **A domain name and a reverse proxy** for anything reachable beyond the
+  machine itself. The application speaks plain HTTP only; see
+  [Reverse proxy](#reverse-proxy).
 
 ### Quick start
 
@@ -82,94 +82,120 @@ git clone https://github.com/Dodecaidr/clewwiki.git
 cd clewwiki
 ```
 
-**2. Create your environment file.**
+**2. Create `.env` and generate the secrets.**
 
 ```sh
 cp .env.example .env
+chmod 600 .env
+
+sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
+sed -i "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -base64 48)|" .env
 ```
 
-**3. Generate the two secrets.** Both are required, and neither has a default —
-the container refuses to start if either is missing or left at a placeholder.
+(`sed -i` as written is GNU sed, which is what Linux has. On macOS use
+`sed -i ''`.)
+
+- `POSTGRES_PASSWORD` is the database password. It is generated as hex because
+  compose places it inside a connection URL, where the `/`, `+` and `=` of
+  base64 would break parsing. It takes effect when the database volume is first
+  created; editing it afterwards does not change the password PostgreSQL has
+  already stored.
+- `BETTER_AUTH_SECRET` signs session cookies. Changing it later signs everyone
+  out.
+
+Then set `BETTER_AUTH_URL` to the address a browser will use. `.env.example`
+ships with `http://localhost:3000`, which is right for a trial on your own
+machine. On a server, use the public HTTPS address the reverse proxy will serve:
 
 ```sh
-# Signs session cookies. Changing it later logs everyone out.
-printf 'BETTER_AUTH_SECRET=%s\n' "$(openssl rand -base64 48)"
-
-# Password for the bundled PostgreSQL container.
-printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -base64 24)"
+sed -i "s|^BETTER_AUTH_URL=.*|BETTER_AUTH_URL=https://wiki.example.com|" .env
 ```
 
-Paste both lines into `.env`, replacing the empty keys already there. Then set
-`BETTER_AUTH_URL` to the address a browser will actually use. For a first local
-run that is:
+It has to match what the browser sees, or sign-in cookies are issued for the
+wrong origin and silently dropped. Secure cookies switch on automatically when
+it starts with `https://`.
 
+Check that none of the three is empty:
+
+```sh
+grep -E '^(POSTGRES_PASSWORD|BETTER_AUTH_SECRET|BETTER_AUTH_URL)=.+' .env
 ```
-BETTER_AUTH_URL=http://localhost:3000
-```
 
-If you are deploying behind a reverse proxy, set it to the public HTTPS address
-instead (`https://wiki.example.com`). It has to match what the browser sees, or
-sign-in cookies are issued for the wrong origin and silently dropped. Secure
-cookies switch on automatically when this value starts with `https://`.
+All three lines must print. If one is missing, compose refuses to start and
+names it — there is no default to fall back on. Keep a copy of `.env` in your
+password manager: it is not in any backup the commands below make.
 
-**4. Start it.**
+**3. Start it.**
 
 ```sh
 docker compose up -d
 ```
 
-Compose builds the image, starts PostgreSQL, waits for it to pass its
-healthcheck, then starts the application, which applies its own database
-migrations before serving the first request. Watch it come up with:
+The first run builds the image, which takes a few minutes. Compose then starts
+PostgreSQL, waits for its healthcheck, and starts the application, which
+applies its own database migrations before serving the first request.
 
 ```sh
-docker compose logs -f web
+docker compose ps          # both services should reach "healthy"
+docker compose logs -f web # follow the application log; Ctrl-C to stop following
 ```
 
-**5. Confirm it is alive.**
+**4. Confirm it is alive.**
 
 ```sh
-curl http://localhost:3000/api/v1/health
+curl http://127.0.0.1:3000/api/v1/health
 ```
 
 ```json
 { "status": "ok", "service": "clewwiki", "database": "up" }
 ```
 
-A `"database": "down"` answer means the app is running but cannot reach
-PostgreSQL — check `docker compose logs postgres` and the `POSTGRES_PASSWORD`
-in `.env`.
+A `503` with `"database": "down"` means the application is running but cannot
+reach PostgreSQL — check `docker compose logs postgres`.
 
-By default compose publishes the port on `127.0.0.1` only, so nothing is
-reachable from the network yet. That is deliberate; see
-[Reverse proxy](#reverse-proxy) before changing it.
+The port is published on `127.0.0.1` only, so at this point nothing on the
+network can reach the instance. Keep it that way until step 5 is done.
 
-**6. Create the administrator account.**
+**5. Create the administrator account — before anyone else can.**
 
-Open <http://localhost:3000> in a browser. Because the instance has no accounts
-yet, it sends you to `/setup`, which asks for a workspace name, your name, your
-email, and a password of at least 12 characters.
+A fresh instance has no accounts, and its `/setup` page creates the first one,
+the administrator, for whoever submits it first. So do it while the instance is
+still reachable only by you.
 
-There are no default credentials, and there is no seeded admin account in any
-migration or fixture. The account you create here is the first one that exists.
-Once it does, `/setup` stops being a route at all and answers 404, so the form
-cannot be reached again on a running instance.
+- **On your own machine**, open <http://localhost:3000>. It sends you to
+  `/setup`.
+- **On a server**, forward the port over SSH from your workstation, and open
+  <http://localhost:3000/setup> there:
 
-Store the password in a password manager. There is no mail transport configured
-by default, so there is no password-reset email to fall back on.
+  ```sh
+  ssh -N -L 3000:127.0.0.1:3000 you@your-server
+  ```
+
+The form asks for a workspace name, your name, your email and a password of at
+least 12 characters. There are no default credentials and no seeded account in
+any migration or fixture: this account is the first one that exists. Once it
+does, `/setup` answers 404 and the form cannot be reached again.
+
+Store the password in a password manager. No mail transport is configured, so
+there is no reset email to fall back on.
+
+**6. Put a reverse proxy in front of it** (servers only). Follow one of the
+three worked examples under [Reverse proxy](#reverse-proxy), then open your
+`https://` address and sign in. For a trial on your own machine, skip this step
+and keep using <http://localhost:3000>.
 
 **7. Issue an agent token.**
 
-Sign in, then open **Agent tokens** in the navigation (or go straight to
-`/tokens`). Give the token a name you will recognise later, choose how long it
-should live, and grant only the scopes the agent actually needs:
+Signed in, open **Agent tokens** in the navigation (or go to `/tokens`). Give
+the token a name you will recognise later, choose how long it should live, and
+grant only the scopes the agent needs:
 
 | Scope | What it permits |
 |---|---|
 | `identity:read` | Call `GET /api/v1/me`. Needed by anything that wants to confirm who it is. |
-| `pages:read` | Read wiki pages, the page tree, search results and exports. |
-| `pages:write` | Create, change, move, delete and link wiki pages. |
-| `audit:read` | Read the audit log. Reserved for a later phase. |
+| `pages:read` | Read pages, the page tree, search results, exports, claims, notes and anchors. |
+| `pages:write` | Create, change, move, delete and link pages; take and release claims; leave notes; manage anchors. |
+| `audit:read` | Read the audit log. |
 
 Press **Issue token**. The token appears once:
 
@@ -184,8 +210,10 @@ one.
 **8. Use it.**
 
 ```sh
-curl -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
-     http://localhost:3000/api/v1/me
+export CLEWWIKI_URL=https://wiki.example.com   # or http://localhost:3000
+export CLEWWIKI_TOKEN=cww_…
+
+curl -H "Authorization: Bearer $CLEWWIKI_TOKEN" "$CLEWWIKI_URL/api/v1/me"
 ```
 
 ```json
@@ -200,13 +228,9 @@ curl -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
 The response carries `RateLimit-Limit`, `RateLimit-Remaining` and
 `RateLimit-Reset` headers so a client can slow down before it is turned away.
 
-**9. Revoke it when you are done.** Press **Revoke** on the tokens page. The
-next request with that token is rejected at the authentication layer, before any
-handler runs:
-
-```sh
-curl -i -H "Authorization: Bearer cww_7Kq2mXpa.…" http://localhost:3000/api/v1/me
-```
+A token is revoked with **Revoke** on the same page. The next request with it
+is rejected at the authentication layer, before any handler runs; a token past
+its expiry is refused at the same point:
 
 ```
 HTTP/1.1 401 Unauthorized
@@ -215,8 +239,399 @@ WWW-Authenticate: Bearer realm="clewwiki"
 {"error":{"code":"invalid_token","message":"Invalid or expired token"}}
 ```
 
-Expiry behaves identically: a token past `expires_at` is refused at the same
-point, not at write time.
+**9. Connect an agent.** Continue with
+[Connecting an AI coding agent (MCP)](#connecting-an-ai-coding-agent-mcp)
+below. Then go through the [Security checklist](#security-checklist) before
+anyone else starts using the instance.
+
+### Connecting an AI coding agent (MCP)
+
+Agents talk to clewwiki through the Model Context Protocol with eleven
+tools — `wiki.search`, `wiki.get_page`, `wiki.claim`, `wiki.write_page`,
+`wiki.release_claim` and the rest. The full contract, with input and
+output shapes and error codes, is in [`docs/mcp.md`](docs/mcp.md). The
+MCP server is a REST client of your instance: it holds an agent token and
+has no other way in, so every tool call gets the same scope checks, rate
+limits and audit rows as a direct REST request.
+
+Most agents run on a developer's machine and start the MCP server
+themselves, over stdio. That machine needs Node.js 22 and pnpm 10 — the
+server host does not.
+
+**1. Issue a token** on the **Agent tokens** page (step 7 above). Give it
+`pages:read` for an agent that only reads, and `pages:write` as well for one
+that edits.
+
+**2. Build the stdio server** from a checkout on the machine the agent runs
+on (it is not on npm yet):
+
+```sh
+git clone https://github.com/Dodecaidr/clewwiki.git
+cd clewwiki
+pnpm install
+pnpm --filter @clewwiki/mcp-server build
+```
+
+**3. Register it with your agent host.** Claude Code, in `.mcp.json` at the
+root of the project the agent works on:
+
+```json
+{
+  "mcpServers": {
+    "clewwiki": {
+      "command": "node",
+      "args": ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"],
+      "env": {
+        "CLEWWIKI_URL": "https://wiki.example.com",
+        "CLEWWIKI_TOKEN": "${CLEWWIKI_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Cursor reads the same object from `.cursor/mcp.json`. Codex reads
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.clewwiki]
+command = "node"
+args = ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"]
+env = { CLEWWIKI_URL = "https://wiki.example.com", CLEWWIKI_TOKEN = "..." }
+```
+
+Keep the token out of files you commit: export `CLEWWIKI_TOKEN` in your
+shell and let the host expand it where it supports that.
+
+**4. Check it.** `node packages/mcp-server/dist/bin.js --help` prints the
+variables it needs. A missing or malformed `CLEWWIKI_URL` or
+`CLEWWIKI_TOKEN` stops it at start-up with a message naming the variable.
+
+#### Remote agents over HTTP
+
+Agents that do not run on a developer machine — a CI job, a remote runner —
+can use the streamable HTTP endpoint instead of stdio. It is off until you
+turn it on on the server:
+
+```sh
+sed -i "s|^MCP_HTTP_ENABLED=.*|MCP_HTTP_ENABLED=true|" .env
+docker compose up -d
+```
+
+It is then served at `https://<your host>/mcp`, behind the same reverse
+proxy and TLS as the web UI. Only `Authorization: Bearer <agent token>`
+gets in; a signed-in browser session does not. Browser origins are refused
+unless listed in `MCP_HTTP_ALLOWED_ORIGINS`. Leave that empty unless you
+know which web client needs it.
+
+### Reverse proxy
+
+**clewwiki does not terminate TLS, and it never will.** The application process
+does not listen on a TLS socket, does not read certificates, and has no ACME
+client. Putting a proxy in front of it is not optional for anything reachable
+beyond `localhost`: without one, session cookies and agent tokens cross the
+network in plaintext.
+
+No proxy is bundled, so you can use the one you already run rather than fight a
+second one. Three worked examples follow. In all of them:
+
+1. Set `BETTER_AUTH_URL` in `.env` to the public `https://` address.
+2. Leave `WEB_BIND_ADDRESS` at its default, `127.0.0.1`. Compose then publishes
+   the app on `127.0.0.1:3000` only: a proxy on the same host (Caddy, nginx)
+   reaches it there and nothing else can. A proxy in a container reaches the
+   app over a Docker network instead, and the port is not published at all
+   (Traefik, below).
+3. Make sure the proxy sends `X-Forwarded-Proto: https`. The app enables HSTS
+   only when it sees that header, which is what keeps a plain-HTTP local run
+   from locking your browser out of the instance.
+4. Run `docker compose up -d` again after editing `.env`.
+
+#### Caddy
+
+Caddy obtains and renews certificates from Let's Encrypt on its own, and sets
+the forwarding headers correctly with no configuration. It is the least you can
+get away with:
+
+```caddyfile
+# /etc/caddy/Caddyfile
+wiki.example.com {
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:3000 {
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+```
+
+```sh
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+Point `wiki.example.com` at the host first: Caddy needs to answer an ACME
+challenge on port 80 before it can serve port 443.
+
+#### Traefik
+
+For a Traefik instance already running on a shared Docker network, add labels to
+the `web` service in a compose override file rather than editing
+`docker-compose.yml`:
+
+```yaml
+# docker-compose.override.yml
+services:
+  web:
+    # The proxy reaches the app over the Docker network, so stop publishing
+    # the port on the host entirely.
+    ports: !reset []
+    networks:
+      - default
+      - traefik
+    labels:
+      traefik.enable: 'true'
+      traefik.docker.network: traefik
+      traefik.http.routers.clewwiki.rule: Host(`wiki.example.com`)
+      traefik.http.routers.clewwiki.entrypoints: websecure
+      traefik.http.routers.clewwiki.tls: 'true'
+      traefik.http.routers.clewwiki.tls.certresolver: letsencrypt
+      traefik.http.services.clewwiki.loadbalancer.server.port: '3000'
+
+networks:
+  traefik:
+    external: true
+```
+
+Traefik sets `X-Forwarded-Proto` itself. Confirm your entrypoint has a
+certificate resolver configured and that the `traefik` network exists
+(`docker network create traefik`).
+
+#### nginx
+
+nginx needs the forwarding headers spelled out, and needs its proxy buffering
+relaxed for streaming responses:
+
+```nginx
+# /etc/nginx/sites-available/clewwiki
+server {
+    listen 80;
+    listen [::]:80;
+    server_name wiki.example.com;
+
+    # Everything except the ACME challenge goes to HTTPS.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name wiki.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/wiki.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/wiki.example.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    # Agent tokens are sent as headers; keep them off any cache.
+    proxy_cache off;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        # Without this the app will not enable secure-cookie or HSTS behaviour.
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Required for streamed responses and the MCP HTTP transport at /mcp.
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+}
+```
+
+```sh
+sudo ln -s /etc/nginx/sites-available/clewwiki /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Obtain the certificate with `certbot certonly --webroot -w /var/www/certbot -d
+wiki.example.com` before enabling the HTTPS block.
+
+### Security checklist
+
+Work through this before exposing an instance to anything but your own machine.
+Each line is pass or fail, not a matter of judgement.
+
+- [ ] **TLS is terminated in front of the app.** Load the instance over
+      `https://` and confirm the certificate is valid. The app never does this
+      itself, and there is no warning if you skip it.
+- [ ] **The app port is not published to the internet.** `docker compose ps`
+      shows `127.0.0.1:3000->3000/tcp` (or a private address), never
+      `0.0.0.0:3000`. Check any override file you added.
+- [ ] **`/setup` returns 404.** Check it. A 200 means the instance has no
+      accounts and anyone reaching it can claim the administrator account.
+- [ ] **`BETTER_AUTH_SECRET` is a generated value.** `openssl rand -base64 48`,
+      not a word you chose. The container refuses to start on an obvious
+      placeholder, but it cannot detect a weak one.
+- [ ] **`POSTGRES_PASSWORD` is a generated value**, and the database port is not
+      published to the host. The shipped compose file keeps it on the internal
+      network; check any override you added.
+- [ ] **`.env` is not in version control and not world-readable.** `git status`
+      never lists it, and `ls -l .env` shows `-rw-------`.
+- [ ] **The administrator account has a strong, stored password.** It was
+      created interactively at first boot; there is no reset email configured.
+- [ ] **Agent tokens carry an expiry.** Prefer a fixed TTL and rotation over a
+      token that never expires.
+- [ ] **Agent tokens carry the narrowest scopes that work.** A token that only
+      reads should not hold `pages:write`.
+- [ ] **Leaked tokens are revoked, not just rotated.** Revocation takes effect
+      on the next request, at the authentication layer.
+- [ ] **MCP over HTTP is off unless an agent needs it.** `MCP_HTTP_ENABLED` is
+      `false`, or `/mcp` is served only behind the same TLS proxy as the UI.
+- [ ] **The MCP origin allowlist is empty** unless a specific browser-based MCP
+      client needs it, and then lists exactly that origin. `MCP_HTTP_ALLOWED_ORIGINS`
+      is the only thing standing between a page in someone's browser and `/mcp`.
+- [ ] **The rate limit suits your agents.** The default is 60 requests per
+      minute per token. It is enforced per application process, so running more
+      than one replica multiplies the effective ceiling.
+- [ ] **The audit log is being read.** Every agent-token request writes a row,
+      including rejected ones. A burst of `auth.rejected` from a token that is
+      normally quiet is the signal that a token has leaked.
+- [ ] **Backups run and have been restored once.** The `postgres-data` volume
+      holds every account, page, token digest and audit row, and
+      `docker compose down -v` deletes it permanently. See [Backups](#backups).
+- [ ] **Image and dependencies are current.** `docker compose build --pull` then
+      `docker compose up -d` picks up base-image security updates.
+
+### Configuration reference
+
+Every value is read from the environment. Nothing is compiled into the image,
+and there is no configuration file to edit inside the container. Compose fills
+`docker-compose.yml` in from `.env` and hands the application only the
+variables that file lists, so a variable added to `.env` alone never reaches the
+container.
+
+| Variable | Secret | Default | Purpose |
+|---|---|---|---|
+| `POSTGRES_PASSWORD` | **yes** | none — required | Password for the bundled PostgreSQL container. Generate with `openssl rand -hex 32`; base64 breaks the connection URL. |
+| `POSTGRES_USER` | no | `clewwiki` | Database role name. |
+| `POSTGRES_DB` | no | `clewwiki` | Database name. |
+| `DATABASE_URL` | **yes** | built by compose | Connection string. Set it by hand only when running the app outside compose. |
+| `BETTER_AUTH_SECRET` | **yes** | none — required | Signs session cookies. Generate with `openssl rand -base64 48`. Changing it signs everyone out. |
+| `BETTER_AUTH_URL` | no | none — required | Public base URL as the browser sees it. Enables secure cookies when it starts with `https://`. |
+| `AGENT_TOKEN_RATE_LIMIT_MAX` | no | `60` | Requests allowed per token per window. |
+| `AGENT_TOKEN_RATE_LIMIT_WINDOW` | no | `60` | Window length in seconds. |
+| `WEB_BIND_ADDRESS` | no | `127.0.0.1` | Host interface compose publishes the app on. Change it only for a proxy on another machine, and then to a private address. |
+| `WEB_PORT` | no | `3000` | Host port compose publishes the app on. |
+| `MCP_HTTP_ENABLED` | no | `false` | Mounts the streamable HTTP MCP endpoint at `/mcp`. While off, `/mcp` answers 404. |
+| `MCP_HTTP_ALLOWED_ORIGINS` | no | empty | Comma-separated browser origins allowed to call `/mcp`. Empty refuses every browser origin; clients that send no `Origin` are unaffected. |
+| `MCP_INTERNAL_BASE_URL` | no | `http://127.0.0.1:$PORT` | Where `/mcp` reaches the app's own REST API. Outside compose only. |
+| `RUN_MIGRATIONS_ON_START` | no | `true` | Set to `false` to manage the schema yourself. |
+| `CLAIM_SWEEP_INTERVAL_SECONDS` | no | `60` | How often lapsed claims are released in the background. `0` disables the sweep; expiry is still applied whenever a claim is read or written. |
+| `REPOS_DIR` | no | `/data/repos` | Where read-only mirrors of workspace repositories are kept. Compose backs it with the `repos-data` volume. |
+| `CLEWWIKI_MIGRATIONS_DIR` | no | set by the image | Where the app looks for migration SQL. Outside a container only. |
+| `CLEWWIKI_GRAMMARS_DIR` | no | set by the image | Where the app looks for the tree-sitter grammar `.wasm` files. Outside a container only. |
+
+Browser sessions are not rate limited; the two `AGENT_TOKEN_RATE_LIMIT_*`
+settings apply to bearer-token requests only.
+
+A private repository's access token is configured by name, not by value: the
+workspace's repository setting names an environment variable (say
+`GIT_ACCESS_TOKEN`), you add that variable to `.env`, and uncomment the matching
+line under `web.environment` in `docker-compose.yml` — or, to keep that file
+untouched, set it in a `docker-compose.override.yml`. The token never enters the
+database.
+
+### Backups
+
+The instance keeps its state in two named volumes. Run these from the
+`clewwiki` directory.
+
+**`postgres-data` — everything that matters.** Accounts, pages and their
+history, claims, token digests and the audit log. Back it up with a logical
+dump, which is consistent while the application keeps running:
+
+```sh
+docker compose exec -T postgres sh -c \
+  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
+  > "clewwiki-db-$(date +%F).dump"
+```
+
+Restore into the running stack, replacing what is there:
+
+```sh
+docker compose stop web
+docker compose exec -T postgres sh -c \
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' \
+  < clewwiki-db-2026-01-31.dump
+docker compose start web
+```
+
+**`repos-data` — a cache.** Bare mirrors of the repositories anchors are checked
+against. Losing it costs a fresh clone on the next check, nothing more; back it
+up only if cloning is slow or expensive for you:
+
+```sh
+docker compose run --rm --no-deps --user root -v "$PWD:/backup" \
+  --entrypoint tar web czf "/backup/clewwiki-repos-$(date +%F).tar.gz" -C /data/repos .
+```
+
+```sh
+docker compose stop web
+docker compose run --rm --no-deps --user root -v "$PWD:/backup:ro" \
+  --entrypoint sh web -c \
+  'tar xzf /backup/clewwiki-repos-2026-01-31.tar.gz -C /data/repos && chown -R 1001:1001 /data/repos'
+docker compose start web
+```
+
+`.env` is in neither backup. Without `BETTER_AUTH_SECRET` a restored instance
+still works, but every session has to sign in again; without
+`POSTGRES_PASSWORD` the application cannot reach a restored volume.
+
+### Upgrading
+
+```sh
+docker compose exec -T postgres sh -c \
+  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
+  > "clewwiki-db-$(date +%F).dump"
+
+git pull
+docker compose build --pull
+docker compose up -d
+```
+
+`--pull` refreshes the base images as well, which is how security updates to
+Node, Debian and git reach the instance. Pending migrations are applied by the
+application when it starts; several replicas starting at once are safe, because
+an advisory lock lets the first one migrate while the rest wait. Read the
+release notes before pulling across a version that says it changes
+`.env.example` or `docker-compose.yml`.
+
+The compose file pins PostgreSQL to major version 16. Moving to another major
+version is a dump and restore into a fresh volume, not a tag change.
+
+### Uninstalling
+
+```sh
+docker compose down                         # stop and remove the containers; keep both volumes
+docker compose down --volumes --rmi all     # also delete both volumes and both images
+docker builder prune                        # reclaim the image build cache
+cd .. && rm -rf clewwiki
+```
+
+The second command is irreversible: accounts, pages, history and the audit log
+go with the `postgres-data` volume. Take a backup first if there is any chance
+you will want them.
 
 ## Writing pages
 
@@ -259,7 +674,8 @@ be kept in agreement.
 
 ### From an agent token
 
-Issue a token with `pages:read` and `pages:write` (see above), then:
+Issue a token with `pages:read` and `pages:write` ([Deploy](#quick-start), step
+7), then:
 
 ```sh
 export CLEWWIKI_TOKEN=cww_…
@@ -389,9 +805,9 @@ Two section claims coexist while they name different sections. A page-level
 claim excludes every section claim on that page, and every section claim
 excludes a page-level one.
 
-Until anchors arrive, a section claim controls *who may write*, not *which
-bytes they may write*: the server has no section boundaries to check a body
-against yet, so a write under a section claim still replaces the whole body.
+A section claim controls *who may write*, not *which bytes they may write*:
+the server does not check a body against section boundaries, so a write under
+a section claim still replaces the whole body.
 Two holders of different sections writing at once are separated by the content
 hash instead — the second one is refused with `stale_base`, re-reads, and
 writes again. Nothing is lost either way.
@@ -486,6 +902,14 @@ file is a standalone document that opens from disk with nothing to load;
 Mermaid blocks are kept as `<pre class="mermaid">` holding their source, since
 drawing them would mean shipping a renderer inside every exported file.
 
+**PDF.** There is no PDF export format. Open the HTML export in a browser and
+print it to PDF: the file carries its own print stylesheet — page margins, no
+dark background, code blocks wrapped instead of cut off, tables and code kept
+off page breaks where they fit — so the printed copy reads as a document rather
+than a screenshot of a web page. Rendering PDFs on the server would mean a
+headless browser in the image, several hundred megabytes for one convenience;
+`docs/roadmap.md` records the measurement behind that decision.
+
 ### Anchoring a page to code
 
 An anchor ties a page, or one named section of it, to a declaration in your
@@ -497,7 +921,7 @@ header and fill in three fields:
 
 | Field | What it takes |
 |---|---|
-| Repository URL | `https://…`, `ssh://…`, or `file:///srv/checkouts/api` for a repository on the same machine. |
+| Repository URL | `https://…`, or `file:///srv/checkouts/api` for a checkout mounted into the container. The container image ships no SSH client, so use `https://` with an access token rather than `ssh://`. |
 | Default ref | The branch, tag or commit anchors are checked against unless a caller names another. Usually `main`. |
 | Access token variable | The **name** of an environment variable holding the token — for example `GIT_ACCESS_TOKEN`. Leave it empty for a public or local repository. |
 
@@ -561,78 +985,7 @@ anchors sitting on the line-range path. Line ranges do not survive an edit above
 them, so a rising number is the early warning that the badges are turning into
 noise.
 
-### Connecting an AI coding agent (MCP)
-
-Agents talk to clewwiki through the Model Context Protocol with eleven
-tools — `wiki.search`, `wiki.get_page`, `wiki.claim`, `wiki.write_page`,
-`wiki.release_claim` and the rest. The full contract, with input and
-output shapes and error codes, is in [`docs/mcp.md`](docs/mcp.md). The
-MCP server is a REST client of your instance: it holds an agent token and
-has no other way in, so every tool call gets the same scope checks, rate
-limits and audit rows as a direct REST request.
-
-**1. Issue a token** on the **Tokens** page. Give it `pages:read` for an
-agent that only reads, and `pages:write` as well for one that edits.
-
-**2. Build the stdio server** from your checkout (it is not on npm yet):
-
-```sh
-pnpm install
-pnpm --filter @clewwiki/mcp-server build
-```
-
-**3. Register it with your agent host.** Claude Code, in `.mcp.json` at the
-root of the project the agent works on:
-
-```json
-{
-  "mcpServers": {
-    "clewwiki": {
-      "command": "node",
-      "args": ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"],
-      "env": {
-        "CLEWWIKI_URL": "https://wiki.example.com",
-        "CLEWWIKI_TOKEN": "${CLEWWIKI_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-Cursor reads the same object from `.cursor/mcp.json`. Codex reads
-`~/.codex/config.toml`:
-
-```toml
-[mcp_servers.clewwiki]
-command = "node"
-args = ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"]
-env = { CLEWWIKI_URL = "https://wiki.example.com", CLEWWIKI_TOKEN = "..." }
-```
-
-Keep the token out of files you commit: export `CLEWWIKI_TOKEN` in your
-shell and let the host expand it where it supports that.
-
-**4. Check it.** `node packages/mcp-server/dist/bin.js --help` prints the
-variables it needs. A missing or malformed `CLEWWIKI_URL` or
-`CLEWWIKI_TOKEN` stops it at start-up with a message naming the variable.
-
-#### Remote agents over HTTP
-
-Agents that do not run on a developer machine — a CI job, a remote runner —
-can use the streamable HTTP endpoint instead of stdio. It is off until you
-turn it on:
-
-```sh
-MCP_HTTP_ENABLED=true
-```
-
-It is then served at `https://<your host>/mcp`, behind the same reverse
-proxy and TLS as the web UI. Only `Authorization: Bearer <agent token>`
-gets in; a signed-in browser session does not. Browser origins are refused
-unless listed in `MCP_HTTP_ALLOWED_ORIGINS`. Leave that empty unless you
-know which web client needs it.
-
-### REST endpoints in this phase
+### REST endpoints
 
 | Endpoint | Auth | Scope | Purpose |
 |---|---|---|---|
@@ -682,234 +1035,7 @@ been released", `forbidden` is "that claim belongs to someone else", and
 the workspace's source repository could not be reached or read, which is this
 instance's dependency failing rather than anything wrong with the request.
 
-### Reverse proxy
-
-**clewwiki does not terminate TLS, and it never will.** The application process
-does not listen on a TLS socket, does not read certificates, and has no ACME
-client. Putting a proxy in front of it is not optional for anything reachable
-beyond `localhost`: without one, session cookies and agent tokens cross the
-network in plaintext.
-
-No proxy is bundled, so you can use the one you already run rather than fight a
-second one. Three worked examples follow. In all of them:
-
-1. Set `BETTER_AUTH_URL` in `.env` to the public `https://` address.
-2. Set `WEB_BIND_ADDRESS=127.0.0.1` (the default) if the proxy runs on the same
-   host, so the app is unreachable except through the proxy.
-3. Make sure the proxy sends `X-Forwarded-Proto: https`. The app enables HSTS
-   only when it sees that header, which is what keeps a plain-HTTP local run
-   from locking your browser out of the instance.
-4. Run `docker compose up -d` again after editing `.env`.
-
-#### Caddy
-
-Caddy obtains and renews certificates from Let's Encrypt on its own, and sets
-the forwarding headers correctly with no configuration. It is the least you can
-get away with:
-
-```caddyfile
-# /etc/caddy/Caddyfile
-wiki.example.com {
-	encode zstd gzip
-
-	reverse_proxy 127.0.0.1:3000 {
-		header_up X-Forwarded-Proto {scheme}
-	}
-}
-```
-
-```sh
-sudo caddy validate --config /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-```
-
-Point `wiki.example.com` at the host first: Caddy needs to answer an ACME
-challenge on port 80 before it can serve port 443.
-
-#### Traefik
-
-For a Traefik instance already running on a shared Docker network, add labels to
-the `web` service in a compose override file rather than editing
-`docker-compose.yml`:
-
-```yaml
-# docker-compose.override.yml
-services:
-  web:
-    # The proxy reaches the app over the Docker network, so stop publishing
-    # the port on the host entirely.
-    ports: !reset []
-    networks:
-      - default
-      - traefik
-    labels:
-      traefik.enable: 'true'
-      traefik.docker.network: traefik
-      traefik.http.routers.clewwiki.rule: Host(`wiki.example.com`)
-      traefik.http.routers.clewwiki.entrypoints: websecure
-      traefik.http.routers.clewwiki.tls: 'true'
-      traefik.http.routers.clewwiki.tls.certresolver: letsencrypt
-      traefik.http.services.clewwiki.loadbalancer.server.port: '3000'
-
-networks:
-  traefik:
-    external: true
-```
-
-Traefik sets `X-Forwarded-Proto` itself. Confirm your entrypoint has a
-certificate resolver configured and that the `traefik` network exists
-(`docker network create traefik`).
-
-#### nginx
-
-nginx needs the forwarding headers spelled out, and needs its proxy buffering
-relaxed for streaming responses:
-
-```nginx
-# /etc/nginx/sites-available/clewwiki
-server {
-    listen 80;
-    listen [::]:80;
-    server_name wiki.example.com;
-
-    # Everything except the ACME challenge goes to HTTPS.
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
-    server_name wiki.example.com;
-
-    ssl_certificate     /etc/letsencrypt/live/wiki.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/wiki.example.com/privkey.pem;
-    ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers off;
-
-    # Agent tokens are sent as headers; keep them off any cache.
-    proxy_cache off;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        # Without this the app will not enable secure-cookie or HSTS behaviour.
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Required for streamed responses and, later, the MCP HTTP transport.
-        proxy_set_header Upgrade    $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_buffering off;
-        proxy_read_timeout 300s;
-    }
-}
-```
-
-```sh
-sudo ln -s /etc/nginx/sites-available/clewwiki /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-Obtain the certificate with `certbot certonly --webroot -w /var/www/certbot -d
-wiki.example.com` before enabling the HTTPS block.
-
-### Security checklist
-
-Work through this before exposing an instance to anything but your own machine.
-Each line is pass or fail, not a matter of judgement.
-
-- [ ] **TLS is terminated in front of the app.** Load the instance over
-      `https://` and confirm the certificate is valid. The app never does this
-      itself, and there is no warning if you skip it.
-- [ ] **`BETTER_AUTH_SECRET` is a generated value.** `openssl rand -base64 48`,
-      not a word you chose and not the placeholder. The container refuses to
-      start on an obvious placeholder, but it cannot detect a weak one.
-- [ ] **`POSTGRES_PASSWORD` is a generated value**, and the database port is not
-      published to the host. The shipped compose file keeps it on the internal
-      network; check any override you added.
-- [ ] **`.env` is not in version control.** `git status` should never list it.
-      `.gitignore` covers it, but a `git add -f` defeats that.
-- [ ] **The administrator account has a strong, stored password.** It was
-      created interactively at first boot; there is no reset email configured.
-- [ ] **`/setup` returns 404.** Check it. A 200 means the instance has no
-      accounts and anyone reaching it can claim the administrator account.
-- [ ] **Agent tokens carry an expiry.** Prefer a fixed TTL and rotation over a
-      token that never expires.
-- [ ] **Agent tokens carry the narrowest scopes that work.** A token that only
-      reads should not hold `pages:write`.
-- [ ] **Leaked tokens are revoked, not just rotated.** Revocation takes effect
-      on the next request, at the authentication layer.
-- [ ] **The rate limit suits your agents.** The default is 60 requests per
-      minute per token. It is enforced per application process, so running more
-      than one replica multiplies the effective ceiling.
-- [ ] **The audit log is being read.** Every agent-token request writes a row,
-      including rejected ones. A burst of `auth.rejected` from a token that is
-      normally quiet is the signal that a token has leaked.
-- [ ] **Backups cover the `postgres-data` volume.** It holds every account,
-      token digest and audit row. `docker compose down -v` deletes it
-      permanently.
-- [ ] **Image and dependencies are current.** `docker compose build --pull` then
-      `docker compose up -d` picks up base-image security updates.
-
-### Configuration reference
-
-Every value is read from the environment. Nothing is compiled into the image,
-and there is no configuration file to edit inside the container.
-
-| Variable | Secret | Default | Purpose |
-|---|---|---|---|
-| `POSTGRES_PASSWORD` | **yes** | none — required | Password for the bundled PostgreSQL container. |
-| `POSTGRES_USER` | no | `clewwiki` | Database role name. |
-| `POSTGRES_DB` | no | `clewwiki` | Database name. |
-| `DATABASE_URL` | **yes** | built by compose | Connection string. Set it by hand only when running outside compose. |
-| `BETTER_AUTH_SECRET` | **yes** | none — required | Signs session cookies and tokens. Changing it invalidates every session. |
-| `BETTER_AUTH_URL` | no | `http://localhost:3000` | Public base URL as the browser sees it. Enables secure cookies when it starts with `https://`. |
-| `APP_BASE_URL` | no | `BETTER_AUTH_URL` | Base URL used for generated links. |
-| `AGENT_TOKEN_RATE_LIMIT_MAX` | no | `60` | Requests allowed per token per window. |
-| `AGENT_TOKEN_RATE_LIMIT_WINDOW` | no | `60` | Window length in seconds. |
-| `WEB_BIND_ADDRESS` | no | `127.0.0.1` | Host interface compose publishes on. `0.0.0.0` exposes the app to the network — only with TLS in front. |
-| `WEB_PORT` | no | `3000` | Host port compose publishes on. |
-| `RUN_MIGRATIONS_ON_START` | no | unset (migrations run) | Set to `false` to manage the schema yourself. |
-| `CLAIM_SWEEP_INTERVAL_SECONDS` | no | `60` | How often lapsed claims are released in the background. `0` disables the sweep; expiry is still applied whenever a claim is read or written. |
-| `CLEWWIKI_MIGRATIONS_DIR` | no | set by the image | Where the app looks for migration SQL. |
-| `REPOS_DIR` | no | `/data/repos` | Where read-only mirrors of workspace repositories are kept. Compose backs it with a named volume. |
-| `CLEWWIKI_GRAMMARS_DIR` | no | set by the image | Where the app looks for the tree-sitter grammar `.wasm` files. |
-| `LOG_LEVEL` | no | `info` | One of `error`, `warn`, `info`, `debug`. |
-
-Browser sessions are not rate limited; the two `AGENT_TOKEN_RATE_LIMIT_*`
-settings apply to bearer-token requests only.
-
-### Upgrading
-
-```sh
-git pull
-docker compose build --pull
-docker compose up -d
-```
-
-Pending migrations are applied by the application when it starts. Several
-replicas starting at once are safe: an advisory lock means the first one
-migrates and the rest wait, then find nothing to do.
-
-### Uninstalling
-
-```sh
-docker compose down        # stop, keep the data
-docker compose down -v     # stop and delete the database volume
-```
-
-The second form is irreversible: accounts, tokens and audit history go with it.
-
-### Development
+## Development
 
 For working on clewwiki itself rather than running it, you need Node.js 22
 (`.nvmrc`), pnpm 10, and a PostgreSQL 16 you can point at.
@@ -976,8 +1102,10 @@ No calendar dates — phases are ordered by dependency, not by schedule.
   *Complete.*
 - **Phase 4** — Doc↔code anchoring with staleness detection. *Complete.*
 - **Phase 5** — MCP server (stdio and streamable HTTP transports). *Complete.*
-- **Phase 6** — Export (Markdown/HTML, PDF conditional on a spike), Docker
-  image and compose, full README and license text.
+- **Phase 6** — Export (Markdown/HTML; PDF deferred in favour of printing the
+  HTML export), Docker image and compose, full README and license text. *Built;
+  closes once the pre-release security review's launch-blocking findings are
+  fixed.*
 - **Phase 7** — Public launch.
 
 See `docs/roadmap.md` for exit criteria per phase.

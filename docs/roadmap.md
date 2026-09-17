@@ -307,7 +307,7 @@ next. And the package is not yet published to npm, so agent hosts run the
 built entry point from a checkout; publishing is a release step, not a
 code change.
 
-## Phase 6 — Export, packaging, docs
+## Phase 6 — Export, packaging, docs — **built, pending the security review gate**
 
 Markdown and HTML export (required); PDF export conditional on an
 image-size spike; the final Docker image and docker-compose setup,
@@ -322,6 +322,108 @@ on a clean machine brings up a working instance using only the README.
 **Pre-release gate**: a full security review pass against every control
 in `docs/security.md`, not a subset, is a named exit criterion of this
 phase and must complete before Phase 7 starts.
+
+**Status: built; not complete.** Everything below is in the repository. The
+phase closes when the pre-release security review — run as a separate pass,
+not as part of this work — has reported, and every finding it marks as
+launch-blocking is fixed. Until then Phase 7 does not start.
+
+- **Image.** `docker/Dockerfile` is two stages on
+  `public.ecr.aws/docker/library/node:22-slim`. The build stage installs the
+  workspace, compiles the standalone server and gathers the grammar `.wasm`
+  files; the runtime stage receives only the standalone output, its static
+  assets, the migration SQL, the grammars and the licence files. No pnpm, no
+  package store, no source tree and no compiler reach it, and the npm, npx,
+  corepack and yarn that ship with the base image are removed, since nothing
+  installs packages at run time. git and ca-certificates are the only
+  packages added — the anchor checker needs git, and git needs certificates to
+  reach an https remote. There is no SSH client: private repositories are
+  reached over https with a token named in the workspace settings.
+- **Size choices.** `slim` rather than `alpine`: the test suite, CI and every
+  development machine run on glibc, and musl would be a second, untested
+  platform under the tree-sitter runtime to save a few megabytes. The copy of
+  the grammars that Next's trace pulls into the standalone output is dropped
+  (it would ship twice), and so is the image optimizer's native library,
+  sharp with libvips — tens of megabytes that nothing loads, because nothing renders
+  `next/image`. The build-time placeholders for `DATABASE_URL` and
+  `BETTER_AUTH_SECRET` are scoped to the one `RUN` that compiles, so they are
+  recorded in no image configuration. The size of the final image is written
+  to the `docker-smoke` job summary on every run.
+- **Runtime hardening.** The process runs as `clewwiki`, UID and GID 1001,
+  fixed so a bind mount can be chowned without guessing. The application files
+  belong to root; the service user can write only to `/data/repos` and Next's
+  cache directory. The image carries a `HEALTHCHECK` that calls
+  `/api/v1/health` with Node rather than curl, `STOPSIGNAL SIGTERM`,
+  `NODE_ENV=production`, `NEXT_TELEMETRY_DISABLED=1` and OCI labels for
+  source, licence (`AGPL-3.0-or-later`), title and description.
+- **Compose.** PostgreSQL 16 from the same mirror, with a healthcheck and a
+  named volume, not published to the host; the app waits for it to be healthy,
+  keeps repository mirrors on a second named volume, and is published on
+  `127.0.0.1:3000` by default. `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET` and
+  `BETTER_AUTH_URL` have no defaults: compose refuses to start and names the
+  missing one. There is no bundled proxy — shipping none is the default rather
+  than a separate compose profile, and the README carries the Caddy, Traefik
+  and nginx configurations. Compose now passes the MCP-over-HTTP, migration
+  and claim-sweep settings through to the app; before, setting
+  `MCP_HTTP_ENABLED` in `.env` had no effect in a compose deployment. Two
+  variables nothing reads, `APP_BASE_URL` and `LOG_LEVEL`, were removed from
+  the compose file, `.env.example` and the README.
+- **The database password is generated as hex.** compose places it inside the
+  connection URL, and the `/`, `+` and `=` that `openssl rand -base64` produces
+  break URL parsing. The README and `.env.example` previously recommended
+  base64 for it.
+- **Continuous verification.** A `docker-smoke` CI job builds the image with
+  `docker compose up -d --build --wait`, then `scripts/smoke-test.mjs` walks
+  the first-run path over plain HTTP: the health endpoint, the `/setup` form
+  and its 404 afterwards, the login form, the agent-token form, `/api/v1/me`,
+  create → claim → write → release, Markdown and HTML export, and MCP
+  `initialize` plus `tools/list` returning eleven tools. The forms are
+  submitted the way a browser without JavaScript submits them — the hidden
+  server-action fields React rendered are sent back with the visible ones —
+  so no test-only endpoint and no seeded account exist. The job then checks
+  that the container runs as a non-root user, that git, the grammars and the
+  migrations are present and npm is not, that neither generated secret appears
+  in the image history or configuration, and that compose refuses to start
+  with no `.env` at all. Every job in the workflow runs with
+  `contents: read`, and every third-party action is pinned to a commit SHA.
+- **README.** The Deploy section runs in order on a clean Linux server:
+  prerequisites, clone, `.env` with a generated value for each secret,
+  `docker compose up -d`, creating the administrator over an SSH tunnel before
+  the instance is reachable, the reverse proxy, the first agent token, and
+  connecting an agent over MCP; followed by the security checklist, the
+  configuration reference, backup and restore commands for both volumes,
+  upgrading and uninstalling.
+
+**PDF export: deferred.** The plan made PDF conditional on measuring what it
+adds to the image. Rendering Mermaid diagrams into a PDF needs a headless
+browser, and the published sizes settle the question without a build:
+
+| Headless browser path | Published size |
+|---|---|
+| Debian bookworm `chromium` package (152.0.7977.82, amd64) | 77 MB download, 282 MB installed |
+| … plus its `chromium-common` dependency | 29 MB download, 65 MB installed |
+| Playwright 1.63 Chromium (Chrome for Testing 153.0.8010.12, linux64) | 196 MB zip |
+| … plus Chrome Headless Shell, which Playwright installs by default | 120 MB zip |
+
+That is roughly 350 MB installed for the Debian route before the X11, GTK,
+font and sound libraries a slim base does not have — against a
+`node:22-slim` base whose compressed amd64 layers total 80 MB. It would
+multiply the image several times over for one convenience, and put a
+full browser, with its own patch cadence, into the process that holds the
+database credentials. So Markdown and HTML are the supported export formats.
+The HTML export carries its own print stylesheet, and printing it to PDF from
+any browser is the documented path. The export contract is unchanged:
+`format` accepts `md` and `html`, and a `pdf` value can be added later without
+breaking a caller, if a renderer that does not need a browser in the image
+turns up.
+
+**Exit criteria status.** Markdown and HTML export open without error: the
+unit tests assert a standalone document with its print stylesheet, and the
+smoke test fetches both from the running container. PDF is deferred without
+changing the export contract. `docker compose up` on a clean machine bringing
+up a working instance from the README alone is exercised by `docker-smoke` on
+every push; its first green run on CI is part of closing this phase, along
+with the security review.
 
 ## Phase 7 — Launch
 

@@ -108,6 +108,13 @@ describe('exportPageHtml', () => {
     expect(exported.body).toContain('<pre class="mermaid">');
   });
 
+  it('carries its own print stylesheet, so printing it is the PDF path', async () => {
+    const exported = await exportPageHtml(page);
+    expect(exported.body).toMatch(/<style>[\s\S]*@media print \{[\s\S]*<\/style>/);
+    expect(exported.body).toContain('@page');
+    expect(exported.body).not.toMatch(/<link\b/i);
+  });
+
   it('references nothing outside the file', async () => {
     const exported = await exportPageHtml(page);
     expect(exported.body).not.toMatch(/<script/i);

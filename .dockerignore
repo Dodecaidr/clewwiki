@@ -27,9 +27,10 @@ apps/web/grammars
 *.log
 .DS_Store
 
-# Documentation and local-only material have no bearing on the image.
+# Documentation, local-only material and the host-side smoke test have no
+# bearing on the image.
 docs
+scripts
 README.md
 AGENTS.md
-NOTICE
-LICENSE-ADDITIONAL-TERMS.md
+docker-compose*.yml

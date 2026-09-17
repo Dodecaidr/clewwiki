@@ -15,7 +15,7 @@ flowchart TD
     Proxy --> App[Next.js app: web UI + REST API]
     MCP -->|internal call, shared service layer| App
     App --> DB[(PostgreSQL)]
-    App -->|export| Export[Markdown / HTML / PDF]
+    App -->|export| Export[Markdown / HTML]
 ```
 
 clewwiki is a server product, not an offline-first client: agents and

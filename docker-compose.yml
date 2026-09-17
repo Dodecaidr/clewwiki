@@ -4,28 +4,33 @@
 # the operator's responsibility: put Caddy, Traefik or nginx in front of the
 # published port before exposing this to a network you do not control. The
 # README has a complete worked example for each of the three.
+#
+# Every value comes from `.env` next to this file (copy `.env.example`). The
+# ones marked `:?` have no default on purpose: compose refuses to start and
+# names the missing variable instead of bringing up an instance with a guessable
+# secret.
 
 services:
   postgres:
+    # Same mirror rule as the Dockerfile: never Docker Hub directly.
+    # digest at last review: sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
     image: public.ecr.aws/docker/library/postgres:16
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-clewwiki}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required. Generate one with openssl rand -hex 32 and put it in .env}
       POSTGRES_DB: ${POSTGRES_DB:-clewwiki}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
       # `web` waits for this, so the first boot never races the database.
-      test:
-        ['CMD-SHELL', 'pg_isready -U "${POSTGRES_USER:-clewwiki}" -d "${POSTGRES_DB:-clewwiki}"']
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
-    # Not published to the host: only the application needs to reach it.
-    expose:
-      - '5432'
+    # Not published to the host: only the application reaches it, over the
+    # compose network.
 
   web:
     build:
@@ -37,34 +42,39 @@ services:
         condition: service_healthy
     environment:
       # Secrets come from the environment only; nothing is baked into the image.
-      DATABASE_URL: postgres://${POSTGRES_USER:-clewwiki}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-clewwiki}
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      # The password is interpolated into a URL, so it must be URL-safe:
+      # `openssl rand -hex 32` is, `openssl rand -base64` is not.
+      DATABASE_URL: postgres://${POSTGRES_USER:-clewwiki}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-clewwiki}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required. Generate one with openssl rand -base64 48 and put it in .env}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required, e.g. http://localhost:3000 or https://wiki.example.com}
       AGENT_TOKEN_RATE_LIMIT_MAX: ${AGENT_TOKEN_RATE_LIMIT_MAX:-60}
       AGENT_TOKEN_RATE_LIMIT_WINDOW: ${AGENT_TOKEN_RATE_LIMIT_WINDOW:-60}
+      RUN_MIGRATIONS_ON_START: ${RUN_MIGRATIONS_ON_START:-true}
+      CLAIM_SWEEP_INTERVAL_SECONDS: ${CLAIM_SWEEP_INTERVAL_SECONDS:-60}
+      MCP_HTTP_ENABLED: ${MCP_HTTP_ENABLED:-false}
+      MCP_HTTP_ALLOWED_ORIGINS: ${MCP_HTTP_ALLOWED_ORIGINS:-}
       REPOS_DIR: /data/repos
-      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # A private repository's access token is passed through by name. Add the
+      # variable your workspace's repository setting names, for example:
+      # GIT_ACCESS_TOKEN: ${GIT_ACCESS_TOKEN:-}
     volumes:
       # Read-only mirrors of the repositories anchors are checked against. On a
       # named volume so a restart does not re-clone every workspace's history.
       - repos-data:/data/repos
     ports:
-      # Bound to the loopback interface by default. Change this to 3000:3000
-      # only once something in front of it is terminating TLS.
+      # Published on the loopback interface only, by default: 127.0.0.1:3000.
+      # A reverse proxy on the same host (Caddy, nginx) reaches it there, and
+      # nothing else can. To expose it to a proxy elsewhere:
+      #   - proxy in another container: attach both to a shared Docker network
+      #     and drop this mapping (README, "Traefik");
+      #   - proxy on another machine: set WEB_BIND_ADDRESS in .env to this
+      #     host's private-network address, never to 0.0.0.0 on a public one.
+      # The application speaks plain HTTP. Never publish it to the internet
+      # without TLS terminated in front of it.
       - '${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000'
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    # The healthcheck is defined in the image (docker/Dockerfile), so a plain
+    # `docker run` gets the same probe as compose does.
+    stop_grace_period: 30s
 
 volumes:
   postgres-data:

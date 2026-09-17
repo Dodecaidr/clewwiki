@@ -72,6 +72,17 @@ blockquote { margin: 1rem 0; padding-left: 1rem; border-left: 3px solid #8884; }
 .page-meta { margin: 0 0 2rem; padding-bottom: 1rem; border-bottom: 1px solid #8884;
   font-size: 0.85rem; opacity: 0.75; }
 img { max-width: 100%; }
+@page { margin: 18mm 16mm; }
+@media print {
+  :root { color-scheme: light; }
+  body { max-width: none; padding: 0; color: #000; background: #fff; font-size: 11pt; line-height: 1.5; }
+  a { color: inherit; text-decoration: underline; }
+  pre { overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; }
+  pre, blockquote, table, img { break-inside: avoid; }
+  h1, h2, h3, h4 { break-after: avoid; }
+  thead { display: table-header-group; }
+  .page-meta { opacity: 1; color: #444; }
+}
 `.trim();
 
 /**

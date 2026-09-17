@@ -4,9 +4,20 @@ on:
   push:
   pull_request:
 
+# Nothing in this workflow writes to the repository. Each job states what it
+# reads; anything not listed is denied.
+permissions:
+  contents: read
+
+# Third-party actions are pinned to a full commit SHA, with the release it
+# corresponds to in a comment: a tag can be moved to other code, a commit
+# cannot. Update both together.
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     services:
       postgres:
@@ -34,15 +45,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -70,13 +82,147 @@ jobs:
 
   secret-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The action lists a pull request's commits through the API to decide
+      # what to scan.
+      pull-requests: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Builds the image and brings the stack up exactly as the README tells an
+  # operator to, then walks the first-run path over HTTP: setup, sign-in, an
+  # agent token, a claim-write-release cycle, both exports and MCP over HTTP.
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        # Only the smoke script runs on the runner; the application runs in
+        # the container.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Compose refuses to start without the required secrets
+        run: |
+          set -u
+          if docker compose --env-file /dev/null config > /dev/null 2> compose-error.txt; then
+            echo "::error::docker compose accepted a configuration with no secrets"
+            exit 1
+          fi
+          cat compose-error.txt
+          grep -q 'is required' compose-error.txt
+
+      - name: Write .env with generated secrets
+        run: |
+          set -eu
+          umask 077
+          {
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)"
+            echo "BETTER_AUTH_SECRET=$(openssl rand -base64 48)"
+            echo "BETTER_AUTH_URL=http://localhost:3000"
+            echo "MCP_HTTP_ENABLED=true"
+          } > .env
+
+      - name: Build and start the stack
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Smoke test over HTTP
+        env:
+          SMOKE_BASE_URL: http://127.0.0.1:3000
+        run: node scripts/smoke-test.mjs
+
+      - name: Inspect the running container
+        run: |
+          set -eu
+          uid="$(docker compose exec -T web id -u)"
+          gid="$(docker compose exec -T web id -g)"
+          echo "web runs as uid=${uid} gid=${gid}"
+          if [ "${uid}" = "0" ] || [ "${gid}" = "0" ]; then
+            echo "::error::the web container runs as root"
+            exit 1
+          fi
+
+          # What the anchor checker and the migrator read at run time.
+          docker compose exec -T web git --version
+          docker compose exec -T web sh -c '
+            set -e
+            for f in web-tree-sitter.wasm tree-sitter-typescript.wasm tree-sitter-tsx.wasm tree-sitter-swift.wasm; do
+              test -s "/app/grammars/$f"
+            done
+            test -s /app/migrations/meta/_journal.json
+            ls /app/migrations/*.sql
+            test -w /data/repos
+            test -s /app/LICENSE
+            # `set -e` does not act on a negated command, hence the explicit exits.
+            if test -w /app/apps/web/server.js; then echo "application code is writable"; exit 1; fi
+            if command -v npm > /dev/null; then echo "npm is present in the runtime image"; exit 1; fi
+            if command -v pnpm > /dev/null; then echo "pnpm is present in the runtime image"; exit 1; fi
+          '
+
+      - name: No secret from .env is recorded in the image
+        run: |
+          set -eu
+          image="$(docker inspect --format '{{.Image}}' "$(docker compose ps -q web)")"
+          docker history --no-trunc "${image}" > image-history.txt
+          docker image inspect "${image}" > image-config.json
+          for key in POSTGRES_PASSWORD BETTER_AUTH_SECRET; do
+            value="$(grep "^${key}=" .env | cut -d= -f2-)"
+            if grep -qF -- "${value}" image-history.txt image-config.json; then
+              echo "::error::the value of ${key} appears in the image"
+              exit 1
+            fi
+          done
+          if grep -q 'build-time-placeholder' image-history.txt image-config.json; then
+            echo "::error::a build-time placeholder leaked into the runtime image"
+            exit 1
+          fi
+
+      - name: Report image size
+        run: |
+          set -eu
+          image="$(docker inspect --format '{{.Image}}' "$(docker compose ps -q web)")"
+          bytes="$(docker image inspect --format '{{.Size}}' "${image}")"
+          {
+            echo "### Container image"
+            echo
+            echo "| Image | Size |"
+            echo "|---|---|"
+            echo "| web | $(awk -v b="${bytes}" 'BEGIN { printf "%.1f MB (%d bytes)", b / 1000000, b }') |"
+            echo
+            echo "<details><summary>Layers</summary>"
+            echo
+            echo '```'
+            docker history --format '{{.Size}}\t{{.CreatedBy}}' "${image}" | cut -c1-160
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color --timestamps
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose down -v --remove-orphans
+          rm -f .env
