@@ -284,6 +284,29 @@ authentication plus CORS/Origin validation on the HTTP transport.
 claim → write → release sequence end to end; an unauthenticated
 streamable HTTP request is rejected by a test.
 
+**Status: complete.**
+
+- `packages/mcp-server` registers the eleven tools of `docs/mcp.md` on the
+  official MCP SDK (1.30) and calls the REST API with the agent's token;
+  it has no path to the database.
+- stdio: an MCP client spawns the built entry point and runs
+  get_page → claim → write_page → release_claim end to end; a stale base
+  hash surfaces as `STALE_BASE`, a token without `pages:write` as
+  `FORBIDDEN`, an unreachable repository as `REPOSITORY_UNAVAILABLE`.
+- Streamable HTTP is mounted at `/mcp` inside the web app, stateless, off
+  unless `MCP_HTTP_ENABLED=true`. Tests assert `404` while off, `401` with
+  no token and with only a session cookie, `403` for an origin not on the
+  allowlist, `405` for `GET`, `401` for a revoked token, and a full
+  initialize → tools/list for a valid one.
+- Invalid tool arguments are refused as `VALIDATION` before any REST call.
+
+Two things differ from the plan. The HTTP transport is stateless rather
+than session-based: a route handler is not a long-lived connection, and a
+session map held in module memory would exist on one replica and not the
+next. And the package is not yet published to npm, so agent hosts run the
+built entry point from a checkout; publishing is a release step, not a
+code change.
+
 ## Phase 6 — Export, packaging, docs
 
 Markdown and HTML export (required); PDF export conditional on an

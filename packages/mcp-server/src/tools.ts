@@ -1,0 +1,393 @@
+import { z } from 'zod';
+
+import { CONTENT_IS_DATA_NOTICE } from './content-notice.ts';
+import { ClewwikiToolError } from './errors.ts';
+import type { ClewwikiRestClient } from './rest-client.ts';
+
+/**
+ * The eleven tools of `docs/mcp.md`, each one REST call deep.
+ *
+ * A tool's job here is to name its inputs, put them where the REST endpoint
+ * expects them, and hand back what came out. It does not merge, retry,
+ * re-order or reformat anything: the write protocol lives in the service layer
+ * beneath REST, and a wrapper that second-guessed it would be a second
+ * implementation of the thing the wiki exists to get right.
+ */
+
+export interface ToolDefinition {
+  name: string;
+  title: string;
+  description: string;
+  /** Zod raw shape, handed to the SDK as the tool's input schema. */
+  inputSchema: Record<string, z.ZodType>;
+  annotations: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
+  run(client: ClewwikiRestClient, args: unknown): Promise<Record<string, unknown>>;
+}
+
+/** The REST wire shapes this wrapper has to look inside rather than pass along. */
+interface PageResource extends Record<string, unknown> {
+  page_id: string;
+  kind: string;
+  body?: string;
+  linked_page?: (Record<string, unknown> & { page_id: string; kind: string }) | null;
+}
+
+interface NodeListResource {
+  nodes: Array<{ page_id: string } & Record<string, unknown>>;
+}
+
+function defineTool<Shape extends Record<string, z.ZodType>>(definition: {
+  name: string;
+  title: string;
+  description: string;
+  input: z.ZodObject<Shape>;
+  annotations: ToolDefinition['annotations'];
+  run(client: ClewwikiRestClient, args: z.infer<z.ZodObject<Shape>>): Promise<Record<string, unknown>>;
+}): ToolDefinition {
+  return {
+    name: definition.name,
+    title: definition.title,
+    description: definition.description,
+    inputSchema: definition.input.shape,
+    annotations: definition.annotations,
+    async run(client, args) {
+      // Validation failures leave as VALIDATION tool errors, the same way a REST
+      // refusal does, and before any request is made.
+      const parsed = definition.input.safeParse(args ?? {});
+      if (!parsed.success) {
+        throw new ClewwikiToolError('VALIDATION', `Invalid input for ${definition.name}`, {
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.join('.'),
+            message: issue.message,
+          })),
+        });
+      }
+      return await definition.run(client, parsed.data);
+    },
+  };
+}
+
+const pageIdSchema = z.uuid();
+
+/** Resolves a materialised path to a page id, for tools that accept either. */
+async function pageIdForPath(client: ClewwikiRestClient, path: string): Promise<string> {
+  const listing = await client.request<NodeListResource>({
+    method: 'GET',
+    path: '/pages',
+    query: { path, depth: 1 },
+  });
+  const first = listing.nodes[0];
+  if (!first) {
+    throw new ClewwikiToolError('NOT_FOUND', `No page at path ${path}`, { path });
+  }
+  return first.page_id;
+}
+
+const search = defineTool({
+  name: 'wiki.search',
+  title: 'Search the wiki',
+  description:
+    'Full-text search across the workspace, over technical and human pages alike. Returns one ' +
+    'snippet per hit with the page id, path and content hash, so a match can be read in full ' +
+    'with wiki.get_page and written to under a claim. ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({
+    query: z.string().min(1).max(500).describe('Words to search for.'),
+    limit: z.number().int().min(1).max(50).optional().describe('Maximum hits to return. Default 10.'),
+    kind: z
+      .enum(['technical', 'human', 'any'])
+      .optional()
+      .describe('Restrict to one kind of page. Default "any".'),
+  }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    const result = await client.request<{ results: unknown[] }>({
+      method: 'GET',
+      path: '/search',
+      query: { q: args.query, limit: args.limit, kind: args.kind },
+    });
+    return { results: result.results };
+  },
+});
+
+const getPage = defineTool({
+  name: 'wiki.get_page',
+  title: 'Read a page',
+  description:
+    'Fetch one page by id or by path, with its body, its content hash, the anchors tying it to ' +
+    'code, and the claim held on it if there is one. The content hash is what a later ' +
+    'wiki.write_page echoes back to prove the write was built on the stored content. ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({
+    page_id: pageIdSchema.optional().describe('The page id. Give this or path, not neither.'),
+    path: z.string().min(1).max(512).optional().describe('The page path, for example /backend/auth.'),
+    variant: z
+      .enum(['technical', 'human', 'both'])
+      .optional()
+      .describe('Which bodies to include: this page\'s kind, its counterpart\'s, or both. Default "both".'),
+  }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    if (!args.page_id && !args.path) {
+      throw new ClewwikiToolError('VALIDATION', 'Give either page_id or path');
+    }
+    const pageId = args.page_id ?? (await pageIdForPath(client, args.path as string));
+    const page = await client.request<PageResource>({ method: 'GET', path: `/pages/${pageId}` });
+
+    const variant = args.variant ?? 'both';
+    const result: PageResource = { ...page };
+
+    // Bodies are dropped, never edited: a variant the caller did not ask for is
+    // absent from the result, and one it did ask for is the stored bytes.
+    if (variant !== 'both' && page.kind !== variant) {
+      delete result.body;
+    }
+
+    const linked = page.linked_page;
+    if (linked && (variant === 'both' || linked.kind === variant)) {
+      // The page endpoint returns the counterpart without its body, so the body
+      // is a second read — made only when the caller asked for that variant.
+      const full = await client.request<PageResource>({
+        method: 'GET',
+        path: `/pages/${linked.page_id}`,
+      });
+      result.linked_page = { ...linked, body: full.body };
+    }
+
+    return result;
+  },
+});
+
+const listPages = defineTool({
+  name: 'wiki.list_pages',
+  title: 'List the page tree',
+  description:
+    'Navigate the page tree without loading bodies. Each node carries its path, title, whether ' +
+    'it has children, how many of its anchors are no longer fresh, and whether someone holds a ' +
+    'claim on it. Titles and summaries are page content. ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({
+    parent_id: pageIdSchema.optional().describe('List the children of this page. Omit for the roots.'),
+    depth: z.number().int().min(1).max(3).optional().describe('How deep to nest. Default 1.'),
+  }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    const result = await client.request<NodeListResource>({
+      method: 'GET',
+      path: '/pages',
+      query: { parent_id: args.parent_id, depth: args.depth ?? 1 },
+    });
+    return { nodes: result.nodes };
+  },
+});
+
+const claim = defineTool({
+  name: 'wiki.claim',
+  title: 'Claim a page before writing',
+  description:
+    'Take a lease on a page, or on a named section of one, before writing to it. Returns the ' +
+    'claim id, when the lease runs out, and the page\'s content hash at the moment it was ' +
+    'granted. A page-level claim excludes every section claim on that page and the other way ' +
+    'round; claiming a target you already hold extends your own lease instead of conflicting ' +
+    'with it. CONFLICT names who holds it, since when and until when.',
+  input: z.object({
+    page_id: pageIdSchema.describe('The page to claim.'),
+    section_id: z
+      .string()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe('Claim one named section instead of the whole page.'),
+    ttl_seconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(3600)
+      .optional()
+      .describe('How long the lease should last. Defaults to the workspace setting.'),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'POST',
+      path: `/pages/${args.page_id}/claims`,
+      body: { section_id: args.section_id ?? null, ttl_seconds: args.ttl_seconds },
+    });
+  },
+});
+
+const renewClaim = defineTool({
+  name: 'wiki.renew_claim',
+  title: 'Extend a claim',
+  description:
+    'Heartbeat: extends a lease you hold. A lease already past its deadline is not revived — ' +
+    'the page may have been taken in the meantime — so a late heartbeat answers NOT_FOUND and ' +
+    'the right move is to claim again.',
+  input: z.object({
+    claim_id: pageIdSchema.describe('The claim to extend.'),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'PATCH',
+      path: `/claims/${args.claim_id}`,
+      body: {},
+    });
+  },
+});
+
+const writePage = defineTool({
+  name: 'wiki.write_page',
+  title: 'Write a page',
+  description:
+    'Write a page under a claim you hold. Both halves of the protocol are required: claim_id ' +
+    'says nobody else may write, base_content_hash proves nobody did. On STALE_BASE, re-read ' +
+    'the page with wiki.get_page, merge the change yourself, and write again with the new ' +
+    'hash — the server never merges on your behalf.',
+  input: z.object({
+    page_id: pageIdSchema.describe('The page to write.'),
+    claim_id: pageIdSchema.describe('A claim you hold on that page.'),
+    base_content_hash: z
+      .string()
+      .min(1)
+      .describe('The content hash you last saw, from wiki.get_page or wiki.claim.'),
+    body: z.string().max(1_000_000).describe('The full new body of the page.'),
+    title: z.string().min(1).max(300).optional().describe('Replaces the page title.'),
+    summary: z.string().max(2_000).nullish().describe('Replaces the page summary.'),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'PATCH',
+      path: `/pages/${args.page_id}`,
+      body: {
+        claim_id: args.claim_id,
+        base_content_hash: args.base_content_hash,
+        body: args.body,
+        ...(args.title !== undefined ? { title: args.title } : {}),
+        ...(args.summary !== undefined ? { summary: args.summary } : {}),
+      },
+    });
+  },
+});
+
+const releaseClaim = defineTool({
+  name: 'wiki.release_claim',
+  title: 'Release a claim',
+  description:
+    'Give a lease back after writing or after abandoning the edit. Ephemeral notes attached to ' +
+    'the claim are deleted with it. Releasing a claim that has already ended is not an error.',
+  input: z.object({
+    claim_id: pageIdSchema.describe('The claim to release.'),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'DELETE',
+      path: `/claims/${args.claim_id}`,
+    });
+  },
+});
+
+const getPresence = defineTool({
+  name: 'wiki.get_presence',
+  title: 'See who is working on what',
+  description:
+    'Every live claim in the workspace: its holder, its target, since when it has been held, ' +
+    'when it lapses, and the notes hanging on it. Read this before claiming a busy area — a ' +
+    'note often says which section its holder is in.',
+  input: z.object({}),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client) {
+    return await client.request<Record<string, unknown>>({ method: 'GET', path: '/claims' });
+  },
+});
+
+const postNote = defineTool({
+  name: 'wiki.post_note',
+  title: 'Leave a note on a claim',
+  description:
+    'Leave a short note on a claim you hold, so other agents and people can see what you are ' +
+    'doing — "rewriting the auth section, leave Overview alone". Notes are not page history: ' +
+    'they never reach a revision and they die with the lease.',
+  input: z.object({
+    page_id: pageIdSchema.describe('The page the claim covers.'),
+    claim_id: pageIdSchema.describe('A claim you hold on that page.'),
+    text: z.string().min(1).max(2_000).describe('What you are doing. At most 2000 characters.'),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'POST',
+      path: `/pages/${args.page_id}/notes`,
+      body: { claim_id: args.claim_id, text: args.text },
+    });
+  },
+});
+
+const checkAnchors = defineTool({
+  name: 'wiki.check_anchors',
+  title: 'Check a page against the code',
+  description:
+    'Recompute a page\'s anchors against the current state of the linked repository and return ' +
+    'each anchor\'s state — fresh, stale, moved-renamed or lost — with the detail behind it. ' +
+    'Nothing is rewritten and no flag clears itself: a stale section is cleared by editing it ' +
+    'under a claim, or by confirming the anchor over REST. fallback_share says how many of the ' +
+    'workspace\'s anchors rest on a line range rather than on a declaration, which is how much ' +
+    'the other states are worth.',
+  input: z.object({
+    page_id: pageIdSchema.describe('The page to check.'),
+    ref: z.string().min(1).max(200).optional().describe('Branch, tag or commit. Defaults to the workspace ref.'),
+  }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'GET',
+      path: `/pages/${args.page_id}/anchors/check`,
+      query: { ref: args.ref },
+    });
+  },
+});
+
+const linkDocs = defineTool({
+  name: 'wiki.link_docs',
+  title: 'Pair a technical page with a human one',
+  description:
+    'Pair a technical page with its human counterpart, or break the pair by passing null. The ' +
+    'two pages must be of different kinds. Both sides are written together, so the pair is ' +
+    'visible from either page or from neither.',
+  input: z.object({
+    page_id: pageIdSchema.describe('The page to pair.'),
+    linked_page_id: pageIdSchema.nullable().describe('Its counterpart, or null to unpair.'),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'POST',
+      path: `/pages/${args.page_id}/link`,
+      body: { linked_page_id: args.linked_page_id },
+    });
+  },
+});
+
+export const TOOLS: readonly ToolDefinition[] = [
+  search,
+  getPage,
+  listPages,
+  claim,
+  renewClaim,
+  writePage,
+  releaseClaim,
+  getPresence,
+  postNote,
+  checkAnchors,
+  linkDocs,
+];
+
+/** The three tools whose results carry page text, per `docs/mcp.md`. */
+export const CONTENT_RETURNING_TOOLS = ['wiki.search', 'wiki.get_page', 'wiki.list_pages'] as const;

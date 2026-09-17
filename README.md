@@ -561,6 +561,77 @@ anchors sitting on the line-range path. Line ranges do not survive an edit above
 them, so a rising number is the early warning that the badges are turning into
 noise.
 
+### Connecting an AI coding agent (MCP)
+
+Agents talk to clewwiki through the Model Context Protocol with eleven
+tools — `wiki.search`, `wiki.get_page`, `wiki.claim`, `wiki.write_page`,
+`wiki.release_claim` and the rest. The full contract, with input and
+output shapes and error codes, is in [`docs/mcp.md`](docs/mcp.md). The
+MCP server is a REST client of your instance: it holds an agent token and
+has no other way in, so every tool call gets the same scope checks, rate
+limits and audit rows as a direct REST request.
+
+**1. Issue a token** on the **Tokens** page. Give it `pages:read` for an
+agent that only reads, and `pages:write` as well for one that edits.
+
+**2. Build the stdio server** from your checkout (it is not on npm yet):
+
+```sh
+pnpm install
+pnpm --filter @clewwiki/mcp-server build
+```
+
+**3. Register it with your agent host.** Claude Code, in `.mcp.json` at the
+root of the project the agent works on:
+
+```json
+{
+  "mcpServers": {
+    "clewwiki": {
+      "command": "node",
+      "args": ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"],
+      "env": {
+        "CLEWWIKI_URL": "https://wiki.example.com",
+        "CLEWWIKI_TOKEN": "${CLEWWIKI_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Cursor reads the same object from `.cursor/mcp.json`. Codex reads
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.clewwiki]
+command = "node"
+args = ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"]
+env = { CLEWWIKI_URL = "https://wiki.example.com", CLEWWIKI_TOKEN = "..." }
+```
+
+Keep the token out of files you commit: export `CLEWWIKI_TOKEN` in your
+shell and let the host expand it where it supports that.
+
+**4. Check it.** `node packages/mcp-server/dist/bin.js --help` prints the
+variables it needs. A missing or malformed `CLEWWIKI_URL` or
+`CLEWWIKI_TOKEN` stops it at start-up with a message naming the variable.
+
+#### Remote agents over HTTP
+
+Agents that do not run on a developer machine — a CI job, a remote runner —
+can use the streamable HTTP endpoint instead of stdio. It is off until you
+turn it on:
+
+```sh
+MCP_HTTP_ENABLED=true
+```
+
+It is then served at `https://<your host>/mcp`, behind the same reverse
+proxy and TLS as the web UI. Only `Authorization: Bearer <agent token>`
+gets in; a signed-in browser session does not. Browser origins are refused
+unless listed in `MCP_HTTP_ALLOWED_ORIGINS`. Leave that empty unless you
+know which web client needs it.
+
 ### REST endpoints in this phase
 
 | Endpoint | Auth | Scope | Purpose |
@@ -904,7 +975,7 @@ No calendar dates — phases are ordered by dependency, not by schedule.
 - **Phase 3** — Claims and leases, presence board, ephemeral agent notes.
   *Complete.*
 - **Phase 4** — Doc↔code anchoring with staleness detection. *Complete.*
-- **Phase 5** — MCP server (stdio and streamable HTTP transports).
+- **Phase 5** — MCP server (stdio and streamable HTTP transports). *Complete.*
 - **Phase 6** — Export (Markdown/HTML, PDF conditional on a spike), Docker
   image and compose, full README and license text.
 - **Phase 7** — Public launch.

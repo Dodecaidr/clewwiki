@@ -48,6 +48,53 @@ export function getAgentRateLimitWindowSeconds(): number {
 }
 
 /**
+ * Whether the streamable HTTP MCP transport is mounted at `/mcp`.
+ *
+ * Off unless the operator says otherwise, and the route answers 404 rather
+ * than 403 while it is off: an endpoint nobody enabled should not announce
+ * that it exists. stdio needs none of this — that transport runs on the
+ * developer's own machine and reaches the instance as an ordinary REST client.
+ */
+export function isMcpHttpEnabled(): boolean {
+  return process.env.MCP_HTTP_ENABLED === 'true';
+}
+
+/**
+ * Browser origins allowed to reach `/mcp`, empty by default.
+ *
+ * A request with no `Origin` header is not a browser request and passes; a
+ * request that carries one is refused unless the operator listed it. The
+ * default of "nothing" is the direct mitigation for DNS rebinding, where a
+ * page the user did not open reaches a local MCP endpoint through their
+ * browser and borrows its network position.
+ */
+export function getMcpAllowedOrigins(): string[] {
+  const raw = process.env.MCP_HTTP_ALLOWED_ORIGINS;
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value !== '');
+}
+
+/**
+ * Where the MCP endpoint reaches the REST API — this same application.
+ *
+ * The MCP server is a REST client, here as much as over stdio: it holds the
+ * caller's token and calls the public API with it, so authorization, scope
+ * checks, rate limiting and the audit row all happen exactly once, in the
+ * handlers, with no private path around them. The default is the loopback
+ * address and the port the server is listening on, so the call never leaves
+ * the container and never depends on the reverse proxy in front of it.
+ */
+export function getMcpInternalBaseUrl(): string {
+  const configured = process.env.MCP_INTERNAL_BASE_URL;
+  if (configured && configured.trim() !== '') return configured.trim();
+  const port = process.env.PORT && process.env.PORT.trim() !== '' ? process.env.PORT.trim() : '3000';
+  return `http://127.0.0.1:${port}`;
+}
+
+/**
  * Where the server keeps its mirror of each workspace's source repository.
  *
  * One directory per workspace, holding a bare clone: the anchor checker reads

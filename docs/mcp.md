@@ -52,7 +52,13 @@ All tools take and return JSON objects. Errors use a single envelope:
 ```
 
 Error codes: `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`,
-`STALE_BASE`, `RATE_LIMITED`, `VALIDATION`.
+`STALE_BASE`, `RATE_LIMITED`, `VALIDATION`, `REPOSITORY_UNAVAILABLE`,
+`INTERNAL`.
+
+`REPOSITORY_UNAVAILABLE` means the linked source repository could not be
+reached while checking anchors; `INTERNAL` covers a failure the REST layer
+did not name. Arguments that do not match a tool's schema are refused with
+a tool error before any REST call is made.
 
 The REST API answers with the same envelope and the same vocabulary in
 lowercase — `not_found`, `conflict`, `stale_base`, `validation`,
@@ -286,22 +292,67 @@ Every write tool call, and every rejected call, produces an audit row:
 actor, tool, target, outcome, timestamp. Admins can read the log through
 the UI and `GET /api/v1/audit`.
 
+## Streamable HTTP endpoint
+
+The endpoint lives inside the web application at `/mcp` and is stateless:
+every `POST` is answered by a server instance that exists for that request
+only, with JSON responses rather than a held-open stream. `GET` and
+`DELETE` answer `405`, because there is no session to stream on or end.
+Every tool on this surface is request/response, so nothing is lost.
+
+A request reaches the tools only if all of these hold:
+
+- `MCP_HTTP_ENABLED=true` (otherwise `404`);
+- it carries `Authorization: Bearer <agent token>` — a browser session
+  cookie is never accepted here (`401` with a `Bearer` challenge);
+- it has no `Origin` header, or its origin is listed in
+  `MCP_HTTP_ALLOWED_ORIGINS` (otherwise `403`, before the token is read);
+- the token passes the same expiry, revocation, rate-limit and audit checks
+  as any REST request.
+
+The endpoint then calls the REST API of the same instance over loopback
+(`MCP_INTERNAL_BASE_URL`) with the caller's token, so authorization happens
+once, in the REST handlers.
+
 ## Configuration for common agent hosts
 
-Claude Code (`.mcp.json` in the developer's project or the user config):
+The stdio server is the `@clewwiki/mcp-server` package in this repository.
+Until it is published to npm, build it from a checkout and point the agent
+host at the built entry point:
+
+```sh
+pnpm install
+pnpm --filter @clewwiki/mcp-server build
+# entry point: packages/mcp-server/dist/bin.js
+```
+
+Claude Code (`.mcp.json` in the project, or the user configuration):
 
 ```json
 {
   "mcpServers": {
     "clewwiki": {
-      "command": "npx",
-      "args": ["-y", "@clewwiki/mcp-server"],
+      "command": "node",
+      "args": ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"],
       "env": { "CLEWWIKI_URL": "https://wiki.example.com", "CLEWWIKI_TOKEN": "${CLEWWIKI_TOKEN}" }
     }
   }
 }
 ```
 
-Cursor and Codex use the same command with their own configuration files.
-Streamable HTTP clients point at `https://wiki.example.com/mcp` with the
-bearer token in the `Authorization` header.
+Cursor (`.cursor/mcp.json` in the project) takes the same `mcpServers`
+object. Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.clewwiki]
+command = "node"
+args = ["/path/to/clewwiki/packages/mcp-server/dist/bin.js"]
+env = { CLEWWIKI_URL = "https://wiki.example.com", CLEWWIKI_TOKEN = "..." }
+```
+
+Once the package is published, `"command": "npx", "args": ["-y",
+"@clewwiki/mcp-server"]` replaces the path.
+
+Remote clients that speak streamable HTTP point at
+`https://wiki.example.com/mcp` with the token in the `Authorization`
+header, as described above.
