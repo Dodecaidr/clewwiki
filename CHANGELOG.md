@@ -26,7 +26,7 @@ tagged after the UI design pass.
   line-range fallback, anchor states (`fresh`, `stale`, `moved-renamed`,
   `lost`), and a `confirm` action to clear a flag after review.
 - MCP server (`packages/mcp-server`, `@clewwiki/mcp-server`) exposing
-  thirteen tools over the same service layer as the REST API, with both
+  its tools over the same service layer as the REST API, with both
   stdio and streamable HTTP (`/mcp`) transports.
 - Spaces: Confluence-style areas per project, each with its own page tree,
   overview, home page and linked source repository. Paths are unique per
@@ -57,6 +57,42 @@ tagged after the UI design pass.
 - `POST /api/v1/pages` accepts `slug`, `parent_path` and `link_to_page_id`;
   an explicit path that is taken answers `conflict` with `existing_page_id`.
 
+- Visual page editor, stored as Markdown: a Visual tab with a toolbar,
+  keyboard shortcuts and a "/" block menu (headings, lists, task lists, quotes,
+  callouts, code blocks with a language, tables with row, column and alignment
+  controls, images by address, Mermaid diagrams from twelve templates with a
+  live drawing, and charts edited as a data table with a live preview), and a
+  Markdown tab over the same text. A page opened and saved without edits is
+  stored byte for byte; an edit rewrites only the blocks it touched; a page the
+  editor cannot keep exactly opens in the Markdown tab with a notice. HTML pasted
+  from word processors, Google Docs or Confluence keeps its structure and loses
+  its fonts and colours. Unsaved changes are guarded on navigation.
+- Callouts written as GitHub alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`,
+  `[!WARNING]`, `[!CAUTION]`), styled in the page view and the HTML export.
+- Chart blocks: a ```` ```chart ```` fence holding JSON for a bar, stacked bar,
+  line, area, pie, donut or scatter chart, drawn as accessible SVG on the server
+  in the page view, the editor and the HTML export (so exported and printed
+  pages show charts with no script). An invalid block renders as an error box
+  naming the problem.
+- `packages/content` (`@clewwiki/content`): the chart schema and renderer, the
+  Mermaid keywords and templates, callout kinds, block validation and the
+  format guide, shared by the server, the editor and the guide endpoint.
+- Validation of chart and Mermaid blocks on every write (`POST /api/v1/pages`,
+  `PATCH /api/v1/pages/{id}`, the MCP tools and the web form): an invalid block
+  is refused with `validation` and `block_index`, `line`, `language` and
+  `errors` (`path`, `message`) for each invalid block. Mermaid is checked
+  structurally only and never run on the server.
+- `GET /api/v1/format-guide` (`pages:read`) and the MCP tool
+  `wiki.format_guide`: every supported construct with an example, the Mermaid
+  keywords and a template per diagram type, the chart block JSON Schema, limits
+  and an example per chart type, page conventions and the validation error
+  shape, generated from the rules the server enforces. The MCP server now has
+  fourteen tools, and the `/connect` onboarding prompt asks agents to read the
+  guide before writing and to use tables, callouts, diagrams and charts.
+- A "Formatting, diagrams and charts" section in the guide.
+- `ALLOW_EXTERNAL_IMAGES` to let pages show images hosted on other `https://`
+  sites; off by default.
+
 ### Changed
 
 - Page path segments generated from titles transliterate Russian, Ukrainian
@@ -66,6 +102,11 @@ tagged after the UI design pass.
   needs a typed segment, and the page form previews the generated path.
 
 ### Security
+
+- The sanitiser allowlist gains only the SVG elements and presentation
+  attributes the chart renderer emits; no element or attribute that can load,
+  link or run anything. Script, event handlers, `foreignObject`, styles,
+  animations and `javascript:` links in SVG stay stripped, and are tested.
 
 - Password sign-in rate limiting, keyed per account and per client
   address, with the client address read only from a configurable trusted

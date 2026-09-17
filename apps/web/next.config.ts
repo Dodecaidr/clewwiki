@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
   // The app lives in a workspace, so tracing has to start at the repo root or
   // the standalone bundle misses the linked packages.
   outputFileTracingRoot: path.join(rootDir, '..', '..'),
-  transpilePackages: ['@clewwiki/db', '@clewwiki/anchors', '@clewwiki/mcp-server'],
+  transpilePackages: ['@clewwiki/db', '@clewwiki/anchors', '@clewwiki/content', '@clewwiki/mcp-server'],
   // The Postgres driver opens raw sockets and must not be bundled. The
   // tree-sitter runtime is an Emscripten module that loads its own
   // WebAssembly; bundling it rewrites the module layout it depends on.

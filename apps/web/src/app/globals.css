@@ -24,7 +24,24 @@
   --destructive-foreground: oklch(0.99 0 0);
   --success: oklch(0.48 0.12 156);
   --ring: oklch(0.42 0.11 258);
+  --warning: oklch(0.6 0.13 70);
+  --important: oklch(0.5 0.14 295);
   --radius: 0.5rem;
+
+  /*
+   * Chart series colours: a fixed, ordered categorical palette whose
+   * neighbours stay apart for colour-blind readers. Light and dark are
+   * separate steps of the same eight hues. The chart renderer writes the same
+   * values as fallback attributes, so an SVG opened on its own matches.
+   */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #4a3aa7;
+  --chart-8: #e34948;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +62,17 @@
     --destructive-foreground: oklch(0.17 0.008 264);
     --success: oklch(0.72 0.13 156);
     --ring: oklch(0.72 0.12 250);
+    --warning: oklch(0.78 0.14 75);
+    --important: oklch(0.72 0.12 295);
+
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-4: #c98500;
+    --chart-5: #d55181;
+    --chart-6: #008300;
+    --chart-7: #9085e9;
+    --chart-8: #e66767;
   }
 }
 
@@ -64,6 +92,8 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-important: var(--important);
   --color-ring: var(--ring);
   --radius-base: var(--radius);
   --font-sans:
@@ -220,7 +250,19 @@
 .markdown-body :is(th, td) {
   border: 1px solid var(--color-border);
   padding: 0.4rem 0.7rem;
+}
+
+/* A column's alignment comes from the table's delimiter row (`align`). */
+.markdown-body :is(th, td):not([align]) {
   text-align: left;
+}
+
+.markdown-body :is(th, td)[align='center'] {
+  text-align: center;
+}
+
+.markdown-body :is(th, td)[align='right'] {
+  text-align: right;
 }
 
 .markdown-body th {
@@ -236,4 +278,235 @@
 .markdown-body img {
   max-width: 100%;
   height: auto;
+}
+
+/*
+ * Callouts: GitHub alert blockquotes (`> [!NOTE]`), rewritten by the renderer
+ * into a `div.callout`. The colour marks the kind on the rule and the title;
+ * the text itself stays in the body colour.
+ */
+.markdown-body .callout {
+  --callout-color: var(--color-primary);
+  border-left: 3px solid var(--callout-color);
+  border-radius: 0 var(--radius-base) var(--radius-base) 0;
+  background-color: color-mix(in oklab, var(--callout-color) 8%, transparent);
+  padding: 0.75rem 1rem;
+}
+
+.markdown-body .callout > * + * {
+  margin-top: 0.5rem;
+}
+
+.markdown-body .callout-title {
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.markdown-body .callout-title::before {
+  content: '';
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-right: 0.5rem;
+  border-radius: 999px;
+  background-color: var(--callout-color);
+  vertical-align: 0.05em;
+}
+
+.markdown-body .callout-tip {
+  --callout-color: var(--color-success);
+}
+.markdown-body .callout-important {
+  --callout-color: var(--color-important);
+}
+.markdown-body .callout-warning {
+  --callout-color: var(--color-warning);
+}
+.markdown-body .callout-caution {
+  --callout-color: var(--color-destructive);
+}
+
+/*
+ * Charts: server-rendered SVG. Every mark carries a class, and these rules
+ * map the classes onto the theme, so one SVG reads in light and dark.
+ */
+.markdown-body .chart-block {
+  overflow-x: auto;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  /* Below this the labels get too small to read; the block scrolls instead. */
+  min-width: 26rem;
+  max-width: 44rem;
+  height: auto;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart .chart-surface {
+  fill: var(--chart-surface, var(--color-background));
+}
+.chart .chart-title {
+  fill: var(--color-foreground);
+}
+.chart :is(.chart-tick, .chart-label) {
+  fill: var(--color-muted-foreground);
+}
+.chart .chart-grid {
+  stroke: var(--color-border);
+}
+.chart .chart-axis {
+  stroke: var(--color-muted-foreground);
+  stroke-opacity: 0.5;
+}
+.chart .chart-ring {
+  stroke: var(--chart-surface, var(--color-background));
+}
+.chart .chart-fill-1 { fill: var(--chart-1); }
+.chart .chart-fill-2 { fill: var(--chart-2); }
+.chart .chart-fill-3 { fill: var(--chart-3); }
+.chart .chart-fill-4 { fill: var(--chart-4); }
+.chart .chart-fill-5 { fill: var(--chart-5); }
+.chart .chart-fill-6 { fill: var(--chart-6); }
+.chart .chart-fill-7 { fill: var(--chart-7); }
+.chart .chart-fill-8 { fill: var(--chart-8); }
+.chart .chart-stroke-1 { stroke: var(--chart-1); }
+.chart .chart-stroke-2 { stroke: var(--chart-2); }
+.chart .chart-stroke-3 { stroke: var(--chart-3); }
+.chart .chart-stroke-4 { stroke: var(--chart-4); }
+.chart .chart-stroke-5 { stroke: var(--chart-5); }
+.chart .chart-stroke-6 { stroke: var(--chart-6); }
+.chart .chart-stroke-7 { stroke: var(--chart-7); }
+.chart .chart-stroke-8 { stroke: var(--chart-8); }
+
+/* A chart block that failed validation: the reason, then the source. */
+.chart-error {
+  border: 1px solid color-mix(in oklab, var(--color-destructive) 45%, transparent);
+  border-radius: var(--radius-base);
+  background-color: color-mix(in oklab, var(--color-destructive) 8%, transparent);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+}
+
+.chart-error ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin: 0.375rem 0 0.5rem;
+}
+
+.chart-error pre {
+  margin: 0;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+/*
+ * The visual editor. Its editable area carries `markdown-body`, so what is
+ * typed looks the way the page will read; these rules add only what editing
+ * needs on top.
+ */
+.visual-editor-body {
+  min-height: 24rem;
+  padding: 1rem 1.25rem;
+  outline: none;
+}
+
+.visual-editor-body:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--color-ring) 40%, transparent);
+}
+
+.visual-editor-body .callout::before {
+  content: attr(data-label);
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-muted-foreground);
+}
+
+.visual-editor-body table {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.visual-editor-body :is(th, td) {
+  position: relative;
+  min-width: 4rem;
+  vertical-align: top;
+}
+
+.visual-editor-body :is(th, td) > p {
+  margin: 0;
+}
+
+.visual-editor-body .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-color: color-mix(in oklab, var(--color-primary) 15%, transparent);
+}
+
+.visual-editor-body ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+
+.visual-editor-body ul[data-type='taskList'] li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.visual-editor-body ul[data-type='taskList'] li > label {
+  margin-top: 0.3rem;
+  flex: none;
+}
+
+.visual-editor-body ul[data-type='taskList'] li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.visual-editor-body img.ProseMirror-selectednode {
+  outline: 2px solid var(--color-ring);
+}
+
+.visual-editor-body hr.ProseMirror-selectednode {
+  border-top-color: var(--color-ring);
+}
+
+.visual-editor-body .ProseMirror-gapcursor::after {
+  border-top-color: var(--color-foreground);
+}
+
+/* Task lists in the rendered page. */
+.markdown-body li.task-list-item {
+  list-style: none;
+}
+
+.markdown-body ul.contains-task-list {
+  padding-left: 0.5rem;
+}
+
+.markdown-body li.task-list-item input[type='checkbox'] {
+  margin-right: 0.4rem;
+}
+
+/* The colour marks next to callout kinds in the editor's callout menu. */
+.callout-dot-info {
+  background-color: var(--color-primary);
+}
+.callout-dot-success {
+  background-color: var(--color-success);
+}
+.callout-dot-warning {
+  background-color: var(--color-warning);
+}
+.callout-dot-danger {
+  background-color: var(--color-destructive);
 }

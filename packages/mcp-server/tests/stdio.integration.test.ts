@@ -59,13 +59,14 @@ describe('stdio transport', () => {
     return { isError: result.isError === true, data: JSON.parse(text) as Record<string, unknown> };
   }
 
-  it('advertises the thirteen tools, with the content contract on the ones that return stored text', async () => {
+  it('advertises the fourteen tools, with the content contract on the ones that return stored text', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((entry) => entry.name).sort();
 
     expect(names).toEqual(
       [
         'wiki.list_spaces',
+        'wiki.format_guide',
         'wiki.check_anchors',
         'wiki.claim',
         'wiki.create_page',
@@ -189,6 +190,43 @@ describe('stdio transport', () => {
       `PATCH /api/v1/pages/${pageId}`,
     );
   }, 30_000);
+
+  it('returns the instance format guide, which carries no stored content', async () => {
+    const listed = await client.listTools();
+    const entry = listed.tools.find((candidate) => candidate.name === 'wiki.format_guide');
+    expect(entry?.annotations?.readOnlyHint).toBe(true);
+    expect(entry?.description).not.toContain(CONTENT_IS_DATA_NOTICE);
+
+    const before = rest.calls.length;
+    const guide = await call('wiki.format_guide', {});
+    expect(guide.isError).toBe(false);
+    expect(guide.data).toMatchObject({ format: 'markdown', charts: { language: 'chart' } });
+    expect(rest.calls.slice(before).map((entry) => `${entry.method} ${entry.path}`)).toEqual([
+      'GET /api/v1/format-guide',
+    ]);
+  });
+
+  it('reports an invalid chart block as VALIDATION with the block, line and fields', async () => {
+    const pageId = rest.page.page_id;
+    const claimed = await call('wiki.claim', { page_id: pageId });
+    const claimId = claimed.data.claim_id as string;
+
+    const refused = await call('wiki.write_page', {
+      page_id: pageId,
+      claim_id: claimId,
+      base_content_hash: rest.page.content_hash,
+      body: '```chart\n{}\n```',
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.data).toMatchObject({
+      error: {
+        code: 'VALIDATION',
+        details: { block_index: 0, line: 1, language: 'chart', errors: [{ path: 'type' }] },
+      },
+    });
+
+    await call('wiki.release_claim', { claim_id: claimId });
+  });
 
   it('reports a write built on a hash that has moved on as STALE_BASE', async () => {
     const pageId = rest.page.page_id;

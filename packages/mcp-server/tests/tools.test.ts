@@ -27,9 +27,10 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the thirteen tools docs/mcp.md names', () => {
+  it('registers exactly the fourteen tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
       'wiki.list_spaces',
+      'wiki.format_guide',
       'wiki.search',
       'wiki.get_page',
       'wiki.list_pages',
@@ -82,6 +83,7 @@ describe('tool surface', () => {
     );
     expect(readOnly).toEqual([
       'wiki.list_spaces',
+      'wiki.format_guide',
       'wiki.search',
       'wiki.get_page',
       'wiki.list_pages',
@@ -181,6 +183,16 @@ describe('input validation', () => {
 });
 
 describe('REST calls', () => {
+  it('reads the format guide from the instance with one GET and no arguments', async () => {
+    const guide = { version: 1, format: 'markdown', charts: { types: ['bar'] } };
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, guide));
+    await expect(tool('wiki.format_guide').run(clientWith(fetchMock), {})).resolves.toEqual(guide);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://wiki.example.com/api/v1/format-guide');
+    expect(init.method).toBe('GET');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('sends the bearer token and its own user agent', async () => {
     const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { results: [] }));
     await tool('wiki.search').run(clientWith(fetchMock), { query: 'auth' });
@@ -454,6 +466,24 @@ describe('failures on the way back', () => {
     await expect(
       tool('wiki.claim').run(clientWith(fetchMock), { page_id: '11111111-1111-4111-8111-111111111111' }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('turns an invalid chart block into VALIDATION, block details included', async () => {
+    const details = {
+      block_index: 1,
+      line: 12,
+      language: 'chart',
+      errors: [{ path: 'series.0.data', message: 'series 0 ("API") has 2 values but x has 3 labels; they must be equal' }],
+      blocks: [],
+    };
+    const fetchMock = vi
+      .fn<FetchLike>()
+      .mockResolvedValue(jsonResponse(400, { error: { code: 'validation', message: 'Chart block 1 at line 12 is not valid', details } }));
+    const failure = await tool('wiki.create_page')
+      .run(clientWith(fetchMock), { space: 'API', title: 'Latency', kind: 'human', body: '```chart\n{}\n```' })
+      .catch((error: unknown) => error);
+    expect((failure as ClewwikiToolError).code).toBe('VALIDATION');
+    expect((failure as ClewwikiToolError).details).toEqual(details);
   });
 
   it('turns a stale write into STALE_BASE, details included', async () => {

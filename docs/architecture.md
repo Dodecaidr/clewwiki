@@ -120,6 +120,136 @@ workspace administrator. That is a human role check, not a scope: an agent
 token carries scopes but no role, so it cannot take a claim away from
 anyone however broadly it is scoped.
 
+## Content model
+
+A page body is Markdown and nothing else: CommonMark with GitHub's extensions
+(tables, task lists, strikethrough, autolinks) and GitHub's alert syntax for
+callouts. There is no second stored representation — no editor JSON, no HTML —
+because the stored text is what agents read and write, what search indexes, and
+what the exports carry. Anything a person can put on a page an agent can write
+as plain text, and the other way round.
+
+Three constructs carry more than prose:
+
+- **Callouts** are blockquotes whose first line is `[!NOTE]`, `[!TIP]`,
+  `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]`. They need no validation: a
+  marker that is not one of these is an ordinary quote.
+- **Diagrams** are ```` ```mermaid ```` fences, drawn in the reader's browser.
+- **Charts** are ```` ```chart ```` fences holding one JSON object — a chart
+  type, labels, series of numbers, an optional unit and value axis — drawn as
+  SVG on the server.
+
+### One package for the rules
+
+`packages/content` (`@clewwiki/content`) holds the chart block's zod schema and
+limits, the chart renderer, the Mermaid keyword list and templates, the callout
+kinds, the block finder that validation uses, and the format guide built from
+all of them. The web application imports it on the server (validation,
+rendering, export, the guide endpoint) and in the browser (the editor's chart
+form, previews and live validation). A package rather than a folder in
+`apps/web`, so the rules have no dependency on Next.js and are tested on their
+own; not part of `packages/mcp-server`, because that package is published to
+npm on its own and would then carry a copy of the rules that can fall behind the
+instance an agent is talking to. The MCP tool `wiki.format_guide` fetches the
+guide from the instance instead.
+
+### Rendering
+
+One pipeline serves the page view, the editor's Markdown preview and the HTML
+export: `remark-parse` with GFM, `remark-rehype` (raw HTML in a body is
+dropped), then chart fences are replaced by the renderer's SVG, then
+`rehype-sanitize`, then Mermaid fences become `<pre class="mermaid">` and alert
+blockquotes become `div.callout`, then serialisation. The chart rewrite runs
+*before* the sanitiser on purpose, so the SVG is held to an allowlist — exactly
+the elements and attributes the renderer can emit, listed by the renderer
+itself — rather than trusted. The Mermaid and callout rewrites run after it, as
+the Mermaid one always has: their classes are added by the pipeline, not taken
+from the document.
+
+`renderChartSvg(spec, theme)` is pure layout arithmetic with no DOM and no
+runtime library: axes with 1-2-5 ticks, grouped and stacked bars with a rounded
+data end, lines and areas, scatter points, pie and donut arcs, a legend when
+there is more than one series, and a `<title>` and `<desc>` that spell the data
+out for screen readers. Series colours come from a fixed, ordered palette of
+eight whose neighbours stay distinguishable for colour-blind readers, which is
+why a chart takes at most eight series. Every mark carries a class that the
+stylesheet maps onto light and dark tokens, and a plain colour attribute as the
+fallback for an SVG opened on its own. The export embeds the same SVG, so charts
+show and print from a file opened offline with scripting off; Mermaid diagrams
+stay source text there, because drawing them needs Mermaid in a browser.
+
+### Validation on write
+
+`createPage` and `updatePage` in the page service validate every chart block
+against the schema and check every Mermaid block structurally — the first
+diagram line must start with a known keyword — before the body is stored. Both
+REST and the page form reach the service, so an agent and a person get the same
+refusal: `validation`, with the first invalid block's `block_index`, `line`,
+`language` and `errors` (`path` and `message`), plus all invalid blocks under
+`blocks`. Mermaid is never executed on the server: a check that needs a headless
+browser per write is not a check worth its cost. An update is checked only when
+its body changes, so a page stored before the rules existed can still be renamed
+or moved.
+
+### The visual editor
+
+The web editor has a Visual tab and a Markdown tab over the same Markdown
+string. The requirement that decided its construction is that opening a page
+written by an agent and saving it without an edit must not rewrite a byte of
+it: an editor that normalises bullets, emphasis markers and table padding would
+make every human visit a diff in the page's history and a reformatting of the
+agent's text.
+
+The candidates were measured rather than compared on paper. A corpus of
+thirteen agent-style pages (nested lists, task lists, tables with and without
+alignment and padding, GitHub alerts, Mermaid and chart fences, code with info
+strings, HTML-looking text, `_`/`*` emphasis, hard breaks, reference links, no
+trailing newline) was loaded and serialised by each without edits:
+
+| Approach | Byte-identical | Content lost |
+|---|---|---|
+| TipTap 3.31 with `@tiptap/markdown` | 1 of 13 | HTML-looking text, a raw `<script>` line, an image, reference link definitions |
+| Milkdown 7.22 (`commonmark` + `gfm` presets) | 4 of 13 | code block info strings (`title="…"`), reference link definitions |
+| `remark-stringify` alone, tuned settings | 6 of 13 | none |
+| TipTap 3 editing surface + remark bridge with block source preservation (chosen) | 13 of 13, and 22 of 22 in the test corpus | none |
+
+Neither packaged serializer is faithful enough, and both lose content in
+ordinary agent pages. Milkdown is the closer of the two because it is built on
+remark, but its presets rewrite the tree on the way in (reference links are
+inlined, info strings dropped), and working around that means replacing most of
+its Markdown layer anyway. So the editor uses TipTap 3 for what it is best at —
+the editing surface: schema, commands, tables, task lists, the suggestion plugin
+behind the "/" menu, React node views — and does its own Markdown conversion
+(`components/editor/markdown-bridge.ts`) with the same remark parser the renderer
+and the validator use, so the editor cannot see a different document than a
+reader does:
+
+- every top-level block remembers the exact slice of source it came from and
+  the whitespace before it;
+- on save, a block whose editor node is unchanged is written back as that slice;
+  only edited, inserted or moved blocks are serialised, with `remark-stringify`
+  using the bullet, emphasis, rule and fence characters the page already uses
+  and a `| --- |` delimiter row;
+- constructs with no visual form (raw HTML blocks, reference and footnote
+  definitions, lists that mix task and plain items) are kept as verbatim source
+  blocks, and inline HTML or references as verbatim inline nodes;
+- on open, the editor binds its own normalised document to the source blocks
+  and checks that saving would return the input unchanged; if it would not, the
+  page opens on the Markdown tab with a notice instead of being reformatted.
+
+The known limits are the ones an edit brings: an edited block comes back in
+canonical form — a setext heading as `#`, an indented code block fenced, a hard
+break as a backslash, a table's column padding dropped — while every block
+around it stays as it was. A table cell holds one line, so cells pasted with
+several paragraphs are joined, and merged cells are not representable in
+Markdown. The editor offers no font, size or colour, because none of them
+survives being stored as Markdown.
+
+HTML pasted from a word processor, Google Docs or Confluence is parsed by the
+editor's schema, which keeps headings, lists, tables, links and emphasis and has
+nowhere to put fonts or colours; Markdown pasted as plain text is parsed as
+Markdown.
+
 ## Anchor model
 
 An anchor ties a page section to a declaration in a source repository:

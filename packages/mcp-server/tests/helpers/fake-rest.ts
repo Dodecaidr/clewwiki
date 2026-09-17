@@ -156,6 +156,16 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
       const method = req.method ?? 'GET';
       const path = url.pathname;
 
+      if (method === 'GET' && path === '/api/v1/format-guide') {
+        if (!needs('pages:read')) return;
+        return send(200, {
+          version: 1,
+          format: 'markdown',
+          mermaid: { language: 'mermaid', keywords: ['flowchart', 'sequenceDiagram'] },
+          charts: { language: 'chart', types: ['bar', 'line'], limits: { maxSeries: 8 } },
+        });
+      }
+
       if (method === 'GET' && path === '/api/v1/spaces') {
         if (!needs('pages:read')) return;
         const includeArchived = url.searchParams.get('include_archived') === 'true';
@@ -311,6 +321,20 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
           return fail(409, 'stale_base', 'Page changed since the base hash was read', {
             current_content_hash: page.content_hash,
             your_base_hash: payload.base_content_hash,
+          });
+        }
+        // The real API validates every chart block on write; the fake knows one
+        // invalid block, an empty object, which is enough to exercise the
+        // error details on their way through the wrapper.
+        if (payload.body && /```chart\n\{\s*\}\n```/.test(payload.body)) {
+          return fail(400, 'validation', 'Chart block 0 at line 1 is not valid: type: type must be one of: bar, line', {
+            block_index: 0,
+            line: 1,
+            language: 'chart',
+            errors: [{ path: 'type', message: 'type must be one of: bar, line' }],
+            blocks: [
+              { block_index: 0, line: 1, language: 'chart', errors: [{ path: 'type', message: 'type must be one of: bar, line' }] },
+            ],
           });
         }
         page.body = payload.body ?? page.body;

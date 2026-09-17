@@ -14,6 +14,7 @@ import { getFallbackShare, listAnchorsForPage } from '@/lib/anchors/service';
 import type { AnchorRecord } from '@/lib/anchors/service';
 import { getActiveClaimsForPage, getActiveNotesForPage } from '@/lib/claims/service';
 import { renderMarkdown } from '@/lib/pages/markdown';
+import { renderLabels } from '@/lib/pages/render-labels';
 import { getAncestors, getPageById, listRevisions } from '@/lib/pages/service';
 import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
@@ -125,7 +126,7 @@ export default async function PageView({ params }: Props) {
 
   const [html, linked, revisions, activeClaims, notes, pageAnchors, fallbackShare, ancestors] =
     await Promise.all([
-      renderMarkdown(page.body),
+      renderLabels().then((labels) => renderMarkdown(page.body, labels)),
       page.linkedPageId
         ? getPageById(session.workspace.id, page.linkedPageId)
         : Promise.resolve(null),

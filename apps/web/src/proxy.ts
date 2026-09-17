@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+import { buildContentSecurityPolicy, externalImagesAllowed } from '@/lib/csp';
+
 /**
  * Per-request security headers.
  *
@@ -14,24 +16,11 @@ export function proxy(request: NextRequest): NextResponse {
   const nonce = crypto.randomUUID().replaceAll('-', '');
   const isDev = process.env.NODE_ENV !== 'production';
 
-  const directives = [
-    "default-src 'self'",
-    // `strict-dynamic` lets the nonce-tagged Next bootstrap load the rest of
-    // the bundle. Development additionally needs `unsafe-eval` for the
-    // bundler's hot-reload runtime.
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
-    // Next inlines critical CSS with a style attribute it does not nonce.
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "font-src 'self'",
-    "connect-src 'self'",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-  ];
-
-  const csp = directives.join('; ');
+  const csp = buildContentSecurityPolicy({
+    nonce,
+    isDev,
+    allowExternalImages: externalImagesAllowed(),
+  });
 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-nonce', nonce);

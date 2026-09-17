@@ -32,6 +32,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/
 COPY packages/db/package.json ./packages/db/
 COPY packages/anchors/package.json ./packages/anchors/
+COPY packages/content/package.json ./packages/content/
 COPY packages/mcp-server/package.json ./packages/mcp-server/
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile

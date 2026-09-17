@@ -138,6 +138,40 @@ partly in place, the gap is named rather than implied away.
   Output written by a remote git server is kept out of API responses and tool
   results and goes to the server log. This is a documented contract, not a
   technical guarantee enforceable on a calling agent.
+- **Rendered page content.** Page bodies are rendered on the server through
+  `remark` and `rehype-sanitize` with GitHub's default schema; raw HTML in a
+  body never reaches the output. Chart blocks add inline SVG, and the
+  sanitiser allowlist was widened for it by exactly what the chart renderer
+  emits — the elements `svg`, `g`, `title`, `desc`, `path`, `rect`, `line`,
+  `circle` and `text`, and presentation attributes (`viewBox`, `role`,
+  coordinates, `fill`, `stroke`, `stroke-width` and similar). The lists live
+  next to the renderer (`CHART_SVG_TAGS`, `CHART_SVG_ATTRIBUTES` in
+  `packages/content`), and a test walks every chart the renderer draws to check
+  it never emits anything outside them. `class` on those elements is limited to
+  the renderer's own `chart…` names. This is safe because nothing on the list
+  can load, link or run anything: no `a`, `use`, `image`, `foreignObject`,
+  `script`, `style`, `animate` or `set` element, and no attribute that takes a
+  URL, an event handler or inline CSS. Raw SVG written into a body is still
+  dropped before the sanitiser sees it, and tests pass SVG carrying `script`,
+  `onload`/`onclick`, `foreignObject`, `style`, `animate`/`set`,
+  `href="javascript:…"`, `use` and `image` through the sanitiser and check that
+  all of it is stripped. Chart JSON is parsed as data — no expressions, no
+  functions — and every label is escaped as text. Mermaid still runs only in
+  the reader's browser with `securityLevel: 'strict'`.
+- **Images from other sites.** Pages reference images by address; there are no
+  uploads. The Content-Security-Policy allows images from the instance itself
+  only, so a page cannot make every reader's browser contact a third-party
+  server that learns who read it and when (a tracking pixel). An operator who
+  accepts that can set `ALLOW_EXTERNAL_IMAGES=true`, which adds `https:` to
+  `img-src` and nothing else; scripts stay on a nonce with no `unsafe-eval`
+  outside development. The editor accepts only `http(s)` or relative addresses
+  for images and links, never `data:` or `javascript:`.
+- **Structured blocks are validated on write.** Chart and Mermaid blocks are
+  checked by the page service for every writer — REST, MCP and the web form —
+  and an invalid block refuses the write, which is audited like any other
+  refused write. The check is bounded: 100 KB of JSON per chart, eight series,
+  1 000 points per series, 50 000 characters per diagram, inside the existing
+  1 000 000-character body limit. Mermaid is never executed on the server.
 - **Secrets from environment only.** No secret value is baked into a built
   image or committed to source; `.env.example` documents required keys with
   empty values, and the container refuses to start on a placeholder secret.

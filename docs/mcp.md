@@ -27,7 +27,7 @@ An agent token belongs to exactly one workspace and carries a scope set:
 
 | Scope | Grants |
 |---|---|
-| `pages:read` | `wiki.list_spaces`, `wiki.search`, `wiki.get_page`, `wiki.list_pages`, `wiki.get_presence` |
+| `pages:read` | `wiki.list_spaces`, `wiki.format_guide`, `wiki.search`, `wiki.get_page`, `wiki.list_pages`, `wiki.get_presence` |
 | `pages:write` | `wiki.create_page`, `wiki.claim`, `wiki.renew_claim`, `wiki.write_page`, `wiki.release_claim`, `wiki.post_note`, `wiki.check_anchors`, `wiki.link_docs` |
 | `pages:delete` | No tool. `DELETE /api/v1/pages/{id}` over REST, together with `pages:write`. |
 
@@ -118,6 +118,72 @@ output: { spaces: [ { key, name, description, icon, page_count, archived } ] }
 A space key is 2–10 uppercase letters or digits (`API`, `MOBILE`), unique in
 the workspace and never changed. Tools accept it in any case.
 
+### wiki.format_guide
+
+The reference for writing a page body on this instance. An agent calls it once
+before it writes or creates pages. Maps to `GET /api/v1/format-guide` and needs
+`pages:read`.
+
+```
+input:  { }
+output: { version, format: "markdown", dialect, rules: [ string ],
+          constructs: [ { name, markdown, notes? } ],
+          mermaid: { language: "mermaid", rendering, keywords: [ string ], max_source_length,
+                     templates: [ { id, name, keyword, markdown } ] },
+          charts: { language: "chart", rendering, types: [ string ], limits: { … }, rules: [ string ],
+                    json_schema, examples: { <type>: { spec, markdown } } },
+          conventions: { technical: [ string ], human: [ string ], pairing: [ string ] },
+          validation: { applies_to, error_code: "VALIDATION", details_shape, example },
+          limits: { body_max_characters, title_max_characters, summary_max_characters } }
+```
+
+`constructs` covers headings, emphasis and inline code, links and images,
+bullet and numbered lists, task lists, tables with alignment, callouts
+(`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`), fenced code
+with a language, and horizontal rules, each with a minimal valid example.
+`mermaid.templates` has one template per diagram type the editor offers
+(flowchart, sequence, class, state, ER, Gantt, pie, XY line and bar, quadrant,
+mind map, timeline). `charts` carries the chart block's JSON Schema, its limits
+and one example per chart type.
+
+Nothing in the guide is written by hand twice. The chart types, limits, JSON
+Schema and examples come from the zod schema in `packages/content` that the
+server validates writes with; the Mermaid keywords and templates, and the
+callout kinds, come from the same package. The guide is served by the instance
+rather than bundled into the MCP package, so an agent always reads the rules of
+the server it writes to, whatever version of the MCP client it runs. Its result
+is produced by clewwiki itself and carries no text written by others, so it has
+no content notice.
+
+#### Page bodies are validated on write
+
+`wiki.create_page` and `wiki.write_page` (REST `POST /api/v1/pages` and a
+`PATCH /api/v1/pages/{id}` that changes the body) check every ```` ```chart ````
+block against the chart schema and every ```` ```mermaid ```` block structurally:
+its first diagram line — after optional front matter, directives and comments —
+must start with a known diagram keyword. Mermaid itself is never run on the
+server; a syntax error deeper inside a diagram is not caught on write and shows
+on the page as the diagram's source. Callouts need no validation: a marker that
+is not a known kind is an ordinary quote. An invalid block refuses the whole
+write, nothing is stored, and the refusal names the first invalid block and
+lists them all:
+
+```json
+{ "error": { "code": "VALIDATION",
+  "message": "Chart block 0 at line 3 is not valid: series.0.data: series 0 (\"p95\") has 2 values but x has 3 labels; they must be equal",
+  "details": {
+    "block_index": 0, "line": 3, "language": "chart",
+    "errors": [ { "path": "series.0.data", "message": "series 0 (\"p95\") has 2 values but x has 3 labels; they must be equal" } ],
+    "blocks": [ { "block_index": 0, "line": 3, "language": "chart", "errors": [ … ] } ] } } }
+```
+
+`block_index` is the zero-based position of the block among the body's chart
+and Mermaid blocks, `line` the one-based line of its opening fence, and each
+error's `path` a dotted path inside the chart JSON (empty for the block as a
+whole). A person saving through the web editor gets the same list, shown under
+the editor. A body that does not change — a rename, a move — is not re-checked,
+so a page stored before these rules can still be renamed.
+
 ### wiki.search
 
 Full-text search in one space, or across every unarchived space the token can
@@ -170,7 +236,9 @@ input:  { space: string, parent_id?: string, parent_path?: string, title: string
 output: { page_id, space: { key, name }, parent_id, path, title, kind, content_hash, version,
           linked_page_id }
 errors: CONFLICT { path, space, existing_page_id } (explicit slug taken),
-        NOT_FOUND (space, parent or link_to_page_id not found), VALIDATION
+        NOT_FOUND (space, parent or link_to_page_id not found),
+        VALIDATION { block_index, line, language, errors, blocks } (invalid chart or mermaid block),
+        VALIDATION (other input)
 ```
 
 The parent is `parent_id` or `parent_path` — not both — and a page with
@@ -243,7 +311,8 @@ caller last saw.
 input:  { claim_id: string, base_content_hash: string, body: string, title?: string, summary?: string }
 output: { page_id, content_hash, version, updated_at }
 errors: STALE_BASE { current_content_hash, your_base_hash },
-        NOT_FOUND (claim expired), FORBIDDEN (claim held by another actor)
+        NOT_FOUND (claim expired), FORBIDDEN (claim held by another actor),
+        VALIDATION { block_index, line, language, errors, blocks } (invalid chart or mermaid block)
 ```
 
 On `STALE_BASE` the caller re-reads the page with `wiki.get_page`, merges,
@@ -359,6 +428,9 @@ sequenceDiagram
     A->>M: wiki.list_spaces
     M->>S: GET /api/v1/spaces
     S-->>A: spaces the token can reach
+    A->>M: wiki.format_guide (once)
+    M->>S: GET /api/v1/format-guide
+    S-->>A: constructs, diagram keywords, chart schema
     A->>M: wiki.get_page {space, path}
     M->>S: GET /api/v1/pages/{id}
     S-->>A: body + content_hash + anchors + claim?
@@ -370,11 +442,14 @@ sequenceDiagram
     end
     A->>M: wiki.write_page {claim_id, base_content_hash, body}
     M->>S: PATCH /api/v1/pages/{id} (hash check)
-    alt hash matches
+    alt hash matches and every block is valid
         S-->>A: content_hash', version
     else someone wrote in between
         S-->>A: STALE_BASE {current_content_hash}
         A->>M: wiki.get_page → merge → wiki.write_page
+    else a chart or mermaid block is invalid
+        S-->>A: VALIDATION {block_index, line, errors}
+        A->>M: fix that block → wiki.write_page
     end
     A->>M: wiki.release_claim {claim_id}
 ```

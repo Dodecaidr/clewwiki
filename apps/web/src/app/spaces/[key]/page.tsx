@@ -7,6 +7,7 @@ import { PageBody } from '@/components/page-body';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { renderMarkdown } from '@/lib/pages/markdown';
+import { renderLabels } from '@/lib/pages/render-labels';
 import { getPageById, listPages } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceByKey } from '@/lib/spaces/service';
@@ -47,7 +48,7 @@ export default async function SpaceOverview({ params }: Props) {
   const homePage = home && home.spaceId === space.id ? home : null;
 
   if (homePage) {
-    const html = await renderMarkdown(homePage.body);
+    const html = await renderMarkdown(homePage.body, await renderLabels());
     return (
       <article className="grid gap-5">
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">

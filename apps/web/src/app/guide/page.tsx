@@ -4,6 +4,9 @@ import { getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
+import { chartExampleBlock } from '@clewwiki/content/chart';
+import { MERMAID_TEMPLATES } from '@clewwiki/content/mermaid';
+
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { getSessionContext } from '@/lib/session';
 
@@ -17,12 +20,15 @@ export async function generateMetadata(): Promise<Metadata> {
 /**
  * A block of a guide section. Paragraph and list texts are message keys under
  * `guide.<section>`; `code` blocks are shown verbatim through `t.raw`, so an
- * example is never run through the message formatter.
+ * example is never run through the message formatter. `sample` blocks are
+ * examples taken from the content rules themselves — a chart example is the
+ * schema's own example — so the guide cannot show something the server refuses.
  */
 type Block =
   | { type: 'p'; key: string }
   | { type: 'ul'; keys: string[] }
-  | { type: 'code'; key: string };
+  | { type: 'code'; key: string }
+  | { type: 'sample'; value: string };
 
 interface Section {
   id: string;
@@ -32,6 +38,11 @@ interface Section {
 const p = (key: string): Block => ({ type: 'p', key });
 const ul = (...keys: string[]): Block => ({ type: 'ul', keys });
 const code = (key: string): Block => ({ type: 'code', key });
+const sample = (value: string): Block => ({ type: 'sample', value });
+
+const CALLOUT_SAMPLE = '> [!NOTE]\n> Claims expire after ten minutes unless renewed.\n\n> [!WARNING]\n> Deleting a page removes everything below it.';
+const TABLE_SAMPLE = '| Endpoint | Method | p95 (ms) |\n| :--- | :---: | ---: |\n| /api/v1/pages | GET | 42 |\n| /api/v1/pages/{id} | PATCH | 180 |';
+const SEQUENCE_TEMPLATE = MERMAID_TEMPLATES.find((template) => template.id === 'sequence');
 
 const SECTIONS: Section[] = [
   {
@@ -63,6 +74,24 @@ const SECTIONS: Section[] = [
       p('p5'),
       p('p6'),
       p('p7'),
+    ],
+  },
+  {
+    id: 'formatting',
+    blocks: [
+      p('p1'),
+      ul('editorVisual', 'editorSlash', 'editorPaste', 'editorFaithful'),
+      p('p2'),
+      sample(CALLOUT_SAMPLE),
+      p('p3'),
+      sample(TABLE_SAMPLE),
+      p('p4'),
+      sample(`\`\`\`mermaid\n${SEQUENCE_TEMPLATE?.source ?? ''}\n\`\`\``),
+      p('p5'),
+      sample(chartExampleBlock('bar')),
+      p('p6'),
+      p('p7'),
+      p('p8'),
     ],
   },
   {
@@ -178,7 +207,7 @@ export default async function GuidePage() {
                   key={index}
                   className="overflow-x-auto rounded-(--radius-base) border border-border bg-muted px-3 py-2 font-mono text-xs text-foreground"
                 >
-                  {String(t.raw(`${section.id}.${block.key}`))}
+                  {block.type === 'sample' ? block.value : String(t.raw(`${section.id}.${block.key}`))}
                 </pre>
               );
             })}

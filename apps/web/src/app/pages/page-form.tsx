@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useEffect, useState, useTransition } from 'react';
+import { useActionState, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useFormatter, useTranslations } from 'next-intl';
 
 import { createPageAction, renderPreviewAction, updatePageAction } from './actions';
@@ -9,11 +10,13 @@ import type { PageFormState } from './actions';
 import { useEditLease } from './use-edit-lease';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/card';
-import { Field, Input, Label, Select } from '@/components/ui/field';
-import { PageBody } from '@/components/page-body';
+import { Field, Input, Select } from '@/components/ui/field';
+import { BodyEditor } from '@/components/editor/body-editor';
+import type { BodyEditorHandle } from '@/components/editor/body-editor';
+import { useUnsavedChangesGuard } from '@/components/editor/use-unsaved-changes';
 import { lastSegment, slugifySegment } from '@/lib/pages/paths';
 import { generateSegment } from '@/lib/pages/slug';
-import { cn, formatDateTime } from '@/lib/utils';
+import { formatDateTime } from '@/lib/utils';
 
 export interface PageFormParent {
   id: string;
@@ -45,14 +48,6 @@ export interface PageFormProps {
 const initialState: PageFormState = {};
 
 /**
- * The page editor.
- *
- * Markdown in a textarea with a preview, deliberately — a rich-text editor
- * would put a second representation of the document between the author and
- * what is stored, and the stored form is what agents read and what exports
- * carry.
- */
-/**
  * The path a page will get, as the server will build it: the parent's path, then
  * the typed segment or, failing that, the fallback. On create the fallback is
  * the segment generated from the title; on edit it is the page's current
@@ -78,6 +73,14 @@ function previewPath(
   return `${parent ? parent.path : ''}/${last}`;
 }
 
+/**
+ * The page editor.
+ *
+ * The body is edited visually or as Markdown, and stored as Markdown either
+ * way: the stored form is what agents read and what exports carry, so the
+ * visual editor is a view onto it rather than a second format. A page opened
+ * and saved without edits is handed back byte for byte.
+ */
 export function PageForm({ mode, spaceKey, parents, initial, cancelHref }: PageFormProps) {
   const t = useTranslations('editor');
   const tc = useTranslations('common');
@@ -105,16 +108,15 @@ export function PageForm({ mode, spaceKey, parents, initial, cancelHref }: PageF
     segment,
     mode === 'edit' ? initial.segment : generatedSegment,
   );
-  const [showPreview, setShowPreview] = useState(false);
-  const [preview, setPreview] = useState('');
-  const [rendering, startRendering] = useTransition();
-
-  useEffect(() => {
-    if (!showPreview) return;
-    startRendering(async () => {
-      setPreview(await renderPreviewAction(body));
-    });
-  }, [showPreview, body]);
+  const bodyEditor = useRef<BodyEditorHandle | null>(null);
+  const [otherFieldsChanged, setOtherFieldsChanged] = useState(false);
+  const dirty =
+    body !== initial.body ||
+    title !== initial.title ||
+    segment !== initial.segment ||
+    parentId !== initial.parentId ||
+    otherFieldsChanged;
+  useUnsavedChangesGuard(dirty && !pending, t('unsavedChanges'));
 
   return (
     <div className="grid gap-5">
@@ -123,8 +125,11 @@ export function PageForm({ mode, spaceKey, parents, initial, cancelHref }: PageF
         <Alert tone="error">{state.message ?? t('errorConflict')}</Alert>
       ) : null}
       {state.error === 'stale_base' ? <Alert tone="error">{t('errorStaleBase')}</Alert> : null}
-      {state.error === 'validation' ? (
+      {state.error === 'validation' && !state.blockIssues ? (
         <Alert tone="error">{state.message ?? t('errorValidation')}</Alert>
+      ) : null}
+      {state.error === 'validation' && state.blockIssues ? (
+        <Alert tone="error">{t('errorBlocks')}</Alert>
       ) : null}
       {state.error === 'not_found' ? <Alert tone="error">{t('errorNotFound')}</Alert> : null}
       {state.error === 'generic' ? <Alert tone="error">{t('errorGeneric')}</Alert> : null}
@@ -153,7 +158,14 @@ export function PageForm({ mode, spaceKey, parents, initial, cancelHref }: PageF
         <Alert tone="error">{t('claimError')}</Alert>
       ) : null}
 
-      <form action={formAction} className="grid gap-5">
+      <form
+        action={formAction}
+        className="grid gap-5"
+        onChange={(event) => {
+          const target = event.target as HTMLElement;
+          if (target.id === 'summary' || target.id === 'kind') setOtherFieldsChanged(true);
+        }}
+      >
         {mode === 'create' ? <input type="hidden" name="spaceKey" value={spaceKey} /> : null}
         {initial.pageId ? <input type="hidden" name="pageId" value={initial.pageId} /> : null}
         {initial.baseContentHash ? (
@@ -229,45 +241,29 @@ export function PageForm({ mode, spaceKey, parents, initial, cancelHref }: PageF
         </Field>
 
         <div className="grid gap-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Label htmlFor="body">{t('body')}</Label>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-pressed={showPreview}
-              onClick={() => setShowPreview((value) => !value)}
-            >
-              {showPreview ? t('hidePreview') : t('showPreview')}
-            </Button>
-          </div>
-
-          <textarea
-            id="body"
+          <p className="text-sm font-medium">{t('body')}</p>
+          <BodyEditor
             name="body"
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-            spellCheck={false}
-            className={cn(
-              'min-h-96 w-full rounded-(--radius-base) border border-input bg-card p-3',
-              'font-mono text-sm leading-relaxed',
-            )}
+            initialBody={initial.body}
+            serverIssues={state.blockIssues ?? []}
+            onBodyChange={setBody}
+            handleRef={bodyEditor}
+            renderPreview={renderPreviewAction}
           />
-          <p className="text-xs text-muted-foreground">{t('bodyHint')}</p>
-
-          {showPreview ? (
-            <div className="rounded-(--radius-base) border border-border bg-card p-4">
-              {rendering && preview === '' ? (
-                <p className="text-sm text-muted-foreground">{tc('loading')}</p>
-              ) : (
-                <PageBody html={preview} />
-              )}
-            </div>
-          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" disabled={pending || blocked}>
+          <Button
+            type="submit"
+            disabled={pending || blocked}
+            onClick={() => {
+              // The visual editor reports changes after a short pause; the
+              // save must carry what is on screen, so it is read out now.
+              flushSync(() => {
+                bodyEditor.current?.flush();
+              });
+            }}
+          >
             {pending ? tc('loading') : mode === 'create' ? t('create') : t('save')}
           </Button>
           <Link

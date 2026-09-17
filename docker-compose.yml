@@ -64,6 +64,7 @@ services:
       TRUSTED_CLIENT_IP_HEADER: ${TRUSTED_CLIENT_IP_HEADER:-x-real-ip}
       REPOS_DIR: /data/repos
       ALLOW_FILE_REPOSITORIES: ${ALLOW_FILE_REPOSITORIES:-false}
+      ALLOW_EXTERNAL_IMAGES: ${ALLOW_EXTERNAL_IMAGES:-false}
       # Access tokens for private repositories. A space's repository setting
       # can name only CLEWWIKI_GIT_TOKEN or CLEWWIKI_GIT_TOKEN_<NAME>; add a line
       # like the second one for each extra token you define in .env.

@@ -124,6 +124,8 @@ describe('onboarding prompt', () => {
     expect(prompt).toContain('`CLEWWIKI_TOKEN`');
     for (const tool of [
       'wiki.list_spaces',
+      'wiki.format_guide',
+      'VALIDATION',
       'wiki.search',
       'wiki.list_pages',
       'wiki.get_page',

@@ -8,7 +8,7 @@ import { TOOLS } from './tools.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
 
 /**
- * Builds the MCP server: the thirteen tools of `docs/mcp.md`, each wired to the
+ * Builds the MCP server: the fourteen tools of `docs/mcp.md`, each wired to the
  * REST client it calls through.
  *
  * The same function serves both transports. stdio hands it a client pointed at
@@ -26,6 +26,10 @@ const SERVER_INSTRUCTIONS = [
   'wiki.list_spaces first, find the space for the project at hand, and pass its key',
   'as space to wiki.search, wiki.list_pages, wiki.get_page (with a path) and',
   'wiki.get_presence.',
+  '',
+  'Before writing, call wiki.format_guide once: page bodies are Markdown with tables,',
+  'callouts, Mermaid diagrams and chart blocks, and a chart or mermaid block that does not',
+  'validate makes the write fail with VALIDATION, naming the block, its line and the fields.',
   '',
   'Writing is a four-step protocol and skipping a step is refused, not merged:',
   'wiki.get_page to read the body and its content hash, wiki.claim to take a lease,',

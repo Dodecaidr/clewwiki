@@ -6,6 +6,7 @@ import type { SQL } from 'drizzle-orm';
 import type { ActorKind, PageKind } from '@clewwiki/db';
 
 import { computeContentHash } from './content';
+import { assertValidContentBlocks } from './content-blocks';
 import { PageServiceError, isPageServiceError } from './errors';
 import {
   InvalidPathError,
@@ -569,6 +570,9 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
   if (title.length === 0) {
     throw new PageServiceError('validation', 'Title must not be empty');
   }
+  // Chart and diagram blocks are checked before anything is looked up, so a
+  // body that cannot be stored costs no queries.
+  assertValidContentBlocks(input.body ?? '');
 
   const db = getDatabase();
   const [space] = await db
@@ -806,6 +810,11 @@ async function runUpdatePage(input: UpdatePageInput): Promise<PageRecord> {
     }
 
     const body = input.body ?? current.body;
+    // Only a body that changes is checked. A page stored before a rule existed
+    // must still accept a rename or a move without first being rewritten.
+    if (body !== current.body) {
+      assertValidContentBlocks(body);
+    }
     const summary = input.summary === undefined ? current.summary : input.summary;
     const kind = input.kind ?? current.kind;
     const contentHash = computeContentHash(body);

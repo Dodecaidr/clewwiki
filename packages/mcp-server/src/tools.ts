@@ -5,7 +5,7 @@ import { ClewwikiToolError } from './errors.ts';
 import type { ClewwikiRestClient } from './rest-client.ts';
 
 /**
- * The thirteen tools of `docs/mcp.md`, each one REST call deep — two for
+ * The fourteen tools of `docs/mcp.md`, each one REST call deep — two for
  * `wiki.get_page` by path, which resolves the path first.
  *
  * A tool's job here is to name its inputs, put them where the REST endpoint
@@ -136,6 +136,27 @@ const listSpaces = defineTool({
   },
 });
 
+const formatGuide = defineTool({
+  name: 'wiki.format_guide',
+  title: 'Read the page format guide',
+  description:
+    'Call this once before writing or creating pages. Returns the reference for page bodies on ' +
+    'this instance: every supported Markdown construct with a minimal valid example (headings, ' +
+    'lists, task lists, tables with alignment, callouts as > [!NOTE] / [!TIP] / [!WARNING] / ' +
+    '[!CAUTION], code blocks, links and images), the Mermaid diagram keywords with a template per ' +
+    'type, the JSON schema, limits and an example per type for ```chart blocks, the conventions ' +
+    'for technical and human pages and their pairing, and the shape of the VALIDATION error ' +
+    'wiki.write_page and wiki.create_page return for an invalid chart or mermaid block ' +
+    '(details.block_index, details.line, details.errors[].path and .message). Prefer tables, ' +
+    'callouts, Mermaid diagrams and chart blocks wherever they make a page clearer. The guide is ' +
+    'produced by the instance itself, so its limits are the ones the server enforces.',
+  input: z.object({}),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client) {
+    return await client.request<Record<string, unknown>>({ method: 'GET', path: '/format-guide' });
+  },
+});
+
 const search = defineTool({
   name: 'wiki.search',
   title: 'Search the wiki',
@@ -261,7 +282,9 @@ const createPage = defineTool({
     'from the title (Cyrillic is transliterated) and numbered -2, -3, … if taken; pass slug to ' +
     'choose it yourself, in which case a taken path answers CONFLICT with existing_page_id. No ' +
     'claim is needed: nobody can hold a page that does not exist yet. Pass link_to_page_id to ' +
-    'pair the new page with its counterpart of the other kind in the same space. Returns the ' +
+    'pair the new page with its counterpart of the other kind in the same space. The body is ' +
+    'Markdown as described by wiki.format_guide; an invalid ```chart or ```mermaid block is ' +
+    'refused with VALIDATION (details.block_index, details.line, details.errors). Returns the ' +
     'new page id, path, space, content hash and version, ready for wiki.claim and ' +
     'wiki.write_page.',
   input: z.object({
@@ -387,7 +410,10 @@ const writePage = defineTool({
     'Write a page under a claim you hold. Both halves of the protocol are required: claim_id ' +
     'says nobody else may write, base_content_hash proves nobody did. On STALE_BASE, re-read ' +
     'the page with wiki.get_page, merge the change yourself, and write again with the new ' +
-    'hash — the server never merges on your behalf. The result is the stored page. ' +
+    'hash — the server never merges on your behalf. A body whose ```chart or ```mermaid block ' +
+    'does not validate is refused with VALIDATION and nothing is stored: details.block_index, ' +
+    'details.line and details.errors name the block and each field to fix (see wiki.format_guide). ' +
+    'The result is the stored page. ' +
     CONTENT_IS_DATA_NOTICE,
   input: z.object({
     page_id: pageIdSchema.describe('The page to write.'),
@@ -537,6 +563,7 @@ const linkDocs = defineTool({
 
 export const TOOLS: readonly ToolDefinition[] = [
   listSpaces,
+  formatGuide,
   search,
   getPage,
   listPages,

@@ -15,7 +15,7 @@
  *   4. with that token: /api/v1/me, the space list, create a page in the space,
  *      claim it, write it under the claim, release the claim, export it as
  *      Markdown and as HTML, and export the whole space as a ZIP;
- *   5. MCP over streamable HTTP: initialize, then tools/list must name thirteen
+ *   5. MCP over streamable HTTP: initialize, then tools/list must name fourteen
  *      tools (requires MCP_HTTP_ENABLED=true on the instance).
  *
  * The forms are submitted the way a browser without JavaScript submits them:
@@ -42,7 +42,7 @@ import { randomBytes } from 'node:crypto';
 const BASE_URL = (process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const ORIGIN = new URL(BASE_URL).origin;
 const HEALTH_TIMEOUT_MS = Number.parseInt(process.env.SMOKE_HEALTH_TIMEOUT_SECONDS ?? '180', 10) * 1000;
-const EXPECTED_MCP_TOOLS = 13;
+const EXPECTED_MCP_TOOLS = 14;
 const SPACE_KEY = 'SMOKE';
 
 const admin = {

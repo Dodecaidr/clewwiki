@@ -1,12 +1,16 @@
 'use server';
 
+import { PAGE_BODY_MAX_LENGTH } from '@clewwiki/content/guide';
+import type { BlockIssue } from '@clewwiki/content/blocks';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { acquireClaim, releaseClaim } from '@/lib/claims/service';
+import { blockIssuesFromDetails } from '@/lib/pages/content-blocks';
 import { isPageServiceError } from '@/lib/pages/errors';
 import { renderMarkdown } from '@/lib/pages/markdown';
+import { renderLabels } from '@/lib/pages/render-labels';
 import { createPage, deletePage, getPageById, linkPages, updatePage } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceById, getSpaceByKey } from '@/lib/spaces/service';
@@ -28,6 +32,11 @@ export interface PageFormState {
   error?: string;
   /** Set when the service rejected the write for a reason worth quoting. */
   message?: string;
+  /**
+   * The chart and Mermaid blocks the service refused, in the same shape the
+   * REST API reports them, so the editor can point at each one.
+   */
+  blockIssues?: BlockIssue[];
 }
 
 const kindSchema = z.enum(['technical', 'human']);
@@ -39,7 +48,7 @@ const fieldsSchema = z.object({
   parentId: z.uuid().optional(),
   kind: kindSchema,
   summary: z.string().trim().max(2_000).optional(),
-  body: z.string().max(1_000_000),
+  body: z.string().max(PAGE_BODY_MAX_LENGTH),
 });
 
 const createSchema = fieldsSchema.extend({
@@ -64,6 +73,27 @@ function formString(formData: FormData, key: string): string | undefined {
   return trimmed === '' ? undefined : value;
 }
 
+/**
+ * The page body as the editor sent it.
+ *
+ * A browser normalises every line break in submitted form fields to CRLF, so a
+ * body sent as plain field text would come back with `\r\n` where the page had
+ * `\n` — a rewrite of every line on a save that changed nothing. The editor
+ * therefore sends the body JSON-encoded (`bodyEncoding=json`), where line breaks
+ * are escapes the browser leaves alone; a plain `body` field is still accepted
+ * for a form posted without the editor's script.
+ */
+function bodyFrom(formData: FormData): unknown {
+  const raw = formData.get('body') ?? '';
+  if (formData.get('bodyEncoding') !== 'json' || typeof raw !== 'string') return raw;
+  try {
+    const decoded: unknown = JSON.parse(raw);
+    return typeof decoded === 'string' ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
 async function requireWriter() {
   const session = await getSessionContext();
   if (!session) return null;
@@ -75,7 +105,12 @@ async function requireWriter() {
 
 function toFormState(error: unknown): PageFormState {
   if (isPageServiceError(error)) {
-    return { error: error.code, message: error.message };
+    const blockIssues = error.code === 'validation' ? blockIssuesFromDetails(error.details) : [];
+    return {
+      error: error.code,
+      message: error.message,
+      ...(blockIssues.length > 0 ? { blockIssues } : {}),
+    };
   }
   console.error('[pages] action failed', error);
   return { error: 'generic' };
@@ -100,7 +135,7 @@ export async function createPageAction(
     parentId: formString(formData, 'parentId'),
     kind: formData.get('kind') ?? 'technical',
     summary: formString(formData, 'summary'),
-    body: formData.get('body') ?? '',
+    body: bodyFrom(formData),
   });
 
   if (!parsed.success) {
@@ -150,7 +185,7 @@ export async function updatePageAction(
     parentId: formString(formData, 'parentId'),
     kind: formData.get('kind') ?? 'technical',
     summary: formString(formData, 'summary'),
-    body: formData.get('body') ?? '',
+    body: bodyFrom(formData),
   });
 
   if (!parsed.success) {
@@ -303,6 +338,7 @@ export async function linkPageAction(
 export async function renderPreviewAction(markdown: string): Promise<string> {
   const session = await getSessionContext();
   if (!session) return '';
-  if (typeof markdown !== 'string' || markdown.length > 1_000_000) return '';
-  return renderMarkdown(markdown);
+  if (typeof markdown !== 'string' || markdown.length > PAGE_BODY_MAX_LENGTH) return '';
+  return renderMarkdown(markdown, await renderLabels());
 }
+

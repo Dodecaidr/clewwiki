@@ -316,13 +316,16 @@ is unchanged; only where the image comes from differs.
 
 ### Connecting an AI coding agent (MCP)
 
-Agents talk to clewwiki through the Model Context Protocol with thirteen
-tools — `wiki.list_spaces`, `wiki.search`, `wiki.get_page`,
-`wiki.create_page`, `wiki.claim`, `wiki.write_page`, `wiki.release_claim` and
-the rest. An agent calls
+Agents talk to clewwiki through the Model Context Protocol with fourteen
+tools — `wiki.list_spaces`, `wiki.format_guide`, `wiki.search`,
+`wiki.get_page`, `wiki.create_page`, `wiki.claim`, `wiki.write_page`,
+`wiki.release_claim` and the rest. An agent calls
 `wiki.list_spaces` first and passes the key of its project's space as `space`
 to `wiki.search`, `wiki.list_pages`, `wiki.get_presence`, and to
-`wiki.get_page` when it reads by path. The full contract, with input and
+`wiki.get_page` when it reads by path. Before writing it calls
+`wiki.format_guide` once: pages are Markdown with tables, callouts, Mermaid
+diagrams and chart blocks, and a chart or diagram block that does not validate
+is refused with `VALIDATION`, naming the block, its line and the field to fix. The full contract, with input and
 output shapes and error codes, is in [`docs/mcp.md`](docs/mcp.md). The
 MCP server is a REST client of your instance: it holds an agent token and
 has no other way in, so every tool call gets the same scope checks, rate
@@ -673,6 +676,7 @@ container.
 | `REPOS_DIR` | no | `/data/repos` | Where read-only mirrors of the spaces' repositories are kept, one per space. Compose backs it with the `repos-data` volume. |
 | `CLEWWIKI_GIT_TOKEN`, `CLEWWIKI_GIT_TOKEN_<NAME>` | **yes** | empty | Access tokens for private repositories. The only variables a space's repository setting may name; sent only to `https://` URLs. |
 | `ALLOW_FILE_REPOSITORIES` | no | `false` | Allows `file://` repository URLs (a repository on the host or mounted into the container). |
+| `ALLOW_EXTERNAL_IMAGES` | no | `false` | Shows images that pages reference on other `https://` sites. Off, the browser loads images from this instance only, so a page cannot make readers' browsers contact a third-party server. |
 | `CLEWWIKI_MIGRATIONS_DIR` | no | set by the image | Where the app looks for migration SQL. Outside a container only. |
 | `CLEWWIKI_GRAMMARS_DIR` | no | set by the image | Where the app looks for the tree-sitter grammar `.wasm` files. Outside a container only. |
 
@@ -840,19 +844,41 @@ that page already chosen as the parent:
   service" under `/backend` becomes `/backend/auth-service`, and the form shows
   the resulting path before you save. A title with no Latin letters needs a
   segment typed in.
-- **Body** is Markdown. A fenced block marked `mermaid` is rendered as a
-  diagram in the browser:
+- **Body** is edited on the **Visual** tab, like a word processor, or on the
+  **Markdown** tab as source — the page is stored as Markdown either way.
+  Type `/` for a block: headings, lists and task lists, tables, callouts,
+  code blocks, images by address (there are no uploads), Mermaid diagrams from
+  a template, and charts drawn from a table of data. A page opened and saved
+  without edits is stored byte for byte as it was, and an edit rewrites only
+  the blocks it touched; a page the editor cannot promise that for opens on the
+  Markdown tab and says so. The same constructs in Markdown:
 
   ````markdown
+  > [!WARNING]
+  > Deleting a page removes everything below it.
+
+  | Service | p95 (ms) |
+  | :--- | ---: |
+  | API | 120 |
+
   ```mermaid
   flowchart LR
       Agent -->|writes| Page
       Page -->|revision| History
   ```
+
+  ```chart
+  { "type": "bar", "x": ["API", "Worker"], "series": [{ "name": "p95", "data": [120, 300] }], "unit": "ms" }
+  ```
   ````
 
-**Show preview** renders the body through the same pipeline the stored page and
-the HTML export use, so the preview cannot show you something the page will not.
+  A chart or Mermaid block that does not validate is not saved: the form lists
+  each problem with its block, line and field, the answer an agent gets as
+  `VALIDATION`.
+
+**Show preview** on the Markdown tab renders the body through the same pipeline
+the stored page and the HTML export use, so the preview cannot show you
+something the page will not.
 
 Opening the editor takes a claim on the page and holds it — the editor
 heartbeats while the form is open and gives the claim back when you save or
@@ -1108,9 +1134,12 @@ the page tree — `API/backend.md`, `API/backend/auth.md`:
 curl -sS -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
      "$CLEWWIKI_URL/api/v1/spaces/API/export?format=md" -o API.zip
 ``` The HTML
-file is a standalone document that opens from disk with nothing to load;
-Mermaid blocks are kept as `<pre class="mermaid">` holding their source, since
-drawing them would mean shipping a renderer inside every exported file.
+file is a standalone document that opens from disk with nothing to load.
+Charts are drawn into it as inline SVG and callouts are styled, so both show
+and print with scripting off. Mermaid blocks are kept as `<pre class="mermaid">`
+holding their source, since drawing them would mean shipping a renderer inside
+every exported file; to print a diagram, print the page view in the application
+once its diagrams have drawn.
 
 **PDF.** There is no PDF export format. Open the HTML export in a browser and
 print it to PDF: the file carries its own print stylesheet — page margins, no
@@ -1215,6 +1244,7 @@ noise.
 |---|---|---|---|
 | `GET /api/v1/health` | none | — | Liveness and database reachability. Used by the compose healthcheck. |
 | `GET /api/v1/me` | session or token | `identity:read` | Who the caller is, what it may do, which workspace it is bound to, and which spaces it can reach (`space_access`). |
+| `GET /api/v1/format-guide` | session or token | `pages:read` | The page format reference: Markdown constructs with examples, Mermaid keywords and templates, the chart block schema, limits and an example per chart type, and the validation error shape. |
 | `GET /api/v1/spaces` | session or token | `pages:read` | The spaces the caller can reach, with page counts. `include_archived=true` adds archived ones. |
 | `POST /api/v1/spaces` | admin session | — | Create a space: `key`, `name`, `description`, `icon`. `409` when the key is taken. |
 | `GET /api/v1/spaces/{key}` | session or token | `pages:read` | One space. The repository link is shown in full to administrators only. |
@@ -1222,9 +1252,9 @@ noise.
 | `POST /api/v1/spaces/{key}/archive`, `…/unarchive` | admin session | — | Archive a space, or bring it back. |
 | `GET /api/v1/spaces/{key}/export` | session or token | `pages:read` | The whole space as a ZIP of Markdown files mirroring the tree. Takes `format=md`. |
 | `GET /api/v1/pages` | session or token | `pages:read` | The page tree, without bodies. Takes `space`, `parent_id`, `path` (needs `space`), `kind`, `depth`; without `space`, the top of every space. |
-| `POST /api/v1/pages` | session or token | `pages:write` | Create a page. Requires `space`. |
+| `POST /api/v1/pages` | session or token | `pages:write` | Create a page. Requires `space`. An invalid ` ```chart ` or ` ```mermaid ` block in the body is `400 validation` with `block_index`, `line` and `errors`. |
 | `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |
-| `PATCH /api/v1/pages/{id}` | session or token | `pages:write` | Update or move a page under a claim. Requires `claim_id` and `base_content_hash`. Writes a revision and bumps the version. |
+| `PATCH /api/v1/pages/{id}` | session or token | `pages:write` | Update or move a page under a claim. Requires `claim_id` and `base_content_hash`. Writes a revision and bumps the version. A changed body is held to the same chart and diagram validation as a new page. |
 | `DELETE /api/v1/pages/{id}` | session or token | `pages:write` + `pages:delete` | Soft-delete a page and everything below it. `409 conflict` while another actor holds a live claim in the subtree, unless the caller is an administrator. |
 | `POST /api/v1/pages/{id}/restore` | admin session | — | Restore a soft-deleted page and the subtree deleted with it. `409 conflict` when a live page has taken one of its paths or its parent is gone or moved. |
 | `GET /api/v1/pages/{id}/tree` | session or token | `pages:read` | The subtree rooted at a page, nested. |
