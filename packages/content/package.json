@@ -8,6 +8,7 @@
     "./blocks": "./src/blocks.ts",
     "./callouts": "./src/callouts.ts",
     "./chart": "./src/chart/index.ts",
+    "./diff": "./src/diff.ts",
     "./guide": "./src/guide.ts",
     "./mermaid": "./src/mermaid.ts",
     "./paths": "./src/paths.ts",

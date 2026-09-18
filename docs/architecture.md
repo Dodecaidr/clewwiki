@@ -322,6 +322,7 @@ lives in the implementation, not here):
 - `spaces`
 - `pages`
 - `page_revisions`
+- `page_reviews`
 - `claims`
 - `claim_notes`
 - `anchors`
@@ -508,6 +509,50 @@ that puts four blocks under four headings, and it is unit-tested as such.
 The retention knobs live in `spaces.settings` for the reason every other knob
 does: read with the row, queried on their own by nothing, and a new one must not
 be a migration.
+
+### Review after agents, and why pending is derived
+
+Agents write without asking. A review queue *in front of* the write would make
+every agent as slow as the person approving it, and the claim protocol already
+keeps writers from overwriting each other — so the review comes after. What a
+person needs is a list of what changed since they last looked, and a way back.
+
+**The baseline.** For each page, the newest version that a person wrote or
+accepted. Agent revisions after it are pending. It is computed from
+`page_revisions.author_type` and `page_reviews`, never stored: there is no
+`needs_review` flag to fall out of step with the history, a person's edit
+settles what came before it without anything being recorded, and a page an agent
+created has baseline 0 and is pending from version 1. The page row already
+carries the author of its newest revision (`updated_by_type`), so "is anything
+pending in this space" rules most pages out before a subquery runs.
+
+**A review covers a range.** `page_reviews` has `from_version` (the baseline,
+exclusive) and `to_version` (what the reviewer saw, inclusive), because that is
+how the work is read: an agent that wrote a page four times in an afternoon
+produced one change. A decision carries the version the reviewer was looking at
+and is refused as `stale_base` when the page has moved on, for the same reason a
+write carries a content hash.
+
+**Accept touches nothing; revert is a write.** Accepting inserts a row under a
+lock on the page. Reverting writes the baseline's title, body and summary back
+as a new revision by the reviewer, through `acquireClaim` → `updatePage` →
+`releaseClaim` like any other write, so it loses to a live claim instead of
+overriding it, and the history keeps the agent's revisions followed by the one
+that undid them. The review row is inserted after that write, in its own
+transaction; should it fail, the page is still consistent, because the revert is
+a person's revision and therefore a baseline with or without the row.
+
+**The diff is a library, not a dependency.** `@clewwiki/content/diff` is Myers'
+O(ND) over lines, with the common head and tail set aside first and the trace
+kept only for the diagonals each round can touch. Both inputs are caller-
+supplied text, so the work is bounded explicitly: past 2 000 edits or 40 000
+lines the middle is reported as removed-then-added and the result says
+`coarse`. It returns data; the interface renders lines as escaped text and
+never as Markdown, since a diff that rendered what it compares could not show
+what changed in the source.
+
+**Only a person decides.** The service functions take a reviewer, not an actor,
+and the handler refuses a bearer token before calling them.
 
 ### Staged imports
 

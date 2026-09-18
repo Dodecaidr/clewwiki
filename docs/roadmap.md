@@ -674,6 +674,36 @@ every token before an agent could talk about pages it may already rewrite.
 which needs a delivery channel this product does not have yet; and searching
 across open discussions, which today is a listing per space.
 
+## Review after agents — **built**
+
+Agents write without asking, so a person needs to see afterwards what was done
+and be able to undo it.
+
+- The baseline of a page is the newest version a person wrote or accepted; agent
+  revisions after it are pending. Derived from `page_revisions` and the new
+  `page_reviews` table (migration `0008_reviews`), never stored as a flag.
+- `@clewwiki/content/diff`: a bounded Myers line diff with changed words marked
+  inside rewritten lines.
+- REST: `GET /api/v1/spaces/{key}/reviews`, `GET /api/v1/spaces/{key}/changes`,
+  `GET /api/v1/pages/{id}/versions/{version}`, `GET /api/v1/pages/{id}/diff`,
+  `GET` and `POST /api/v1/pages/{id}/review`. Reads need `pages:read`; deciding
+  is for signed-in people only.
+- Accept records the decision; revert writes the baseline back as a new version
+  under a claim. Both refuse a stale version, both take a note agents can read.
+- UI: **Changes** in every space's sidebar with a count, a "Needs review" queue,
+  an "All changes" feed, a banner on a pending page, a version history and a
+  comparison view for any two versions. Both languages.
+
+Two decisions worth recording. **The review is after the write, not before it**:
+a queue in front of the write would make agents as slow as their approver, and
+claims already prevent lost updates. **A review covers a range of versions, not
+one revision**: what a person compares is the page as they last knew it with the
+page as it stands, however many times an agent wrote in between.
+
+**Next**: comments anchored to a paragraph, so a reviewer can say what is wrong
+where it is wrong, and MCP tools for the queue, the diff and those comments, so
+the feedback reaches the agent without anybody pasting it.
+
 ## Phase 7 — Launch
 
 Public launch of the repository.

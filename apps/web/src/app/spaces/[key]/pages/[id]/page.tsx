@@ -17,6 +17,7 @@ import { listOpenDiscussionsForPage } from '@/lib/discussions/service';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
 import { getAncestors, getPageById, listRevisions } from '@/lib/pages/service';
+import { getPageReviewState } from '@/lib/reviews/service';
 import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceById } from '@/lib/spaces/service';
@@ -25,7 +26,9 @@ import {
   newSpacePageHref,
   spaceDiscussionHref,
   spaceHref,
+  spacePageChangesHref,
   spacePageEditHref,
+  spacePageHistoryHref,
   spacePageHref,
 } from '@/lib/spaces/urls';
 import { assertSameWorkspace } from '@/lib/workspace';
@@ -137,6 +140,7 @@ export default async function PageView({ params }: Props) {
     fallbackShare,
     ancestors,
     openDiscussions,
+    review,
   ] = await Promise.all([
       renderLabels().then((labels) => renderMarkdown(page.body, labels)),
       page.linkedPageId
@@ -152,10 +156,12 @@ export default async function PageView({ params }: Props) {
       getFallbackShare(session.workspace.id, space.id),
       getAncestors(session.workspace.id, page),
       listOpenDiscussionsForPage(session.workspace.id, page.id),
+      getPageReviewState(session.workspace.id, page.id),
     ]);
 
   const ta = await getTranslations('anchors');
   const tdis = await getTranslations('discussions');
+  const trev = await getTranslations('reviews');
   const repository = readRepositorySettings(space.settings);
 
   const anchorItems: AnchorPanelItem[] = pageAnchors.map((anchor) => ({
@@ -319,6 +325,28 @@ export default async function PageView({ params }: Props) {
           </div>
         </dl>
 
+        {/* Said above the text, not in the margin: a reader should know that
+            what follows was changed by an agent and that nobody has read the
+            change yet, before they rely on it. */}
+        {review.pending ? (
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-(--radius-base) border border-warning/60 bg-warning/10 px-3 py-2 text-xs">
+            <span>
+              {review.baselineVersion === 0
+                ? trev('bannerCreated')
+                : trev('bannerChanged', {
+                    count: review.pendingRevisions.length,
+                    version: review.baselineVersion,
+                  })}
+            </span>
+            <Link
+              href={spacePageChangesHref(space.key, page.id)}
+              className="font-medium underline underline-offset-2"
+            >
+              {trev('reviewLink')}
+            </Link>
+          </p>
+        ) : null}
+
         {claim ? (
           <p className="rounded-(--radius-base) border border-border bg-muted px-3 py-2 text-xs">
             <span className="font-medium">
@@ -398,6 +426,12 @@ export default async function PageView({ params }: Props) {
       <Card>
         <CardHeader>
           <CardTitle>{t('historyHeading')}</CardTitle>
+          <Link
+            href={spacePageHistoryHref(space.key, page.id)}
+            className="text-xs underline underline-offset-2"
+          >
+            {trev('allVersions')}
+          </Link>
         </CardHeader>
         <CardBody>
           <ul className="grid gap-2 text-sm">

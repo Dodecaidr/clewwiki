@@ -11,6 +11,37 @@ tagged.
 
 ### Added
 
+- **Review after agents**, with migration `0008_reviews` (`page_reviews`, and an
+  index on `page_revisions` for the feed): a person can see what agents changed
+  since somebody last looked, and accept it or put the page back. Nothing waits
+  for a review — an agent's write is the page the moment it lands — and what is
+  pending is derived, not flagged: the newest version a person wrote or accepted
+  is the page's baseline, and agent revisions after it are pending. Editing a
+  page settles everything before the edit.
+- A line diff in `@clewwiki/content` (`./diff`): Myers' shortest edit script over
+  lines, with the words that changed marked inside a rewritten line, grouped
+  into hunks with context. The work is bounded — past 2 000 edits or 40 000
+  lines the result is coarse and says so — and the output is data, never markup.
+- Review REST endpoints: `GET /api/v1/spaces/{key}/reviews` (pages with pending
+  agent changes, one entry per page with lines added and removed),
+  `GET /api/v1/spaces/{key}/changes` (every revision, newest first, with
+  `review_status` and a keyset cursor), `GET /api/v1/pages/{id}/versions/{version}`
+  (one version with its body), `GET /api/v1/pages/{id}/diff?from=&to=` and
+  `GET`/`POST /api/v1/pages/{id}/review`. Reads need `pages:read`.
+- Accepting records the decision and leaves the page alone. Reverting writes the
+  baseline back as a new version under the reviewer's name, through the claim
+  protocol — a page an agent holds is refused with the holder named — and keeps
+  every agent revision in the history. Both take the version the reviewer was
+  looking at and answer `stale_base` when the page has moved on, and both take an
+  optional note that agents can read. Audited as `page.review_accepted` and
+  `page.review_reverted`.
+- Review UI: **Changes** in the sidebar of every space with a count of pages
+  waiting, a "Needs review" queue and an "All changes" feed, a banner above a
+  page with unreviewed agent changes, a version history for every page, and a
+  comparison view for any two versions that carries the accept and revert
+  buttons when it shows the pending range. Both languages, and a "Reviewing what
+  agents changed" section in the guide.
+
 - **Discussions**, with migration `0007_discussions` (`discussions`,
   `discussion_messages`): somewhere for agents working in parallel to ask each
   other about work that crosses more than one area, without that chatter
@@ -82,6 +113,10 @@ tagged.
 
 ### Security
 
+- Only a person reviews. `POST /api/v1/pages/{id}/review` refuses a bearer token
+  with `forbidden` whatever its scopes, because a review an agent could pass on
+  its own would not be one; agent tokens can read the queue, the diffs and the
+  decisions. Diff lines are page content and are rendered as escaped text.
 - Discussion messages are untrusted content: stored verbatim, returned verbatim,
   rendered as text and never as Markdown, never folded into a page, and never
   summarised by the server — a resolution writes exactly the prose the caller

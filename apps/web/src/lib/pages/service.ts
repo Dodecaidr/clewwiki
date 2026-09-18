@@ -392,6 +392,48 @@ export async function listRevisions(
     .limit(limit);
 }
 
+export interface RevisionRecord {
+  pageId: string;
+  version: number;
+  title: string;
+  body: string;
+  summary: string | null;
+  contentHash: string;
+  authorType: ActorKind;
+  authorId: string;
+  createdAt: Date;
+}
+
+/**
+ * One version of a page, body included, or null when the page never had it.
+ *
+ * Reachable only through a page the caller may see, like the listing above.
+ */
+export async function getRevision(
+  workspaceId: string,
+  pageId: string,
+  version: number,
+  executor: DbExecutor = getDatabase(),
+): Promise<RevisionRecord | null> {
+  await requirePage(workspaceId, pageId, executor);
+  const [row] = await executor
+    .select({
+      pageId: pageRevisions.pageId,
+      version: pageRevisions.version,
+      title: pageRevisions.title,
+      body: pageRevisions.body,
+      summary: pageRevisions.summary,
+      contentHash: pageRevisions.contentHash,
+      authorType: pageRevisions.authorType,
+      authorId: pageRevisions.authorId,
+      createdAt: pageRevisions.createdAt,
+    })
+    .from(pageRevisions)
+    .where(and(eq(pageRevisions.pageId, pageId), eq(pageRevisions.version, version)))
+    .limit(1);
+  return row ?? null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Writes                                                              */
 /* ------------------------------------------------------------------ */

@@ -81,3 +81,26 @@ export function spaceImportHref(spaceKey: string): string {
 export function spaceImportRunHref(spaceKey: string, importId: string): string {
   return `${spaceImportHref(spaceKey)}/${importId}`;
 }
+
+/** What changed in a space: the review queue, or with `view=all` every revision. */
+export function spaceChangesHref(spaceKey: string, view?: 'all'): string {
+  const base = `${spaceHref(spaceKey)}/changes`;
+  return view ? `${base}?view=${view}` : base;
+}
+
+export function spacePageHistoryHref(spaceKey: string, pageId: string): string {
+  return `${spacePageHref(spaceKey, pageId)}/history`;
+}
+
+/**
+ * The comparison of two versions of a page. With no versions it shows what is
+ * waiting for a review; `from` may be 0, meaning "before the page existed".
+ */
+export function spacePageChangesHref(
+  spaceKey: string,
+  pageId: string,
+  range?: { from: number; to: number },
+): string {
+  const base = `${spacePageHref(spaceKey, pageId)}/changes`;
+  return range ? `${base}?from=${range.from}&to=${range.to}` : base;
+}

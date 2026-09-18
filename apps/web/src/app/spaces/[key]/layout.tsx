@@ -9,6 +9,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { getStaleAnchorCounts } from '@/lib/anchors/service';
 import { getActiveClaimsByPage } from '@/lib/claims/service';
 import { countOpenDiscussions } from '@/lib/discussions/service';
+import { countPendingPages } from '@/lib/reviews/service';
 import type { ClaimRecord } from '@/lib/claims/service';
 import { getPageTree } from '@/lib/pages/service';
 import type { PageTreeNode } from '@/lib/pages/service';
@@ -16,6 +17,7 @@ import { getSessionContext } from '@/lib/session';
 import { getSpaceByKey } from '@/lib/spaces/service';
 import {
   newSpacePageHref,
+  spaceChangesHref,
   spaceDiscussionsHref,
   spaceHref,
   spacePagesBase,
@@ -88,14 +90,16 @@ export default async function SpaceLayout({
   const trules = await getTranslations('rules');
   const tsk = await getTranslations('skills');
   const tdis = await getTranslations('discussions');
+  const trev = await getTranslations('reviews');
   const format = await getFormatter();
-  const [tree, claims, staleAnchors, openDiscussions] = await Promise.all([
+  const [tree, claims, staleAnchors, openDiscussions, pendingReviews] = await Promise.all([
     getPageTree(session.workspace.id, space.id),
     // One query each for the whole sidebar rather than one per node: presence
     // and anchor state are cheap only if they are read in bulk.
     getActiveClaimsByPage(session.workspace.id),
     getStaleAnchorCounts(session.workspace.id),
     countOpenDiscussions(session.workspace.id, [space.id]),
+    countPendingPages(session.workspace.id, space.id),
   ]);
   const openCount = openDiscussions.get(space.id) ?? 0;
 
@@ -181,6 +185,23 @@ export default async function SpaceLayout({
                   className="rounded-full border border-primary px-1.5 text-xs font-medium tabular-nums"
                 >
                   {openCount}
+                </span>
+              ) : null}
+            </Link>
+            {/* The number is pages, not revisions: it is how many things there
+                are to read, which is what somebody deciding whether to look
+                now or later wants to know. */}
+            <Link
+              href={spaceChangesHref(space.key)}
+              className="flex items-center justify-between gap-2 rounded-(--radius-base) px-2 py-1 font-medium hover:bg-secondary"
+            >
+              <span>{trev('title')}</span>
+              {pendingReviews > 0 ? (
+                <span
+                  aria-label={trev('pendingBadgeLabel', { count: pendingReviews })}
+                  className="rounded-full border border-warning px-1.5 text-xs font-medium tabular-nums"
+                >
+                  {pendingReviews}
                 </span>
               ) : null}
             </Link>

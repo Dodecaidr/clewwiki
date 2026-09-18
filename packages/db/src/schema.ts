@@ -85,6 +85,15 @@ export const importDecision = pgEnum('import_decision', ['create', 'skip', 'over
 export const discussionStatus = pgEnum('discussion_status', ['open', 'resolved']);
 
 /**
+ * What a person decided about the changes an agent made to a page.
+ *
+ * Two values and no `rejected`: a review happens after the write, so there is
+ * nothing to reject — the content is already the page. It is either left as it
+ * is, or the page is put back to what it was.
+ */
+export const reviewDecision = pgEnum('review_decision', ['accepted', 'reverted']);
+
+/**
  * PostgreSQL `tsvector`. Drizzle has no built-in mapping for it, and the
  * column is never read back into TypeScript — it exists for the index and for
  * the ranking expression — so the driver type is a plain string.
@@ -459,6 +468,8 @@ export const pageRevisions = pgTable(
   (table) => [
     uniqueIndex('page_revisions_page_version_key').on(table.pageId, table.version),
     index('page_revisions_page_created_idx').on(table.pageId, table.createdAt),
+    // The change feed of a space reads revisions newest first across pages.
+    index('page_revisions_created_idx').on(table.createdAt, table.id),
   ],
 );
 
@@ -900,6 +911,70 @@ export const discussionMessages = pgTable(
   ],
 );
 
+/**
+ * Page reviews: one row per act of a person looking at what agents changed on a
+ * page and deciding about it.
+ *
+ * Agents write without asking — that is what makes them useful — so the review
+ * comes after the write, not before it. A row covers a *range* of versions
+ * rather than one revision, because that is how the work is actually read: an
+ * agent that touched a page four times in an afternoon produced one change as
+ * far as the reader is concerned, and what they compare is the page as they
+ * last knew it (`from_version`, exclusive) with the page as it stands
+ * (`to_version`, inclusive).
+ *
+ * What still needs a look is derived, never stored: the newest version that a
+ * person wrote or accepted is the baseline, and agent revisions after it are
+ * pending. A person editing the page therefore settles everything before their
+ * edit without a row here, and a `reverted` row is followed by the revision the
+ * revert wrote (`result_version`), which is a person's and so a baseline too.
+ *
+ * `from_version` is 0 when the page has no baseline at all — an agent created
+ * it and nobody has looked since. Such a page can be accepted and cannot be
+ * reverted: there is nothing to put it back to, and removing it is a delete.
+ */
+export const pageReviews = pgTable(
+  'page_reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    pageId: uuid('page_id')
+      .notNull()
+      .references((): AnyPgColumn => pages.id, { onDelete: 'cascade' }),
+    decision: reviewDecision('decision').notNull(),
+    /** The baseline the reviewer compared against; exclusive, 0 for none. */
+    fromVersion: integer('from_version').notNull(),
+    /** The newest version the reviewer saw; inclusive. */
+    toVersion: integer('to_version').notNull(),
+    /** The version the revert wrote. Null for `accepted`. */
+    resultVersion: integer('result_version'),
+    /** Always a person: an agent token cannot review. */
+    reviewerId: text('reviewer_id').notNull(),
+    /** The reviewer's name as it stood, for the same reason a claim snapshots its holder. */
+    reviewerLabel: text('reviewer_label').notNull(),
+    /** Why, in the reviewer's words. What an agent reads to learn what was wrong. */
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('page_reviews_page_idx').on(table.pageId, table.toVersion),
+    index('page_reviews_space_created_idx').on(table.spaceId, table.createdAt),
+    check(
+      'page_reviews_version_range',
+      sql`${table.fromVersion} >= 0 and ${table.toVersion} > ${table.fromVersion}`,
+    ),
+    check(
+      'page_reviews_note_length',
+      sql`${table.note} is null or char_length(${table.note}) between 1 and 2000`,
+    ),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type Space = typeof spaces.$inferSelect;
 export type NewSpace = typeof spaces.$inferInsert;
@@ -934,3 +1009,6 @@ export type NewDiscussionRow = typeof discussions.$inferInsert;
 export type DiscussionMessageRow = typeof discussionMessages.$inferSelect;
 export type NewDiscussionMessageRow = typeof discussionMessages.$inferInsert;
 export type DiscussionStatusValue = (typeof discussionStatus.enumValues)[number];
+export type PageReviewRow = typeof pageReviews.$inferSelect;
+export type NewPageReviewRow = typeof pageReviews.$inferInsert;
+export type ReviewDecisionValue = (typeof reviewDecision.enumValues)[number];

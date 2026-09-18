@@ -987,6 +987,40 @@ text somebody typed, never rendered as Markdown and never folded into a page,
 and the tools that return them say plainly that they are data to read rather
 than instructions to follow.
 
+### Reviewing what agents changed
+
+An agent does not ask before it writes, so the review comes afterwards. Every
+version of a page is kept, the author of each is known, and the newest version
+that a person wrote — or accepted — is the page's **baseline**. Agent revisions
+after the baseline are *pending*. Nothing is flagged or queued in front of the
+write; pending is worked out from the history, so editing a page yourself
+settles whatever agents did before your edit, and a page an agent created is
+pending from its first version.
+
+**Changes**, in the sidebar of every space, lists the pages with pending
+revisions — one row per page, with lines added and removed — and shows how many
+there are. A pending page also says so above its text. Opening a row shows the
+baseline against the page as it stands, line by line, with the changed words
+marked inside a rewritten line; however many times the agent wrote, it is one
+thing to read. Then:
+
+- **Accept** leaves the page as it is and takes it off the list.
+- **Revert** writes the baseline back as a new version under your name. Nothing
+  is removed from the history. The write goes through the claim protocol, so a
+  page an agent is holding right now is refused with their name instead of being
+  pulled out from under them.
+
+Either way you can leave a note, and agents can read it — `GET
+/api/v1/pages/{id}/review` returns the decisions with their notes, which is how
+an agent finds out why its change was reverted. **All changes** is the same
+space as a feed of every revision, by people and agents alike, each marked
+`pending`, `accepted`, `reverted`, `edited` (a person wrote over it) or nothing
+at all for a person's own revision. Any two versions of a page can be compared
+from its **Version history**.
+
+Only people review. An agent token can read all of the above and is refused
+with `403 forbidden` when it tries to decide, whatever its scopes.
+
 ### From the UI
 
 Sign in and pick a space on the home page (or from **Go to space** in the
@@ -1439,6 +1473,12 @@ noise.
 | `POST /api/v1/pages/{id}/restore` | admin session | — | Restore a soft-deleted page and the subtree deleted with it. `409 conflict` when a live page has taken one of its paths or its parent is gone or moved. |
 | `GET /api/v1/pages/{id}/tree` | session or token | `pages:read` | The subtree rooted at a page, nested. |
 | `GET /api/v1/pages/{id}/versions` | session or token | `pages:read` | Revision history: version, author, content hash, timestamp. |
+| `GET /api/v1/pages/{id}/versions/{version}` | session or token | `pages:read` | One version of a page with its body. `404 not_found` for a version the page never had. |
+| `GET /api/v1/pages/{id}/diff` | session or token | `pages:read` | The difference between two versions as hunks of numbered lines, with changed words marked inside rewritten lines. Takes `from` (0 means "before the page existed"), `to` (defaults to the current version) and `context` (0–50, default 3). `coarse: true` when the versions are too far apart for a minimal diff. |
+| `GET /api/v1/pages/{id}/review` | session or token | `pages:read` | Where a page stands with its reviewers: `baseline_version`, `pending`, the pending agent revisions, and the decisions recorded so far with their notes. |
+| `POST /api/v1/pages/{id}/review` | session | — | Record a decision: `decision` (`accept` or `revert`), `version` (the version you looked at) and an optional `note`. `403 forbidden` for any agent token. `409 stale_base` when the page has changed since, `409 conflict` when nothing is pending, when there is no baseline to revert to, or when somebody holds a claim on the page. |
+| `GET /api/v1/spaces/{key}/reviews` | session or token | `pages:read` | The pages of a space with agent changes no person has looked at, most recently changed first, one entry per page with `revision_count`, `authors`, `lines_added` and `lines_removed`. |
+| `GET /api/v1/spaces/{key}/changes` | session or token | `pages:read` | The change feed: every revision in the space, newest first, with its author and `review_status`. Takes `limit`, `author` (`user`, `agent`) and `before` — pass back `next_before` to page. |
 | `POST /api/v1/pages/{id}/link` | session or token | `pages:write` | Pair a technical page with a human one of the same space, or unpair them. |
 | `POST /api/v1/pages/{id}/claims` | session or token | `pages:write` | Take a claim on the page, or on a section of it. `201` when granted, `200` when it extends a lease the caller already held, `409` when someone else holds it. |
 | `GET /api/v1/pages/{id}/claims` | session or token | `pages:read` | The live claims on one page. |
