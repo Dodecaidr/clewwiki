@@ -510,3 +510,29 @@
 .callout-dot-danger {
   background-color: var(--color-destructive);
 }
+
+/*
+ * Paragraph comments. `data-comments` and `data-block` are written by the
+ * renderer after sanitising, never by page content. Text gets a tint; blocks
+ * with a surface of their own — tables, code, callouts, charts — get an outline
+ * instead, so the tint does not fight their background. Colour is not the only
+ * signal: the gutter button beside the paragraph carries the number.
+ */
+.markdown-body [data-comments] {
+  background-color: color-mix(in oklab, var(--color-warning) 14%, transparent);
+  border-radius: 2px;
+}
+
+.markdown-body table[data-comments],
+.markdown-body pre[data-comments],
+.markdown-body div[data-comments] {
+  background-color: revert-layer;
+  outline: 2px solid color-mix(in oklab, var(--color-warning) 60%, transparent);
+  outline-offset: 3px;
+}
+
+.markdown-body .comment-target {
+  outline: 2px solid var(--color-warning);
+  outline-offset: 4px;
+  border-radius: 2px;
+}

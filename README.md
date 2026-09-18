@@ -330,12 +330,13 @@ is unchanged; only where the image comes from differs.
 
 ### Connecting an AI coding agent (MCP)
 
-Agents talk to clewwiki through the Model Context Protocol with twenty-two
+Agents talk to clewwiki through the Model Context Protocol with twenty-eight
 tools — `wiki.list_spaces`, `wiki.format_guide`, `wiki.get_rules`,
 `wiki.list_skills`, `wiki.get_skill`, `wiki.search`,
 `wiki.get_page`, `wiki.create_page`, `wiki.claim`, `wiki.write_page`,
 `wiki.release_claim`, `wiki.list_discussions`, `wiki.open_discussion`,
-`wiki.resolve_discussion` and the rest. An agent calls
+`wiki.resolve_discussion`, `wiki.list_changes`, `wiki.list_comments`,
+`wiki.post_comment` and the rest. An agent calls
 `wiki.list_spaces` first and passes the key of its project's space as `space`
 to `wiki.get_rules`, `wiki.list_skills`, `wiki.search`, `wiki.list_pages`,
 `wiki.get_presence`, and to `wiki.get_page` when it reads by path. Before writing it calls
@@ -1021,6 +1022,25 @@ from its **Version history**.
 Only people review. An agent token can read all of the above and is refused
 with `403 forbidden` when it tries to decide, whatever its scopes.
 
+**Comments on paragraphs** are how a reviewer says *where* the problem is. Point
+at a paragraph of a page and press the **+** beside it; the comment, and any
+replies, appear under the text, and the paragraph is tinted with the number of
+open comments next to it. A comment is attached to the paragraph's text rather
+than to its position: it follows the paragraph through edits elsewhere on the
+page, and the moment the paragraph itself is rewritten the comment is marked as
+being about text that has changed — it is never moved to whatever took the
+paragraph's place. That is usually what you want to see after asking an agent
+to fix something: the comment, the agent's reply saying what it changed, and the
+old wording struck through.
+
+Agents read comments with `wiki.list_comments` — for a whole space before
+starting work, or for one page — answer them with `wiki.post_comment`, and open
+their own by quoting the passage they mean. A person may resolve any thread; an
+agent may resolve only a thread an agent opened, so "resolved" never means that
+the agent under review says it is fine. Comments stay with the page, resolved
+ones included; they draw on the same per-actor rate limit as discussion
+messages, and bodies are shown as the text somebody typed, never as Markdown.
+
 ### From the UI
 
 Sign in and pick a space on the home page (or from **Go to space** in the
@@ -1479,6 +1499,12 @@ noise.
 | `POST /api/v1/pages/{id}/review` | session | — | Record a decision: `decision` (`accept` or `revert`), `version` (the version you looked at) and an optional `note`. `403 forbidden` for any agent token. `409 stale_base` when the page has changed since, `409 conflict` when nothing is pending, when there is no baseline to revert to, or when somebody holds a claim on the page. |
 | `GET /api/v1/spaces/{key}/reviews` | session or token | `pages:read` | The pages of a space with agent changes no person has looked at, most recently changed first, one entry per page with `revision_count`, `authors`, `lines_added` and `lines_removed`. |
 | `GET /api/v1/spaces/{key}/changes` | session or token | `pages:read` | The change feed: every revision in the space, newest first, with its author and `review_status`. Takes `limit`, `author` (`user`, `agent`) and `before` — pass back `next_before` to page. |
+| `GET /api/v1/pages/{id}/comments` | session or token | `pages:read` | The comment threads of a page with their replies. Takes `status` (`open`, `resolved`, `all`). Each thread's `anchor.state` says where it points now: `current` with `line_start`/`line_end`, `outdated`, or `page`. |
+| `POST /api/v1/pages/{id}/comments` | session or token | `pages:write` | Open a thread: `body`, and either `block_index` (with `version`, counting the blocks of that version) or `quote` (a passage of the body identifying one paragraph), or neither for the page as a whole. `400 validation` for a quote found nowhere or in several paragraphs, or past 200 open threads; `429 rate_limited` past the per-actor message budget. |
+| `POST /api/v1/comments/{id}/replies` | session or token | `pages:write` | Reply in a thread. `409 conflict` on a resolved thread, `400 validation` past 100 replies or 8 KB. |
+| `PATCH /api/v1/comments/{id}` | session or token | `pages:write` | Resolve or reopen: `{ "resolved": true }`. `403 forbidden` for an agent token on a thread a person opened. |
+| `DELETE /api/v1/comments/{id}` | session or token | `pages:write` | Remove a comment, and its replies if it opens a thread. Its author or a workspace administrator. |
+| `GET /api/v1/spaces/{key}/comments` | session or token | `pages:read` | The comment threads of a space, newest first, each with its page. Takes `status` (default `open`) and `limit`. |
 | `POST /api/v1/pages/{id}/link` | session or token | `pages:write` | Pair a technical page with a human one of the same space, or unpair them. |
 | `POST /api/v1/pages/{id}/claims` | session or token | `pages:write` | Take a claim on the page, or on a section of it. `201` when granted, `200` when it extends a lease the caller already held, `409` when someone else holds it. |
 | `GET /api/v1/pages/{id}/claims` | session or token | `pages:read` | The live claims on one page. |

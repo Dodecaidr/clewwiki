@@ -86,7 +86,9 @@ describe.skipIf(!probe.reachable)('review after agents', () => {
     const headers: Record<string, string> =
       typeof caller === 'string'
         ? { Authorization: `Bearer ${caller}` }
-        : { cookie: caller.cookie, origin: BASE };
+        : // A session mutation is only accepted as JSON from its own origin,
+          // body or no body.
+          { cookie: caller.cookie, origin: BASE, 'Content-Type': 'application/json' };
     if (init.body) headers['Content-Type'] = 'application/json';
     return new Request(`${BASE}${target}`, { ...init, headers });
   }

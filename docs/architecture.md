@@ -323,6 +323,7 @@ lives in the implementation, not here):
 - `pages`
 - `page_revisions`
 - `page_reviews`
+- `page_comments`
 - `claims`
 - `claim_notes`
 - `anchors`
@@ -553,6 +554,48 @@ what changed in the source.
 
 **Only a person decides.** The service functions take a reviewer, not an actor,
 and the handler refuses a bearer token before calling them.
+
+### Comments on paragraphs, and why an anchor is a fingerprint
+
+A review note says why a change was reverted; a comment says where the problem
+is. The design question is what "where" means on a page that keeps changing.
+
+**Not a position.** A line number or a block index is wrong the moment anything
+above it is edited, and the failure is silent: the comment now sits on a
+different paragraph and still looks authoritative. **Not a fuzzy match either.**
+Re-attaching a comment to the most similar paragraph is right most of the time
+and misleading the rest, and "MD5 is not acceptable" pinned to the paragraph
+that now says SHA-256 is worse than a comment that admits its text has changed.
+
+So the anchor is a **fingerprint of the block's text**, whitespace normalised,
+taken from the version the commenter was reading (`block_fingerprint`, with
+`block_index` kept only to break ties between identical blocks, `quote` to show
+what it was about, and `version`). `@clewwiki/content/paragraphs` splits a body
+with the same parser the page view renders with — top-level nodes, lists taken
+apart into items — and the anchor is resolved against the current body on every
+read: found, the thread is `current` and reports its lines; not found, it is
+`outdated`. Nothing is stored about the outcome, so there is nothing to
+recompute when a page is written. The fingerprint is a 53-bit non-cryptographic
+hash: it tells the blocks of one page apart and is not a security boundary.
+
+**Two ways to say where.** A person clicks a paragraph of the rendered page, so
+the interface sends `block_index` and the `version` it counted in. An agent
+reads bodies, so it sends a `quote`; one that occurs in no paragraph or in
+several is refused rather than guessed at.
+
+**The renderer marks the blocks.** `renderMarkdown` takes the blocks' start
+lines and stamps `data-block` (and `data-comments`) on the matching elements in
+a rehype step that runs *after* the sanitiser — source positions survive the
+pipeline, and running last means no page content can produce or forge a mark.
+The body stays server-rendered HTML that the client does not own: the gutter of
+comment buttons is measured and drawn beside it, and the form is a sheet at the
+bottom of the window, so nothing is inserted between paragraphs and the text
+being commented on cannot move.
+
+**Comments stay; discussions do not.** A discussion is a conversation on the way
+to a decision page and is deleted. A resolved comment is itself the record —
+what was asked, what was answered — so it stays with the page and goes when the
+page goes (`on delete cascade`).
 
 ### Staged imports
 

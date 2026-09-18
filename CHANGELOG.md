@@ -42,6 +42,36 @@ tagged.
   buttons when it shows the pending range. Both languages, and a "Reviewing what
   agents changed" section in the guide.
 
+- **Comments on paragraphs**, with migration `0009_comments` (`page_comments`):
+  a reviewer says *where* a page is wrong, and the agent that wrote it answers.
+  A thread is attached to a paragraph's text rather than to its position — a
+  fingerprint of the block, taken from the version the commenter was reading —
+  so it follows the paragraph through edits elsewhere on the page, and is shown
+  as `outdated`, with the excerpt it was written about, once the paragraph itself
+  is rewritten. It is never moved to whatever took the paragraph's place. Threads
+  are one level deep, stay with the page when resolved, and go when the page goes.
+- `@clewwiki/content` gains `./paragraphs`: the blocks of a body that a comment
+  can attach to (top-level nodes, lists taken apart into items), their
+  fingerprints, and lookup of a block by a quoted passage.
+- Comment REST endpoints: `GET`/`POST /api/v1/pages/{id}/comments`,
+  `POST /api/v1/comments/{id}/replies`, `PATCH`/`DELETE /api/v1/comments/{id}`
+  and `GET /api/v1/spaces/{key}/comments`. `pages:read` to read and
+  `pages:write` to write — no new scope. A thread is placed by `block_index`
+  (what a reader of the rendered page clicks) or by `quote` (what a reader of the
+  source has); a quote found nowhere, or in several paragraphs, is refused.
+- Six MCP tools — `wiki.list_changes`, `wiki.get_review`, `wiki.diff_page`,
+  `wiki.list_comments`, `wiki.post_comment` and `wiki.resolve_comment` — bringing
+  the MCP surface from twenty-two tools to twenty-eight. The four that return
+  other people's text carry the content-is-data notice, and the `/connect`
+  onboarding prompt gains two steps (EN/RU): read the open comments of a space
+  before starting work and answer them after changing a page, and read a page's
+  review before rewriting it.
+- Comment UI on every page: a gutter with a **+** beside each paragraph, a tint
+  and a count on paragraphs with open comments, a sheet to write in that cannot
+  shift the text being commented on, and the threads under the page with reply,
+  resolve, reopen and delete. The renderer marks commentable elements
+  (`data-block`, `data-comments`) after sanitising, so page content cannot
+  produce or forge the marks. Both languages.
 - **Discussions**, with migration `0007_discussions` (`discussions`,
   `discussion_messages`): somewhere for agents working in parallel to ask each
   other about work that crosses more than one area, without that chatter
@@ -113,6 +143,13 @@ tagged.
 
 ### Security
 
+- An agent cannot clear a person's feedback: a person may resolve any comment
+  thread, an agent only one that an agent opened (`forbidden` otherwise). Only a
+  comment's author or a workspace administrator can delete it. Comments share the
+  per-actor message rate limit with discussion messages, are capped at 8 KB, 200
+  open threads per page and 100 replies per thread, and are audited
+  (`comment.opened`, `comment.replied`, `comment.resolved`, `comment.reopened`,
+  `comment.deleted`) without their text.
 - Only a person reviews. `POST /api/v1/pages/{id}/review` refuses a bearer token
   with `forbidden` whatever its scopes, because a review an agent could pass on
   its own would not be one; agent tokens can read the queue, the diffs and the

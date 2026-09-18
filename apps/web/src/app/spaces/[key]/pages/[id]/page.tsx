@@ -18,6 +18,10 @@ import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
 import { getAncestors, getPageById, listRevisions } from '@/lib/pages/service';
 import { getPageReviewState } from '@/lib/reviews/service';
+import { listPageComments } from '@/lib/comments/service';
+import { splitParagraphs } from '@clewwiki/content/paragraphs';
+import { CommentableBody } from '@/components/commentable-body';
+import { CommentsPanel } from '@/components/comments-panel';
 import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceById } from '@/lib/spaces/service';
@@ -131,7 +135,7 @@ export default async function PageView({ params }: Props) {
   const format = await getFormatter();
 
   const [
-    html,
+    comments,
     linked,
     revisions,
     activeClaims,
@@ -142,7 +146,7 @@ export default async function PageView({ params }: Props) {
     openDiscussions,
     review,
   ] = await Promise.all([
-      renderLabels().then((labels) => renderMarkdown(page.body, labels)),
+      listPageComments(session.workspace.id, page.id, 'all'),
       page.linkedPageId
         ? getPageById(session.workspace.id, page.linkedPageId)
         : Promise.resolve(null),
@@ -158,6 +162,23 @@ export default async function PageView({ params }: Props) {
       listOpenDiscussionsForPage(session.workspace.id, page.id),
       getPageReviewState(session.workspace.id, page.id),
     ]);
+
+  // The body is rendered once the comments are known, so that a paragraph with
+  // unresolved comments is marked in the HTML itself and looks the same before
+  // and after the page hydrates.
+  const openThreads = comments.threads.filter((thread) => thread.root.resolvedAt === null);
+  const resolvedThreads = comments.threads.filter((thread) => thread.root.resolvedAt !== null);
+  const threadsByBlock: Record<string, string[]> = {};
+  for (const thread of openThreads) {
+    if (thread.anchor.state !== 'current') continue;
+    (threadsByBlock[String(thread.anchor.blockIndex)] ??= []).push(thread.root.id);
+  }
+  const html = await renderMarkdown(page.body, await renderLabels(), {
+    startLines: splitParagraphs(page.body).map((block) => block.startLine),
+    openThreads: new Map(
+      Object.entries(threadsByBlock).map(([index, ids]) => [Number(index), ids.length]),
+    ),
+  });
 
   const ta = await getTranslations('anchors');
   const tdis = await getTranslations('discussions');
@@ -407,9 +428,25 @@ export default async function PageView({ params }: Props) {
 
       {page.body.trim() === '' ? (
         <p className="text-sm text-muted-foreground">{t('emptyBody')}</p>
-      ) : (
+      ) : space.archivedAt ? (
         <PageBody html={html} />
+      ) : (
+        <CommentableBody
+          html={html}
+          pageId={page.id}
+          version={page.version}
+          threadsByBlock={threadsByBlock}
+        />
       )}
+
+      <CommentsPanel
+        pageId={page.id}
+        version={page.version}
+        open={openThreads}
+        resolved={resolvedThreads}
+        viewer={{ userId: session.userId, isAdmin: session.role === 'admin' }}
+        canComment={!space.archivedAt}
+      />
 
       <AnchorPanel
         pageId={page.id}

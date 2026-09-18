@@ -208,6 +208,52 @@ function rehypeCallouts(labels: RenderLabels) {
   };
 }
 
+/** What `renderMarkdown` is told about a body's blocks when asked to mark them. */
+export interface BlockMarks {
+  /** First line of each commentable block, in order — `splitParagraphs` of the same body. */
+  startLines: readonly number[];
+  /** Unresolved comment threads per block index. */
+  openThreads?: ReadonlyMap<number, number>;
+}
+
+/**
+ * Marks the elements a comment can be attached to with `data-block`, and those
+ * that carry unresolved comments with `data-comments`.
+ *
+ * It runs after the sanitiser, so these two attributes exist only where this
+ * function put them: nothing written into a page body can produce or forge one.
+ * An element is matched to a block by the source line it starts on — positions
+ * survive the whole pipeline — and an element the pipeline built from nothing,
+ * such as a rendered chart, simply has no mark and cannot be commented on from
+ * the rendered page.
+ */
+function rehypeBlockMarks() {
+  return (tree: Root, file: { data: Record<string, unknown> }): void => {
+    const marks = file.data.blockMarks as BlockMarks | undefined;
+    if (!marks) return;
+    const indexByLine = new Map(marks.startLines.map((line, index) => [line, index]));
+
+    const mark = (node: ElementContent | Root['children'][number]): void => {
+      if (node.type !== 'element') return;
+      const line = node.position?.start.line;
+      const index = line === undefined ? undefined : indexByLine.get(line);
+      if (index === undefined) return;
+      node.properties = { ...node.properties, dataBlock: String(index) };
+      const open = marks.openThreads?.get(index) ?? 0;
+      if (open > 0) node.properties.dataComments = String(open);
+    };
+
+    for (const node of tree.children) {
+      if (node.type === 'element' && (node.tagName === 'ul' || node.tagName === 'ol')) {
+        // A list is commented on item by item, as `splitParagraphs` splits it.
+        for (const item of node.children) mark(item);
+      } else {
+        mark(node);
+      }
+    }
+  };
+}
+
 const svgProperties = [...new Set(CHART_SVG_ATTRIBUTES.map((attribute) => find(svg, attribute).property))];
 
 /**
@@ -249,6 +295,7 @@ function createProcessor(labels: RenderLabels) {
       .use(rehypeSanitize, sanitizeSchema)
       .use(rehypeMermaid)
       .use(rehypeCallouts, labels)
+      .use(rehypeBlockMarks)
       .use(rehypeStringify)
       .freeze()
   );
@@ -269,9 +316,19 @@ function processorFor(labels: RenderLabels) {
   return processor;
 }
 
-/** Renders a page body to sanitised HTML. */
-export async function renderMarkdown(body: string, labels: RenderLabels = {}): Promise<string> {
-  const file = await processorFor(labels).process(body);
+/**
+ * Renders a page body to sanitised HTML. With `blockMarks`, the elements a
+ * comment can be attached to are marked for the page view; every other caller —
+ * the export, a preview, a skill — gets the same HTML as before.
+ */
+export async function renderMarkdown(
+  body: string,
+  labels: RenderLabels = {},
+  blockMarks?: BlockMarks,
+): Promise<string> {
+  const file = await processorFor(labels).process(
+    blockMarks ? { value: body, data: { blockMarks } } : body,
+  );
   return String(file);
 }
 

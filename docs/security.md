@@ -131,6 +131,19 @@ partly in place, the gap is named rather than implied away.
   a person's words to agents and is returned to them as data. Both decisions are
   audited (`page.review_accepted`, `page.review_reverted`) with the version
   range, never the content.
+- **Comments: who may do what.** Reading needs `pages:read` and writing
+  `pages:write`, space-restricted, with no new scope. A person may resolve any
+  thread; an agent token only a thread an agent opened, and is otherwise refused
+  with `forbidden` — a reviewer's request is not met because the agent under
+  review says so. Deleting a comment is for its author or a workspace
+  administrator. Bodies are capped at 8 KB (a column check as well), a page at
+  200 open threads, a thread at 100 replies, and posting draws on the same
+  per-actor bucket as discussion messages, so a loop cannot fill a page's margin.
+  Comment bodies and review notes are rendered as escaped text, never as
+  Markdown, and the tools that return them say they are data. The `data-block`
+  and `data-comments` attributes the interface relies on are written by the
+  renderer after sanitising; a page body cannot produce them. Audit rows record
+  who commented on which page and never the words.
 - **Write audit log.** Every write attempt — success, claim conflict, content-
   hash conflict, a refused subtree delete — is recorded. A successful write
   commits its audit row in the same transaction as the write itself. A refused

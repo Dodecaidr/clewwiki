@@ -104,7 +104,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'reviews',
-    blocks: [p('p1'), p('p2'), p('p3'), p('p4'), p('p5'), p('p6')],
+    blocks: [p('p1'), p('p2'), p('p3'), p('p4'), p('p5'), p('p6'), p('p7')],
   },
   {
     id: 'import',

@@ -975,6 +975,80 @@ export const pageReviews = pgTable(
   ],
 );
 
+/**
+ * Comments on a page, each thread attached to one paragraph of it or to the
+ * page as a whole.
+ *
+ * A review note says why a change was reverted; a comment says *where* the
+ * problem is. A thread is a root row and its replies (`parent_id`), one level
+ * deep — a comment is a remark about a paragraph, not a forum.
+ *
+ * The anchor lives on the root: `block_fingerprint` is a fingerprint of the
+ * paragraph's text, `block_index` where it was and `version` the version the
+ * commenter was reading. A comment follows its paragraph through edits
+ * elsewhere on the page and is reported as outdated once the paragraph itself
+ * is rewritten — never moved to whatever took its place. `quote` keeps an
+ * excerpt so an outdated comment can still show what it was about. All four are
+ * null for a comment on the page as a whole.
+ *
+ * Unlike discussions, comments stay: a resolved thread is the record of what a
+ * reviewer asked for and what was done about it. They go when the page goes.
+ * Bodies are text other people and other agents wrote, and every path that
+ * hands them to an agent says so.
+ */
+export const pageComments = pgTable(
+  'page_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    pageId: uuid('page_id')
+      .notNull()
+      .references((): AnyPgColumn => pages.id, { onDelete: 'cascade' }),
+    /** Null for the comment that opens a thread; the root's id for a reply. */
+    parentId: uuid('parent_id').references((): AnyPgColumn => pageComments.id, {
+      onDelete: 'cascade',
+    }),
+    /** The version the commenter was reading. Root only. */
+    version: integer('version'),
+    blockFingerprint: text('block_fingerprint'),
+    blockIndex: integer('block_index'),
+    quote: text('quote'),
+    authorType: actorType('author_type').notNull(),
+    authorId: text('author_id').notNull(),
+    authorLabel: text('author_label').notNull(),
+    body: text('body').notNull(),
+    /** Root only. A resolved thread takes no more replies until it is reopened. */
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedByType: actorType('resolved_by_type'),
+    resolvedById: text('resolved_by_id'),
+    resolvedByLabel: text('resolved_by_label'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('page_comments_page_idx').on(table.pageId, table.createdAt),
+    index('page_comments_parent_idx').on(table.parentId, table.createdAt),
+    // The open threads of a space: what is still waiting for somebody.
+    index('page_comments_space_open_idx')
+      .on(table.spaceId, table.createdAt)
+      .where(sql`${table.parentId} is null and ${table.resolvedAt} is null`),
+    check('page_comments_body_size', sql`octet_length(${table.body}) between 1 and 8192`),
+    check(
+      'page_comments_anchor_shape',
+      sql`(${table.blockFingerprint} is null and ${table.blockIndex} is null and ${table.quote} is null)
+        or (${table.parentId} is null and ${table.blockFingerprint} is not null and ${table.blockIndex} is not null and ${table.blockIndex} >= 0 and ${table.quote} is not null and ${table.version} is not null)`,
+    ),
+    check(
+      'page_comments_reply_shape',
+      sql`${table.parentId} is null or (${table.resolvedAt} is null and ${table.version} is null)`,
+    ),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type Space = typeof spaces.$inferSelect;
 export type NewSpace = typeof spaces.$inferInsert;
@@ -1012,3 +1086,5 @@ export type DiscussionStatusValue = (typeof discussionStatus.enumValues)[number]
 export type PageReviewRow = typeof pageReviews.$inferSelect;
 export type NewPageReviewRow = typeof pageReviews.$inferInsert;
 export type ReviewDecisionValue = (typeof reviewDecision.enumValues)[number];
+export type PageCommentRow = typeof pageComments.$inferSelect;
+export type NewPageCommentRow = typeof pageComments.$inferInsert;

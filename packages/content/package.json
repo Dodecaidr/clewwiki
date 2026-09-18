@@ -11,6 +11,7 @@
     "./diff": "./src/diff.ts",
     "./guide": "./src/guide.ts",
     "./mermaid": "./src/mermaid.ts",
+    "./paragraphs": "./src/paragraphs.ts",
     "./paths": "./src/paths.ts",
     "./skill": "./src/skill.ts",
     "./slug": "./src/slug.ts"

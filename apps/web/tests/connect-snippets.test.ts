@@ -139,6 +139,11 @@ describe('onboarding prompt', () => {
       'STALE_BASE',
       'wiki.post_note',
       'wiki.get_presence',
+      'wiki.list_comments',
+      'wiki.post_comment',
+      'wiki.get_review',
+      'wiki.list_changes',
+      'wiki.diff_page',
     ]) {
       expect(prompt).toContain(tool);
     }

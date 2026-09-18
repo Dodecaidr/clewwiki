@@ -700,9 +700,23 @@ claims already prevent lost updates. **A review covers a range of versions, not
 one revision**: what a person compares is the page as they last knew it with the
 page as it stands, however many times an agent wrote in between.
 
-**Next**: comments anchored to a paragraph, so a reviewer can say what is wrong
-where it is wrong, and MCP tools for the queue, the diff and those comments, so
-the feedback reaches the agent without anybody pasting it.
+**Comments on paragraphs — built.** `page_comments` (migration `0009_comments`),
+anchored by a fingerprint of the paragraph's text: a comment follows its
+paragraph through edits elsewhere and is reported as outdated once the paragraph
+is rewritten, never re-attached to something similar. REST under
+`/api/v1/pages/{id}/comments`, `/api/v1/comments/{id}` and
+`/api/v1/spaces/{key}/comments`; a gutter of comment buttons on every page and
+the threads beneath it. A person may resolve any thread, an agent only an
+agent's.
+
+**MCP — built.** `wiki.list_changes`, `wiki.get_review`, `wiki.diff_page`,
+`wiki.list_comments`, `wiki.post_comment`, `wiki.resolve_comment`, bringing the
+surface to twenty-eight, and two steps in the onboarding prompt, so the feedback
+reaches the agent without anybody pasting it.
+
+**Next, if it is wanted**: telling a reviewer that an agent answered — which
+needs the same delivery channel discussions are waiting for — and comments on a
+selection inside a paragraph rather than the whole of it.
 
 ## Phase 7 — Launch
 

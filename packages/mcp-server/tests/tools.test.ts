@@ -27,7 +27,7 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the twenty-two tools docs/mcp.md names', () => {
+  it('registers exactly the twenty-eight tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
       'wiki.list_spaces',
       'wiki.format_guide',
@@ -49,10 +49,16 @@ describe('tool surface', () => {
       'wiki.open_discussion',
       'wiki.post_discussion_message',
       'wiki.resolve_discussion',
+      'wiki.list_changes',
+      'wiki.get_review',
+      'wiki.diff_page',
+      'wiki.list_comments',
+      'wiki.post_comment',
+      'wiki.resolve_comment',
       'wiki.check_anchors',
       'wiki.link_docs',
     ]);
-    expect(TOOLS).toHaveLength(22);
+    expect(TOOLS).toHaveLength(28);
   });
 
   it('names every tool whose result carries text written by others', () => {
@@ -71,6 +77,10 @@ describe('tool surface', () => {
         'wiki.post_note',
         'wiki.list_discussions',
         'wiki.get_discussion',
+        'wiki.list_changes',
+        'wiki.get_review',
+        'wiki.diff_page',
+        'wiki.list_comments',
         'wiki.check_anchors',
       ].sort(),
     );
@@ -107,6 +117,10 @@ describe('tool surface', () => {
       'wiki.get_presence',
       'wiki.list_discussions',
       'wiki.get_discussion',
+      'wiki.list_changes',
+      'wiki.get_review',
+      'wiki.diff_page',
+      'wiki.list_comments',
     ]);
   });
 
@@ -598,6 +612,125 @@ describe('discussion tools', () => {
     // The server assembling a decision out of a thread is the thing this
     // feature must never do; the tool says so where an agent will read it.
     expect(tool('wiki.resolve_discussion').description).toContain('never summarises');
+  });
+});
+
+describe('review and comment tools', () => {
+  const never: FetchLike = () => {
+    throw new Error('no REST call should have been made');
+  };
+  const PAGE_ID = '44444444-4444-4444-8444-444444444444';
+  const THREAD_ID = '55555555-5555-4555-8555-555555555555';
+  const url = (mock: ReturnType<typeof vi.fn<FetchLike>>) => mock.mock.calls[0]?.[0];
+  const sent = (mock: ReturnType<typeof vi.fn<FetchLike>>) => {
+    const init = mock.mock.calls[0]?.[1] as RequestInit;
+    return { method: init.method, body: JSON.parse(String(init.body)) as unknown };
+  };
+
+  it('lists pages awaiting review by default, and the full feed when asked', async () => {
+    const pending = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { pending: [] }));
+    await tool('wiki.list_changes').run(clientWith(pending), { space: 'docs', limit: 10 });
+    expect(url(pending)).toBe('https://wiki.example.com/api/v1/spaces/docs/reviews?limit=10');
+
+    const feed = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { changes: [] }));
+    await tool('wiki.list_changes').run(clientWith(feed), {
+      space: 'docs',
+      view: 'all',
+      author: 'agent',
+      before: '2026-01-01T00:00:00.000Z_44444444-4444-4444-8444-444444444444',
+    });
+    expect(url(feed)).toBe(
+      'https://wiki.example.com/api/v1/spaces/docs/changes?author=agent&before=2026-01-01T00%3A00%3A00.000Z_44444444-4444-4444-8444-444444444444',
+    );
+  });
+
+  it('reads a page\'s review state and compares versions', async () => {
+    const review = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { reviews: [] }));
+    await tool('wiki.get_review').run(clientWith(review), { page_id: PAGE_ID });
+    expect(url(review)).toBe(`https://wiki.example.com/api/v1/pages/${PAGE_ID}/review`);
+
+    const diff = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { hunks: [] }));
+    await tool('wiki.diff_page').run(clientWith(diff), { page_id: PAGE_ID, from: 0, to: 3, context: 0 });
+    expect(url(diff)).toBe(`https://wiki.example.com/api/v1/pages/${PAGE_ID}/diff?from=0&to=3&context=0`);
+
+    const sinceN = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { hunks: [] }));
+    await tool('wiki.diff_page').run(clientWith(sinceN), { page_id: PAGE_ID, from: 2 });
+    expect(url(sinceN)).toBe(`https://wiki.example.com/api/v1/pages/${PAGE_ID}/diff?from=2`);
+  });
+
+  it('lists the comments of a space or of a page, and of exactly one of them', async () => {
+    const bySpace = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { threads: [] }));
+    await tool('wiki.list_comments').run(clientWith(bySpace), { space: 'docs' });
+    expect(url(bySpace)).toBe('https://wiki.example.com/api/v1/spaces/docs/comments');
+
+    const byPage = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { threads: [] }));
+    await tool('wiki.list_comments').run(clientWith(byPage), { page_id: PAGE_ID, status: 'all' });
+    expect(url(byPage)).toBe(`https://wiki.example.com/api/v1/pages/${PAGE_ID}/comments?status=all`);
+
+    for (const args of [{}, { space: 'docs', page_id: PAGE_ID }]) {
+      await expect(tool('wiki.list_comments').run(clientWith(never), args)).rejects.toMatchObject({
+        code: 'VALIDATION',
+      });
+    }
+  });
+
+  it('replies in a thread, or opens one on a quoted paragraph', async () => {
+    const reply = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(201, {}));
+    await tool('wiki.post_comment').run(clientWith(reply), { thread_id: THREAD_ID, body: 'Fixed in v4.' });
+    expect(url(reply)).toBe(`https://wiki.example.com/api/v1/comments/${THREAD_ID}/replies`);
+    expect(sent(reply)).toEqual({ method: 'POST', body: { body: 'Fixed in v4.' } });
+
+    const opened = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(201, {}));
+    await tool('wiki.post_comment').run(clientWith(opened), {
+      page_id: PAGE_ID,
+      quote: 'expire after thirty days',
+      body: 'Is this still the policy?',
+    });
+    expect(url(opened)).toBe(`https://wiki.example.com/api/v1/pages/${PAGE_ID}/comments`);
+    expect(sent(opened).body).toEqual({
+      body: 'Is this still the policy?',
+      quote: 'expire after thirty days',
+    });
+
+    const whole = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(201, {}));
+    await tool('wiki.post_comment').run(clientWith(whole), { page_id: PAGE_ID, body: 'Needs a diagram.' });
+    expect(sent(whole).body).toEqual({ body: 'Needs a diagram.' });
+  });
+
+  it('refuses a comment with no target, two targets, or a quote on a reply', async () => {
+    for (const args of [
+      { body: 'x' },
+      { body: 'x', thread_id: THREAD_ID, page_id: PAGE_ID },
+      { body: 'x', thread_id: THREAD_ID, quote: 'some words' },
+      { thread_id: THREAD_ID, body: '' },
+    ]) {
+      await expect(tool('wiki.post_comment').run(clientWith(never), args)).rejects.toMatchObject({
+        code: 'VALIDATION',
+      });
+    }
+  });
+
+  it('resolves by default, reopens when asked, and passes a refusal through as FORBIDDEN', async () => {
+    const resolved = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { status: 'resolved' }));
+    await tool('wiki.resolve_comment').run(clientWith(resolved), { thread_id: THREAD_ID });
+    expect(url(resolved)).toBe(`https://wiki.example.com/api/v1/comments/${THREAD_ID}`);
+    expect(sent(resolved)).toEqual({ method: 'PATCH', body: { resolved: true } });
+
+    const reopened = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { status: 'open' }));
+    await tool('wiki.resolve_comment').run(clientWith(reopened), { thread_id: THREAD_ID, resolved: false });
+    expect(sent(reopened).body).toEqual({ resolved: false });
+
+    const refused = vi.fn<FetchLike>().mockResolvedValue(
+      jsonResponse(403, { error: { code: 'forbidden', message: 'A person opened this comment' } }),
+    );
+    await expect(
+      tool('wiki.resolve_comment').run(clientWith(refused), { thread_id: THREAD_ID }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('offers no way to accept or revert: reviews are decided by people', () => {
+    const names = TOOLS.map((definition) => definition.name);
+    expect(names.filter((name) => /accept|revert|approve/.test(name))).toEqual([]);
   });
 });
 

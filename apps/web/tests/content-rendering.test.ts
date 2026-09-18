@@ -138,3 +138,45 @@ describe('sanitiser allowlist for chart SVG', () => {
     expect(html).not.toContain('chart-block');
   });
 });
+
+describe('block marks', () => {
+  const body = [
+    '# Title',
+    '',
+    'First paragraph.',
+    '',
+    '- one',
+    '- two',
+    '',
+    '> [!NOTE]',
+    '> A callout.',
+    '',
+    '| a | b |',
+    '| - | - |',
+    '| 1 | 2 |',
+    '',
+  ].join('\n');
+
+  it('marks each commentable element with its block index, list items one by one', async () => {
+    const { splitParagraphs } = await import('@clewwiki/content/paragraphs');
+    const blocks = splitParagraphs(body);
+    const html = await renderMarkdown(body, {}, {
+      startLines: blocks.map((block) => block.startLine),
+      openThreads: new Map([[1, 2]]),
+    });
+    expect(html).toContain('<h1 data-block="0">Title</h1>');
+    expect(html).toContain('<p data-block="1" data-comments="2">First paragraph.</p>');
+    expect(html).toContain('<li data-block="2">one</li>');
+    expect(html).toContain('<li data-block="3">two</li>');
+    expect(html).toMatch(/<div class="callout callout-note" data-block="4">/);
+    expect(html).toMatch(/<table data-block="5">/);
+    expect(html.match(/data-block=/g)).toHaveLength(blocks.length);
+  });
+
+  it('leaves the output untouched when not asked, and cannot be forged from a body', async () => {
+    expect(await renderMarkdown(body)).not.toContain('data-block');
+    const forged = await renderMarkdown('<p data-block="9" data-comments="3">x</p>\n\n<div data-block="1">y</div>');
+    expect(forged).not.toContain('data-block');
+    expect(forged).not.toContain('data-comments');
+  });
+});

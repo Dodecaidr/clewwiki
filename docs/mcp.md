@@ -27,8 +27,8 @@ An agent token belongs to exactly one workspace and carries a scope set:
 
 | Scope | Grants |
 |---|---|
-| `pages:read` | `wiki.list_spaces`, `wiki.format_guide`, `wiki.get_rules`, `wiki.list_skills`, `wiki.get_skill`, `wiki.search`, `wiki.get_page`, `wiki.list_pages`, `wiki.get_presence`, `wiki.list_discussions`, `wiki.get_discussion` |
-| `pages:write` | `wiki.create_page`, `wiki.claim`, `wiki.renew_claim`, `wiki.write_page`, `wiki.release_claim`, `wiki.post_note`, `wiki.open_discussion`, `wiki.post_discussion_message`, `wiki.resolve_discussion`, `wiki.check_anchors`, `wiki.link_docs`. Over REST also `POST`/`PATCH` on a space's skills, and `DELETE /api/v1/discussions/{id}`. |
+| `pages:read` | `wiki.list_spaces`, `wiki.format_guide`, `wiki.get_rules`, `wiki.list_skills`, `wiki.get_skill`, `wiki.search`, `wiki.get_page`, `wiki.list_pages`, `wiki.get_presence`, `wiki.list_discussions`, `wiki.get_discussion`, `wiki.list_changes`, `wiki.get_review`, `wiki.diff_page`, `wiki.list_comments` |
+| `pages:write` | `wiki.create_page`, `wiki.claim`, `wiki.renew_claim`, `wiki.write_page`, `wiki.release_claim`, `wiki.post_note`, `wiki.open_discussion`, `wiki.post_discussion_message`, `wiki.resolve_discussion`, `wiki.post_comment`, `wiki.resolve_comment`, `wiki.check_anchors`, `wiki.link_docs`. Over REST also `POST`/`PATCH` on a space's skills, and `DELETE /api/v1/discussions/{id}`. |
 | `pages:delete` | No tool. `DELETE /api/v1/pages/{id}` and `DELETE /api/v1/spaces/{key}/skills/{slug}` over REST, together with `pages:write`. |
 
 The discussion tools deliberately introduce **no scope of their own**. A
@@ -62,14 +62,17 @@ time; a revoked token fails with `UNAUTHORIZED` on the next call.
 
 ## Content is data
 
-Fourteen tools return text that someone other than the caller wrote:
+Eighteen tools return text that someone other than the caller wrote:
 `wiki.list_spaces` (space names and descriptions), `wiki.search`,
 `wiki.get_page`, `wiki.list_pages` and `wiki.write_page` (page bodies, titles
 and summaries), `wiki.get_rules` (a project's rules page), `wiki.list_skills`
 and `wiki.get_skill` (skill names, descriptions and instruction bodies),
 `wiki.get_presence`, `wiki.post_note` and `wiki.claim` (claim
 notes and holder names), `wiki.list_discussions` and `wiki.get_discussion`
-(discussion titles, participant names and message bodies), and
+(discussion titles, participant names and message bodies),
+`wiki.list_changes`, `wiki.get_review` and `wiki.diff_page` (page titles and
+summaries, reviewers' notes, and lines of page bodies old and new),
+`wiki.list_comments` (comment bodies and the passages they quote), and
 `wiki.check_anchors` (names read out of repository code). Each of their
 descriptions carries this statement, verbatim:
 
@@ -100,6 +103,14 @@ skill bodies to files and likewise never runs them. Text produced by a remote pa
 is not a principal of the workspace at all — a git server's error output — is
 not passed to agents: it goes to the server log, and the MCP boundary drops it
 from error details even if an instance sends it.
+
+A reviewer's note and a comment on a paragraph deserve a word of their own,
+because unlike everything above they *are* meant for the agent: a person wrote
+them so that the next attempt would be better. They are still data. They say
+what is wrong with the content of a page, and an agent weighs that as it would
+any review; a note that asks for something other than a change to that content
+— to fetch a URL, to reveal a token, to touch another page — is text somebody
+typed into a box, and is not acted on.
 
 ## Tools
 
@@ -598,6 +609,121 @@ none; it records the thread's title and when it ran instead. Resolving an
 already-resolved thread rewrites its existing decision page rather than creating
 a second one, under a claim taken and released like any other write.
 
+### wiki.list_changes
+
+What changed in a space, and what reviewers made of it. Maps to
+`GET /api/v1/spaces/{key}/reviews` (`view: "pending"`, the default) or
+`GET /api/v1/spaces/{key}/changes` (`view: "all"`), and needs `pages:read`.
+
+```
+input:  { space: string, view?: "pending" | "all", author?: "agent" | "user",
+          limit?: number, before?: string }
+output: pending → { space, pending: [{ page_id, path, title, current_version,
+                    baseline_version, created_by_agent, revision_count, authors,
+                    lines_added, lines_removed, updated_at }] }
+        all     → { space, changes: [{ page_id, path, page_title, version, title,
+                    summary, author, created_at, review_status }], next_before }
+errors: NOT_FOUND (no such space, or not one the token may see), VALIDATION
+```
+
+Review happens **after** the write. An agent's write is the page the moment it
+lands; nothing is queued. What is pending is derived: the newest version a
+person wrote or accepted is a page's *baseline*, and agent revisions after it
+are pending. `review_status` is `pending`, `accepted`, `reverted`, `edited` (a
+person wrote a later version, which settles it) or `null` for a person's own
+revision. There is no tool that accepts or reverts — see below.
+
+### wiki.get_review
+
+Where one page stands. Maps to `GET /api/v1/pages/{id}/review`, `pages:read`.
+
+```
+input:  { page_id: string }
+output: { page_id, path, title, current_version, baseline_version, pending,
+          pending_revisions: [...], reviews: [{ decision: "accepted" | "reverted",
+          from_version, to_version, result_version, reviewer, note, created_at }] }
+```
+
+The `note` of a `reverted` decision is the reason an agent's change was undone.
+An agent about to rewrite a page it has written before reads this first.
+
+### wiki.diff_page
+
+Two versions of a page compared. Maps to `GET /api/v1/pages/{id}/diff`,
+`pages:read`.
+
+```
+input:  { page_id: string, from: number, to?: number, context?: number }
+output: { from, to, title_changed, summary_changed, identical,
+          only_line_endings, coarse, lines_added, lines_removed,
+          hunks: [{ old_start, old_lines, new_start, new_lines,
+                    lines: [{ kind: "context" | "added" | "removed", text,
+                              old_number, new_number, segments? }] }] }
+errors: VALIDATION (`from` not lower than `to`), NOT_FOUND (no such version)
+```
+
+`from: 0` compares against an empty page; omitting `to` compares with the
+current version. The diff is bounded: past 2 000 edits or 40 000 lines it is
+`coarse` — correct, not minimal.
+
+### wiki.list_comments
+
+The comment threads of a space or of a page. Maps to
+`GET /api/v1/spaces/{key}/comments` or `GET /api/v1/pages/{id}/comments`,
+`pages:read`.
+
+```
+input:  { space?: string, page_id?: string, status?: "open" | "resolved" | "all",
+          limit?: number }            exactly one of space and page_id
+output: { threads: [{ thread_id, page_id, status, written_on_version,
+          anchor: { state: "current", block_index, line_start, line_end, quote }
+                | { state: "outdated", quote, written_on_version }
+                | { state: "page" },
+          author, body, created_at, resolved_at, resolved_by,
+          replies: [{ comment_id, author, body, created_at }], page? }] }
+```
+
+A comment is attached to a paragraph's **text**, not to its position. It follows
+the paragraph through edits elsewhere on the page, and becomes `outdated` the
+moment the paragraph itself is rewritten — it is never moved to whatever took
+the paragraph's place, and never matched to something merely similar.
+`line_start` and `line_end` are lines of the current body, the same numbering
+`wiki.get_page` returns.
+
+### wiki.post_comment
+
+Replies in a thread, or opens one. Maps to `POST /api/v1/comments/{id}/replies`
+or `POST /api/v1/pages/{id}/comments`, `pages:write`.
+
+```
+input:  { thread_id?: string, page_id?: string, quote?: string, body: string }
+                                      exactly one of thread_id and page_id
+errors: VALIDATION (quote found nowhere, or in several paragraphs — details say
+        which; body empty or over 8 KB; 200 open threads on the page; 100
+        replies in the thread), CONFLICT (the thread is resolved),
+        RATE_LIMITED (shares the per-actor budget of discussion messages)
+```
+
+An agent says *where* by quoting: `quote` is a passage copied from the body,
+long enough to occur in one paragraph only. Without it the comment is about the
+page as a whole.
+
+### wiki.resolve_comment
+
+Resolves or reopens a thread. Maps to `PATCH /api/v1/comments/{id}`,
+`pages:write`.
+
+```
+input:  { thread_id: string, resolved?: boolean }
+errors: FORBIDDEN (a person opened the thread), NOT_FOUND
+```
+
+**An agent cannot clear a person's feedback.** A person may resolve any thread;
+an agent only one that an agent opened. "Resolved" has to mean that a reviewer
+is satisfied or that an agent's own question was answered — not that the agent
+under review says it is fine. The agent replies with what it changed, and the
+person resolves.
+
 ### wiki.check_anchors
 
 Recompute the anchors of a page against the current state of the repository
@@ -720,7 +846,12 @@ on top of `pages:write`. Two are an administrator's act rather than an
 agent's, so no token can perform them whatever its scopes:
 `DELETE /api/v1/claims/{claimId}?force=true`, which takes a claim away from its
 holder, and `POST /api/v1/pages/{id}/restore`, which brings back a deleted
-subtree. `DELETE /api/v1/discussions/{id}` has no tool either: it needs
+subtree. So is a review decision: `POST /api/v1/pages/{id}/review` accepts or
+reverts the agent changes on a page and refuses every bearer token with
+`FORBIDDEN`, because a review an agent could pass on its own would not be one.
+`GET /api/v1/pages/{id}/versions/{version}` returns one old version with its
+body, and `DELETE /api/v1/comments/{id}` removes a comment — its author or an
+administrator only. `DELETE /api/v1/discussions/{id}` has no tool either: it needs
 `pages:write` *and* the caller must be a workspace administrator or the actor
 that opened the thread, because a discussion is other people's conversation and
 the two legitimate reasons to remove one early are housekeeping and the opener
