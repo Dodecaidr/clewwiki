@@ -9,6 +9,12 @@ tagged.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-19
+
+First tagged release. The application, the MCP server and the container
+image are published from this tag; earlier commits were development on
+`main`.
+
 ### Added
 
 - **Review after agents**, with migration `0008_reviews` (`page_reviews`, and an
@@ -61,7 +67,7 @@ tagged.
   source has); a quote found nowhere, or in several paragraphs, is refused.
 - Six MCP tools — `wiki.list_changes`, `wiki.get_review`, `wiki.diff_page`,
   `wiki.list_comments`, `wiki.post_comment` and `wiki.resolve_comment` — bringing
-  the MCP surface from twenty-two tools to twenty-eight. The four that return
+  the MCP surface to twenty-eight tools. The four that return
   other people's text carry the content-is-data notice, and the `/connect`
   onboarding prompt gains two steps (EN/RU): read the open comments of a space
   before starting work and answer them after changing a page, and read a page's
@@ -96,8 +102,7 @@ tagged.
   workspace administrator or the actor that opened the thread.
 - Five MCP tools — `wiki.list_discussions`, `wiki.get_discussion`,
   `wiki.open_discussion`, `wiki.post_discussion_message` and
-  `wiki.resolve_discussion` — bringing the MCP surface from seventeen tools to
-  twenty-two. The two read tools carry the content-is-data notice.
+  `wiki.resolve_discussion` — the discussion tools. The two read tools carry the content-is-data notice.
 - Discussion UI: `/spaces/{KEY}/discussions` and `…/discussions/{id}` with
   author badges for people and agents, a compose box, a "Resolve with a
   decision" form that names the page it will create, an "Open a discussion"
@@ -130,63 +135,6 @@ tagged.
   `import.deleted` and `import.failed`.
 - An "Импорт" / "Import" section in the in-app guide, and entry points on the
   space overview and in space settings, in both languages.
-
-### Changed
-
-- The path and slug generators moved from `apps/web/src/lib/pages` into
-  `@clewwiki/content` (`./paths`, `./slug`), so the import pipeline and the
-  application produce identical paths from identical titles. The application's
-  own modules re-export them, so every existing import site is unchanged.
-- `createPage` accepts an optional `id`, used only by the import pipeline: a
-  batch of pages that link to each other has to resolve those links before the
-  first body is written.
-
-### Security
-
-- An agent cannot clear a person's feedback: a person may resolve any comment
-  thread, an agent only one that an agent opened (`forbidden` otherwise). Only a
-  comment's author or a workspace administrator can delete it. Comments share the
-  per-actor message rate limit with discussion messages, are capped at 8 KB, 200
-  open threads per page and 100 replies per thread, and are audited
-  (`comment.opened`, `comment.replied`, `comment.resolved`, `comment.reopened`,
-  `comment.deleted`) without their text.
-- Only a person reviews. `POST /api/v1/pages/{id}/review` refuses a bearer token
-  with `forbidden` whatever its scopes, because a review an agent could pass on
-  its own would not be one; agent tokens can read the queue, the diffs and the
-  decisions. Diff lines are page content and are rendered as escaped text.
-- Discussion messages are untrusted content: stored verbatim, returned verbatim,
-  rendered as text and never as Markdown, never folded into a page, and never
-  summarised by the server — a resolution writes exactly the prose the caller
-  typed. Bodies are capped at 8 KB in octets, a thread at 200 messages and a
-  space at 100 open threads, each a `validation` refusal naming the limit.
-- Posting a discussion message consumes from a second rate-limit bucket keyed by
-  actor (`DISCUSSION_MESSAGE_RATE_LIMIT_MAX`, default 20 per minute); the web
-  compose box consumes from the same bucket.
-- Imported documents are treated as untrusted input throughout: storage XHTML is
-  parsed, never executed, `<script>` and `<style>` bodies are discarded, and
-  converted text is escaped before it becomes Markdown.
-- Confluence credentials are used for one run and stored nowhere — not in
-  `imports.params`, the audit log, or any log line. The site address must be
-  `https`.
-- ZIP archives are read defensively: central-directory only, no encrypted
-  archives, entry and expansion caps, bounded inflate, and unsafe entry names
-  skipped.
-- Upload limits: 200 MB per upload, 5 000 pages per import, 10 MB per page, and
-  10 imports awaiting review per space.
-- Agent tokens cannot import, and the endpoints refuse a bearer token with an
-  explanation rather than a scope check.
-- The import upload endpoint requires a matching `Origin` header outright,
-  because a multipart request cannot carry the `Content-Type: application/json`
-  that the rest of the cross-origin rule relies on.
-
-## [0.1.0] - 2026-09-18
-
-First tagged release. The application, the MCP server and the container
-image are published from this tag; earlier commits were development on
-`main`.
-
-### Added
-
 - Workspace, user, membership, and agent-token data model, with credential
   login and scoped, TTL-bound agent tokens.
 - Wiki core: pages, page tree, revision history, full-text search, and the
@@ -293,14 +241,25 @@ image are published from this tag; earlier commits were development on
   `clewwiki-mcp skills list --space KEY` shows what a space publishes. The
   `/connect` page gains an "Install the project's skills" step with the command
   filled in.
-- The MCP server now has seventeen tools, and the `/connect` onboarding prompt
-  asks agents to call `wiki.get_rules` and `wiki.list_skills` for the space
-  before starting work.
+- The `/connect` onboarding prompt asks agents to call `wiki.get_rules` and
+  `wiki.list_skills` for the space before starting work.
 - A "Rules and skills" section in the guide, explaining what each is, when to
   write a skill instead of a page, and how agents get them.
 
 ### Changed
 
+- `docker-compose.yml` forwards `DISCUSSION_SWEEP_INTERVAL_SECONDS`,
+  `DISCUSSION_MESSAGE_RATE_LIMIT_MAX`, `DISCUSSION_MESSAGE_RATE_LIMIT_WINDOW`,
+  `IMPORT_MAX_UPLOAD_MB` and `IMPORT_MAX_EXPANDED_MB` to the container. The
+  three discussion settings were documented but never reached it, so a value in
+  `.env` had no effect under compose.
+- The path and slug generators moved from `apps/web/src/lib/pages` into
+  `@clewwiki/content` (`./paths`, `./slug`), so the import pipeline and the
+  application produce identical paths from identical titles. The application's
+  own modules re-export them, so every existing import site is unchanged.
+- `createPage` accepts an optional `id`, used only by the import pipeline: a
+  batch of pages that link to each other has to resolve those links before the
+  first body is written.
 - Page path segments generated from titles transliterate Russian, Ukrainian
   and Belarusian Cyrillic (ICAO Doc 9303), strip Latin diacritics, fall back
   to `page-<hash>` when nothing is left, and are numbered `-2`, `-3`, … on the
@@ -309,6 +268,59 @@ image are published from this tag; earlier commits were development on
 
 ### Security
 
+- An agent cannot clear a person's feedback: a person may resolve any comment
+  thread, an agent only one that an agent opened (`forbidden` otherwise). Only a
+  comment's author or a workspace administrator can delete it. Comments share the
+  per-actor message rate limit with discussion messages, are capped at 8 KB, 200
+  open threads per page and 100 replies per thread, and are audited
+  (`comment.opened`, `comment.replied`, `comment.resolved`, `comment.reopened`,
+  `comment.deleted`) without their text.
+- Only a person reviews. `POST /api/v1/pages/{id}/review` refuses a bearer token
+  with `forbidden` whatever its scopes, because a review an agent could pass on
+  its own would not be one; agent tokens can read the queue, the diffs and the
+  decisions. Diff lines are page content and are rendered as escaped text.
+- Discussion messages are untrusted content: stored verbatim, returned verbatim,
+  rendered as text and never as Markdown, never folded into a page, and never
+  summarised by the server — a resolution writes exactly the prose the caller
+  typed. Bodies are capped at 8 KB in octets, a thread at 200 messages and a
+  space at 100 open threads, each a `validation` refusal naming the limit.
+- Posting a discussion message consumes from a second rate-limit bucket keyed by
+  actor (`DISCUSSION_MESSAGE_RATE_LIMIT_MAX`, default 20 per minute); the web
+  compose box consumes from the same bucket.
+- A Confluence import only sends requests to the public host it was given. The
+  address must not be, or resolve to, a loopback, private, link-local or
+  otherwise non-public address; the `next` link of a listing is followed only as
+  a path on that origin; redirects are not followed; and a response is read up
+  to 64 MB. The address is checked inside the one DNS resolution the socket
+  uses, so a name that resolves differently a moment later (DNS rebinding)
+  cannot pass the check and land somewhere else. Before this, the server on the
+  other end could point the import — and the credential on its requests — at
+  any host the instance could reach.
+- Import limits are the operator's: `IMPORT_MAX_UPLOAD_MB` (200) and
+  `IMPORT_MAX_EXPANDED_MB`, whose default drops from 800 to 256, because what an
+  archive expands to is held in memory and a small container was killed rather
+  than refused. The upload form states the instance's actual limit.
+- The import upload endpoint refuses by the declared `Content-Length` before
+  reading the body (`413` over the limit, `411` when absent). The 200 MB limit
+  was previously checked only after the whole body had been buffered.
+- The Confluence storage-format reader bounds the depth of the tree it builds
+  and no longer takes quadratic time on a body of many `<script>` elements.
+- Imported documents are treated as untrusted input throughout: storage XHTML is
+  parsed, never executed, `<script>` and `<style>` bodies are discarded, and
+  converted text is escaped before it becomes Markdown.
+- Confluence credentials are used for one run and stored nowhere — not in
+  `imports.params`, the audit log, or any log line. The site address must be
+  `https`.
+- ZIP archives are read defensively: central-directory only, no encrypted
+  archives, entry and expansion caps, bounded inflate, and unsafe entry names
+  skipped.
+- Upload limits: 200 MB per upload, 5 000 pages per import, 10 MB per page, and
+  10 imports awaiting review per space.
+- Agent tokens cannot import, and the endpoints refuse a bearer token with an
+  explanation rather than a scope check.
+- The import upload endpoint requires a matching `Origin` header outright,
+  because a multipart request cannot carry the `Content-Type: application/json`
+  that the rest of the cross-origin rule relies on.
 - Skill bodies are untrusted stored text like page bodies: returned as data with
   the content-is-data statement on both skill tools, never executed, and written
   to files by the install command and nothing more. The command refuses a slug
