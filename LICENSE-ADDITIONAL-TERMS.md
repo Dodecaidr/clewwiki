@@ -14,7 +14,7 @@ including but not limited to the project `README.md`, the application's
 footer, and the application's About screen — the following author
 attribution, unmodified and reasonably visible:
 
-> clewwiki — created by Dodecaidr (https://dodecaidr.pro.site)
+> clewwiki — created by Dodecaidr (https://dodecaidr.pro)
 
 ## 2. Marking of modified versions (permitted by AGPLv3 §7(c))
 

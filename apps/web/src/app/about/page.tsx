@@ -33,10 +33,10 @@ export default async function AboutPage() {
             clewwiki — created by Dodecaidr (
             <a
               className="underline underline-offset-2"
-              href="https://dodecaidr.pro.site"
+              href="https://dodecaidr.pro"
               rel="noreferrer"
             >
-              https://dodecaidr.pro.site
+              https://dodecaidr.pro
             </a>
             )
           </p>

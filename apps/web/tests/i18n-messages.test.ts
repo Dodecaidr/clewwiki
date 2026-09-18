@@ -61,7 +61,7 @@ describe('message catalogs', () => {
   it('keeps the attribution line identical in every locale', () => {
     expect(catalogs.ru.get('common.attribution')).toBe(catalogs.en.get('common.attribution'));
     expect(catalogs.en.get('common.attribution')).toBe(
-      'clewwiki — created by Dodecaidr (https://dodecaidr.pro.site)',
+      'clewwiki — created by Dodecaidr (https://dodecaidr.pro)',
     );
   });
 });

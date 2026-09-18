@@ -46,4 +46,4 @@ Cursor and Codex are in
 AGPL-3.0-or-later with additional attribution terms — see the repository's
 `LICENSE` and `LICENSE-ADDITIONAL-TERMS.md`.
 
-clewwiki — created by Dodecaidr (https://dodecaidr.pro.site)
+clewwiki — created by Dodecaidr (https://dodecaidr.pro)

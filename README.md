@@ -1479,4 +1479,4 @@ marking of modified versions (see `LICENSE-ADDITIONAL-TERMS.md`).
 ## Author
 
 clewwiki is created and maintained by **Dodecaidr** —
-[https://dodecaidr.pro.site](https://dodecaidr.pro.site)
+[https://dodecaidr.pro](https://dodecaidr.pro)

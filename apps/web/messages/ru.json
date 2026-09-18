@@ -1,8 +1,8 @@
 {
   "common": {
     "appName": "clewwiki",
-    "attribution": "clewwiki — created by Dodecaidr (https://dodecaidr.pro.site)",
-    "authorSite": "https://dodecaidr.pro.site",
+    "attribution": "clewwiki — created by Dodecaidr (https://dodecaidr.pro)",
+    "authorSite": "https://dodecaidr.pro",
     "signOut": "Выйти",
     "cancel": "Отмена",
     "loading": "Выполняется…",
