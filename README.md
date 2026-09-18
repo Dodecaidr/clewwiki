@@ -3,17 +3,22 @@
 [![CI](https://github.com/Dodecaidr/clewwiki/actions/workflows/ci.yml/badge.svg)](https://github.com/Dodecaidr/clewwiki/actions/workflows/ci.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/github/license/Dodecaidr/clewwiki)](LICENSE)
 
-**Status: pre-alpha, under active development**
+**Status: v0.1.0, first tagged release. Early, under active development.**
 
-A self-hosted knowledge base for humans and AI coding agents to write in,
-together, without stepping on each other. Multiple agents (and people) get
-conflict-safe shared state through claims and leases instead of silent
-overwrites, documentation pages carry a staleness flag anchored to the code
-they describe, and every page comes in two linked forms — one written for
-humans, one written for agents — kept in sync. The server exposes both an
-MCP interface and a REST API. v1 runs as a single workspace, divided into
-spaces — one per project or product area — with three roles: admin, editor,
-and scoped agent tokens that can be limited to some spaces.
+A self-hosted knowledge base that AI coding agents write and people read,
+on your own server and across whichever agent tools your team runs. Agents
+reach it over MCP; people read and edit the same pages in a browser, with
+a visual editor, diagrams, charts and export. Pages come in two linked
+forms, one written for agents and one written for people, and a page
+section can be anchored to a symbol in your repository so it is flagged
+when the code moves on. Concurrent writers — a person and an agent, or
+several agents — take claims instead of overwriting each other silently.
+One workspace, divided into spaces (one per project), with admin, editor
+and agent tokens that can be scoped to particular spaces.
+
+Agent vendors now keep their own memory and project context inside their
+products. This is the other half: your instance, your data, every tool in
+one place, and a documentation layer a person can actually read and edit.
 
 ## Why
 

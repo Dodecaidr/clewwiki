@@ -9,9 +9,13 @@ tagged.
 
 ## [Unreleased]
 
-Nothing has been tagged yet. This section describes what exists in the
-repository today, ahead of the first release, `v0.1.0`, which will be
-tagged after the UI design pass.
+Nothing yet.
+
+## [0.1.0] - 2026-09-18
+
+First tagged release. The application, the MCP server and the container
+image are published from this tag; earlier commits were development on
+`main`.
 
 ### Added
 
@@ -172,4 +176,5 @@ tagged after the UI design pass.
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/commits/main
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Dodecaidr/clewwiki/releases/tag/v0.1.0
