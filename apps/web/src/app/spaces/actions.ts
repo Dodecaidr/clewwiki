@@ -4,8 +4,10 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
+import { locales } from '@/i18n/locale';
 import { recordAudit } from '@/lib/audit';
 import { isPageServiceError } from '@/lib/pages/errors';
+import { createPage } from '@/lib/pages/service';
 import { probeRepository } from '@/lib/repository/git';
 import { repositorySettingsSchema } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
@@ -15,8 +17,9 @@ import {
   spaceKeyInputSchema,
   spaceNameSchema,
 } from '@/lib/spaces/keys';
+import { RULES_PAGE_SLUG, rulesTemplate } from '@/lib/spaces/rules';
 import { createSpace, getSpaceByKey, setSpaceArchived, updateSpace } from '@/lib/spaces/service';
-import { spaceHref, spaceSettingsHref } from '@/lib/spaces/urls';
+import { spaceHref, spaceRulesHref, spaceSettingsHref } from '@/lib/spaces/urls';
 
 /**
  * The administrator's actions on spaces: create one, change it, link its
@@ -173,6 +176,105 @@ export async function setSpaceArchivedAction(
 
   revalidatePath('/', 'layout');
   redirect(spaceSettingsHref(space.key));
+}
+
+/* ------------------------------------------------------------------ */
+/* Rules                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Which page holds the project's rules — and, when there is none yet, creating
+ * one from the starter template.
+ *
+ * Designating a page is an administrator's act because it decides what every
+ * agent working in the space is told to follow. Editing the page afterwards is
+ * an ordinary page edit by anyone who may write there, which is the point of
+ * making the rules a page rather than a settings field.
+ */
+export async function setRulesPageAction(
+  _previous: SpaceFormState,
+  formData: FormData,
+): Promise<SpaceFormState> {
+  const session = await requireAdmin();
+  if (!session) return { error: 'forbidden' };
+
+  const parsed = z
+    .object({
+      spaceKey: z.string().min(1).max(20),
+      rulesPageId: z.union([z.uuid(), z.literal('')]),
+    })
+    .safeParse({
+      spaceKey: formText(formData, 'spaceKey'),
+      rulesPageId: formText(formData, 'rulesPageId'),
+    });
+  if (!parsed.success) return { error: 'validation' };
+
+  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  if (!space) return { error: 'not_found' };
+
+  try {
+    await updateSpace({
+      workspaceId: session.workspace.id,
+      spaceId: space.id,
+      actor: { type: 'user', id: session.userId },
+      rulesPageId: parsed.data.rulesPageId === '' ? null : parsed.data.rulesPageId,
+    });
+  } catch (error) {
+    return toFormState(error);
+  }
+
+  revalidatePath('/', 'layout');
+  return { saved: true };
+}
+
+/**
+ * Creates the rules page from the starter template and designates it, in that
+ * order, so a failure to designate leaves a page rather than nothing.
+ *
+ * The template is placeholders only. A rules document that arrived pre-filled
+ * with plausible-looking facts about a project nobody has described would be
+ * believed by the first agent that read it, which is worse than an empty
+ * heading.
+ */
+export async function createRulesPageAction(
+  _previous: SpaceFormState,
+  formData: FormData,
+): Promise<SpaceFormState> {
+  const session = await requireAdmin();
+  if (!session) return { error: 'forbidden' };
+
+  const parsed = z
+    .object({ spaceKey: z.string().min(1).max(20), locale: z.enum(locales) })
+    .safeParse({ spaceKey: formText(formData, 'spaceKey'), locale: formText(formData, 'locale') });
+  if (!parsed.success) return { error: 'validation' };
+
+  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  if (!space) return { error: 'not_found' };
+  if (space.archivedAt !== null) return { error: 'conflict' };
+
+  const template = rulesTemplate(parsed.data.locale);
+  try {
+    const page = await createPage({
+      workspaceId: session.workspace.id,
+      spaceId: space.id,
+      actor: { type: 'user', id: session.userId },
+      title: template.title,
+      body: template.body,
+      kind: 'technical',
+      slug: RULES_PAGE_SLUG,
+    });
+    await updateSpace({
+      workspaceId: session.workspace.id,
+      spaceId: space.id,
+      actor: { type: 'user', id: session.userId },
+      rulesPageId: page.id,
+    });
+  } catch (error) {
+    return toFormState(error);
+  }
+
+  revalidatePath('/', 'layout');
+  redirect(spaceRulesHref(space.key));
 }
 
 /* ------------------------------------------------------------------ */

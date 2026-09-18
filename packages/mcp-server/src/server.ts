@@ -8,7 +8,7 @@ import { TOOLS } from './tools.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
 
 /**
- * Builds the MCP server: the fourteen tools of `docs/mcp.md`, each wired to the
+ * Builds the MCP server: the seventeen tools of `docs/mcp.md`, each wired to the
  * REST client it calls through.
  *
  * The same function serves both transports. stdio hands it a client pointed at

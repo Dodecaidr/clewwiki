@@ -35,6 +35,8 @@ export interface SpaceRecord {
   description: string;
   icon: string | null;
   homePageId: string | null;
+  /** The page holding the project's working rules, when one is designated. */
+  rulesPageId: string | null;
   settings: SpaceSettings;
   createdBy: string | null;
   createdAt: Date;
@@ -64,6 +66,7 @@ const spaceColumns = {
   description: spaces.description,
   icon: spaces.icon,
   homePageId: spaces.homePageId,
+  rulesPageId: spaces.rulesPageId,
   settings: spaces.settings,
   createdBy: spaces.createdBy,
   createdAt: spaces.createdAt,
@@ -304,6 +307,8 @@ export interface UpdateSpaceInput {
   icon?: string | null;
   /** `null` clears the home page. */
   homePageId?: string | null;
+  /** `null` clears the rules page. */
+  rulesPageId?: string | null;
   /** `null` unlinks the repository. */
   repository?: RepositorySettings | null;
 }
@@ -342,26 +347,34 @@ export async function updateSpace(input: UpdateSpaceInput): Promise<SpaceRecord>
       changes.icon = input.icon?.trim() ? input.icon.trim() : null;
       changed.push('icon');
     }
-    if (input.homePageId !== undefined) {
-      if (input.homePageId !== null) {
-        const [home] = await tx
-          .select({ id: pages.id })
-          .from(pages)
-          .where(
-            and(
-              eq(pages.id, input.homePageId),
-              eq(pages.workspaceId, input.workspaceId),
-              eq(pages.spaceId, current.id),
-              isNull(pages.deletedAt),
-            ),
-          )
-          .limit(1);
-        if (!home) {
-          throw new PageServiceError('validation', 'The home page must be a page in this space');
-        }
+    /** A designated page must be a live page of this space, or nothing at all. */
+    const requirePageInSpace = async (pageId: string, label: string) => {
+      const [found] = await tx
+        .select({ id: pages.id })
+        .from(pages)
+        .where(
+          and(
+            eq(pages.id, pageId),
+            eq(pages.workspaceId, input.workspaceId),
+            eq(pages.spaceId, current.id),
+            isNull(pages.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!found) {
+        throw new PageServiceError('validation', `The ${label} must be a page in this space`);
       }
+    };
+
+    if (input.homePageId !== undefined) {
+      if (input.homePageId !== null) await requirePageInSpace(input.homePageId, 'home page');
       changes.homePageId = input.homePageId;
       changed.push('home_page_id');
+    }
+    if (input.rulesPageId !== undefined) {
+      if (input.rulesPageId !== null) await requirePageInSpace(input.rulesPageId, 'rules page');
+      changes.rulesPageId = input.rulesPageId;
+      changed.push('rules_page_id');
     }
     const repositoryChanged = input.repository !== undefined;
     if (repositoryChanged) {

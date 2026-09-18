@@ -11,6 +11,17 @@ export { handleMcpHttpRequest, MAX_BATCH_MESSAGES } from './http.ts';
 export { assertSecureBaseUrl, ClewwikiRestClient } from './rest-client.ts';
 export type { ClewwikiClientOptions, FetchLike, RestRequest } from './rest-client.ts';
 export { createClewwikiMcpServer, createClewwikiMcpServerFromConfig } from './server.ts';
+export {
+  DEFAULT_SKILLS_DIR,
+  installSkills,
+  listSpaceSkills,
+  parseSkillsArgs,
+  resolveSkillDirectory,
+  runSkillsCommand,
+  SKILL_FILENAME,
+  SkillsCliError,
+} from './skills-cli.ts';
+export type { InstalledSkill, InstallOptions, SkillsCliIo, SkillsCommand } from './skills-cli.ts';
 export type { CreateServerOptions } from './server.ts';
 export { CONTENT_RETURNING_TOOLS, TOOLS } from './tools.ts';
 export type { ToolDefinition } from './tools.ts';

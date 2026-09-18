@@ -3,10 +3,15 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 import { assertSecureBaseUrl, ClewwikiRestClient } from './rest-client.ts';
 import { createClewwikiMcpServer } from './server.ts';
+import { runSkillsCommand } from './skills-cli.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
 
 /**
- * The stdio entry point: `clewwiki-mcp`.
+ * The entry point: `clewwiki-mcp`.
+ *
+ * With no arguments it is the stdio MCP server. With `skills` it is the
+ * install command instead — see `skills-cli.ts` for why that lives in the same
+ * package: it is the binary people already have configured.
  *
  * An agent host starts this process, and it talks to a clewwiki instance over
  * HTTPS with the token in its environment. Nothing is read from a
@@ -35,6 +40,15 @@ Optional:
 
 The token's scopes decide what the tools can do: pages:read for reading and
 searching, pages:write for claims, writes and notes.
+
+Commands:
+
+  clewwiki-mcp                        run the MCP server on stdio (the default)
+  clewwiki-mcp skills list    --space KEY
+  clewwiki-mcp skills install --space KEY [--dir DIR] [--only a,b] [--force]
+
+"skills install" writes each of a space's skills to <DIR>/<slug>/SKILL.md,
+where agent hosts read them. Run "clewwiki-mcp skills --help" for its options.
 `;
 
 function fail(message: string): never {
@@ -54,6 +68,14 @@ function readTimeout(): number | undefined {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // `skills` is a command rather than a flag, so it is dispatched before the
+  // option checks below: everything after it belongs to that command.
+  if (args[0] === 'skills') {
+    process.exitCode = await runSkillsCommand(args.slice(1), process.env);
+    return;
+  }
+
   if (args.includes('--help') || args.includes('-h')) {
     process.stderr.write(USAGE);
     return;

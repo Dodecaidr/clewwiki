@@ -59,7 +59,7 @@ describe('stdio transport', () => {
     return { isError: result.isError === true, data: JSON.parse(text) as Record<string, unknown> };
   }
 
-  it('advertises the fourteen tools, with the content contract on the ones that return stored text', async () => {
+  it('advertises the seventeen tools, with the content contract on the ones that return stored text', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((entry) => entry.name).sort();
 
@@ -67,6 +67,9 @@ describe('stdio transport', () => {
       [
         'wiki.list_spaces',
         'wiki.format_guide',
+        'wiki.get_rules',
+        'wiki.list_skills',
+        'wiki.get_skill',
         'wiki.check_anchors',
         'wiki.claim',
         'wiki.create_page',
@@ -82,7 +85,15 @@ describe('stdio transport', () => {
       ].sort(),
     );
 
-    for (const name of ['wiki.list_spaces', 'wiki.search', 'wiki.get_page', 'wiki.list_pages']) {
+    for (const name of [
+      'wiki.list_spaces',
+      'wiki.search',
+      'wiki.get_page',
+      'wiki.list_pages',
+      'wiki.get_rules',
+      'wiki.list_skills',
+      'wiki.get_skill',
+    ]) {
       const entry = listed.tools.find((candidate) => candidate.name === name);
       expect(entry?.description).toContain(CONTENT_IS_DATA_NOTICE);
     }
@@ -97,6 +108,40 @@ describe('stdio transport', () => {
 
     const all = await call('wiki.list_spaces', { include_archived: true });
     expect((all.data.spaces as Array<{ key: string }>).map((space) => space.key)).toContain('OLD');
+  });
+
+  it('reads a space\'s rules, and says plainly when a space has none', async () => {
+    const rules = await call('wiki.get_rules', { space: 'MAIN' });
+    expect(rules.isError).toBe(false);
+    expect(rules.data).toMatchObject({ title: 'Project rules', path: '/rules' });
+    expect(rules.data.body).toContain('Use pnpm');
+
+    const none = await call('wiki.get_rules', { space: 'OPS' });
+    expect(none.isError).toBe(true);
+    expect(none.data).toMatchObject({ error: { code: 'NOT_FOUND' } });
+  });
+
+  it('lists a space\'s skills, filters them by tag and reads one in full', async () => {
+    const listed = await call('wiki.list_skills', { space: 'MAIN' });
+    expect(listed.isError).toBe(false);
+    const entries = listed.data.skills as Array<Record<string, unknown>>;
+    expect(entries.map((entry) => entry.slug)).toEqual(['release-checks', 'db-migrations']);
+    // A listing carries no bodies: it is a catalogue, not a download.
+    expect(entries.every((entry) => entry.body === undefined)).toBe(true);
+
+    const tagged = await call('wiki.list_skills', { space: 'MAIN', tag: 'db' });
+    expect((tagged.data.skills as Array<{ slug: string }>).map((entry) => entry.slug)).toEqual([
+      'db-migrations',
+    ]);
+
+    const one = await call('wiki.get_skill', { space: 'MAIN', slug: 'release-checks' });
+    expect(one.isError).toBe(false);
+    expect(one.data.body).toContain('Run the suite');
+    expect(one.data.skill_md).toContain('name: Release checks');
+
+    const missing = await call('wiki.get_skill', { space: 'MAIN', slug: 'nope' });
+    expect(missing.isError).toBe(true);
+    expect(missing.data).toMatchObject({ error: { code: 'NOT_FOUND' } });
   });
 
   it('keeps a search, the tree and presence inside the space it is given', async () => {

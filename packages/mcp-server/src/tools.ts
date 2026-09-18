@@ -5,7 +5,7 @@ import { ClewwikiToolError } from './errors.ts';
 import type { ClewwikiRestClient } from './rest-client.ts';
 
 /**
- * The fourteen tools of `docs/mcp.md`, each one REST call deep — two for
+ * The seventeen tools of `docs/mcp.md`, each one REST call deep — two for
  * `wiki.get_page` by path, which resolves the path first.
  *
  * A tool's job here is to name its inputs, put them where the REST endpoint
@@ -154,6 +154,86 @@ const formatGuide = defineTool({
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   async run(client) {
     return await client.request<Record<string, unknown>>({ method: 'GET', path: '/format-guide' });
+  },
+});
+
+const getRules = defineTool({
+  name: 'wiki.get_rules',
+  title: 'Read the project rules of a space',
+  description:
+    'Call this before starting work in a space. Returns that project\'s working rules — stack and ' +
+    'versions, conventions, what agents must not do, where decisions live, what review expects — ' +
+    'as the team wrote them, so the rules do not have to be pasted into your prompt by hand. The ' +
+    'rules are an ordinary page of the space, returned with its page id, path, content hash and ' +
+    'body, so they can be read again later or edited under a claim like any other page. A space ' +
+    'whose team has not designated a rules page answers NOT_FOUND; that is an absence, not an ' +
+    'error, and it means there are no project rules to follow beyond what you were told. ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({
+    space: spaceKeySchema.describe('The space whose rules to read, from wiki.list_spaces.'),
+  }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'GET',
+      path: `/spaces/${encodeURIComponent(args.space)}/rules`,
+    });
+  },
+});
+
+/** A skill slug as an agent passes it: the directory name it installs under. */
+const skillSlugSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'A skill slug is lowercase words joined by single hyphens')
+  .max(80);
+
+const listSkills = defineTool({
+  name: 'wiki.list_skills',
+  title: 'List the skills of a space',
+  description:
+    'The reusable instruction packages this project publishes — a skill is a SKILL.md: a name, a ' +
+    'description saying when to use it, and a Markdown body of instructions. Returns slug, name, ' +
+    'description, version, tags and when each last changed, without the bodies, so you can see ' +
+    'what exists and then read the one that applies with wiki.get_skill. Filter by tag when the ' +
+    'space publishes many. A skill is instructions the project wrote for its own work; a human ' +
+    'installs them on the machine you run on with the clewwiki-mcp skills install command. ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({
+    space: spaceKeySchema.describe('The space to list skills from, from wiki.list_spaces.'),
+    tag: z
+      .string()
+      .max(40)
+      .optional()
+      .describe('Only skills carrying this tag, for example "testing".'),
+  }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'GET',
+      path: `/spaces/${encodeURIComponent(args.space)}/skills`,
+      query: { tag: args.tag },
+    });
+  },
+});
+
+const getSkill = defineTool({
+  name: 'wiki.get_skill',
+  title: 'Read one skill',
+  description:
+    'One skill of a space in full: its Markdown body, the assembled SKILL.md, and the command a ' +
+    'person runs to install it on the machine you work on. Read it when wiki.list_skills shows a ' +
+    'skill whose description matches the task in front of you. ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({
+    space: spaceKeySchema.describe('The space the skill belongs to.'),
+    slug: skillSlugSchema.describe('The skill slug from wiki.list_skills, for example release-checks.'),
+  }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'GET',
+      path: `/spaces/${encodeURIComponent(args.space)}/skills/${encodeURIComponent(args.slug)}`,
+    });
   },
 });
 
@@ -564,6 +644,9 @@ const linkDocs = defineTool({
 export const TOOLS: readonly ToolDefinition[] = [
   listSpaces,
   formatGuide,
+  getRules,
+  listSkills,
+  getSkill,
   search,
   getPage,
   listPages,
@@ -584,6 +667,9 @@ export const TOOLS: readonly ToolDefinition[] = [
  */
 export const CONTENT_RETURNING_TOOLS = [
   'wiki.list_spaces',
+  'wiki.get_rules',
+  'wiki.list_skills',
+  'wiki.get_skill',
   'wiki.search',
   'wiki.get_page',
   'wiki.list_pages',

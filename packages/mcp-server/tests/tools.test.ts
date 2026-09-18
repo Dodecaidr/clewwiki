@@ -27,10 +27,13 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the fourteen tools docs/mcp.md names', () => {
+  it('registers exactly the seventeen tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
       'wiki.list_spaces',
       'wiki.format_guide',
+      'wiki.get_rules',
+      'wiki.list_skills',
+      'wiki.get_skill',
       'wiki.search',
       'wiki.get_page',
       'wiki.list_pages',
@@ -50,6 +53,9 @@ describe('tool surface', () => {
     expect([...CONTENT_RETURNING_TOOLS].sort()).toEqual(
       [
         'wiki.list_spaces',
+        'wiki.get_rules',
+        'wiki.list_skills',
+        'wiki.get_skill',
         'wiki.search',
         'wiki.get_page',
         'wiki.list_pages',
@@ -84,6 +90,9 @@ describe('tool surface', () => {
     expect(readOnly).toEqual([
       'wiki.list_spaces',
       'wiki.format_guide',
+      'wiki.get_rules',
+      'wiki.list_skills',
+      'wiki.get_skill',
       'wiki.search',
       'wiki.get_page',
       'wiki.list_pages',

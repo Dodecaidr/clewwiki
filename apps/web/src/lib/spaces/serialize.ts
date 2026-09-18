@@ -15,6 +15,8 @@ export interface SpaceResource {
   description: string;
   icon: string | null;
   home_page_id: string | null;
+  /** The page holding the project's rules, or null. `GET …/rules` reads it. */
+  rules_page_id: string | null;
   archived: boolean;
   archived_at: string | null;
   created_at: string;
@@ -40,6 +42,7 @@ export function toSpaceResource(
     description: space.description,
     icon: space.icon,
     home_page_id: space.homePageId,
+    rules_page_id: space.rulesPageId,
     archived: space.archivedAt !== null,
     archived_at: space.archivedAt?.toISOString() ?? null,
     created_at: space.createdAt.toISOString(),

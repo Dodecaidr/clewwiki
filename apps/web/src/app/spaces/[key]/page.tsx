@@ -11,7 +11,7 @@ import { renderLabels } from '@/lib/pages/render-labels';
 import { getPageById, listPages } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceByKey } from '@/lib/spaces/service';
-import { newSpacePageHref, spacePageHref } from '@/lib/spaces/urls';
+import { newSpacePageHref, spacePageHref, spaceRulesHref, spaceSkillsHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -41,7 +41,32 @@ export default async function SpaceOverview({ params }: Props) {
 
   const t = await getTranslations('spaces');
   const tp = await getTranslations('pages');
+  const trules = await getTranslations('rules');
+  const tsk = await getTranslations('skills');
   const format = await getFormatter();
+
+  /**
+   * The two things an agent is told to read before it starts. They are on the
+   * overview as well as in the sidebar because the overview is where a person
+   * lands, and "where are this project's rules" is the first question a new
+   * contributor — human or not — has.
+   */
+  const orientation = (
+    <div className="flex flex-wrap gap-2">
+      <Link
+        href={spaceRulesHref(space.key)}
+        className={buttonVariants({ variant: 'outline', size: 'sm' })}
+      >
+        {trules('title')}
+      </Link>
+      <Link
+        href={spaceSkillsHref(space.key)}
+        className={buttonVariants({ variant: 'outline', size: 'sm' })}
+      >
+        {tsk('title')}
+      </Link>
+    </div>
+  );
 
   // A home page that has since been deleted is treated as no home page.
   const home = space.homePageId ? await getPageById(session.workspace.id, space.homePageId) : null;
@@ -53,12 +78,15 @@ export default async function SpaceOverview({ params }: Props) {
       <article className="grid gap-5">
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
           <h1 className="text-2xl font-semibold tracking-tight">{homePage.title}</h1>
-          <Link
-            href={spacePageHref(space.key, homePage.id)}
-            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          >
-            {t('openHomePage')}
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {orientation}
+            <Link
+              href={spacePageHref(space.key, homePage.id)}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              {t('openHomePage')}
+            </Link>
+          </div>
         </header>
         {homePage.body.trim() === '' ? (
           <p className="text-sm text-muted-foreground">{tp('emptyBody')}</p>
@@ -76,13 +104,14 @@ export default async function SpaceOverview({ params }: Props) {
 
   return (
     <div className="grid gap-6">
-      <div className="grid gap-2">
+      <div className="grid gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">{space.name}</h1>
         {descriptionHtml ? (
           <PageBody html={descriptionHtml} />
         ) : (
           <p className="max-w-2xl text-sm text-muted-foreground">{t('noDescription')}</p>
         )}
+        {orientation}
       </div>
 
       {recent.length === 0 ? (

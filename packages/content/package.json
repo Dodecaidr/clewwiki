@@ -9,7 +9,8 @@
     "./mermaid": "./src/mermaid.ts",
     "./callouts": "./src/callouts.ts",
     "./blocks": "./src/blocks.ts",
-    "./guide": "./src/guide.ts"
+    "./guide": "./src/guide.ts",
+    "./skill": "./src/skill.ts"
   },
   "scripts": {
     "test": "vitest run",

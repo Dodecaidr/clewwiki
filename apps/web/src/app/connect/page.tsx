@@ -4,7 +4,7 @@ import { getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { ConnectWizard } from './connect-wizard';
-import type { HostSetup } from './connect-wizard';
+import type { HostSetup, SkillsSetup } from './connect-wizard';
 import { locales } from '@/i18n/locale';
 import type { Locale } from '@/i18n/locale';
 import {
@@ -16,6 +16,8 @@ import {
 import type { ConnectOptions } from '@/lib/connect/snippets';
 import { getAuthBaseUrl, isMcpHttpEnabled } from '@/lib/env';
 import { getSessionContext } from '@/lib/session';
+import { buildSkillsInstallCommand, buildSkillsListCommand } from '@/lib/skills/install';
+import { listSpaces } from '@/lib/spaces/service';
 import enMessages from '../../../messages/en.json';
 import ruMessages from '../../../messages/ru.json';
 
@@ -72,12 +74,36 @@ export default async function ConnectPage() {
     ) as Record<Locale, string>,
   }));
 
+  // The install command has to name a space, and a command with a placeholder
+  // in it is one a person has to think about before running. So the keys the
+  // reader can actually reach are offered, and `KEY` is only the fallback for
+  // a workspace with no spaces yet.
+  const spaces = await listSpaces(session.workspace.id);
+  const spaceKeys = spaces.map((space) => space.key);
+  const keysForCommands = spaceKeys.length > 0 ? spaceKeys : ['KEY'];
+  const skills: SkillsSetup = {
+    spaceKeys,
+    install: Object.fromEntries(
+      keysForCommands.map((key) => [
+        key,
+        buildSkillsInstallCommand({ baseUrl: options.baseUrl, spaceKey: key }),
+      ]),
+    ),
+    list: Object.fromEntries(
+      keysForCommands.map((key) => [
+        key,
+        buildSkillsListCommand({ baseUrl: options.baseUrl, spaceKey: key }),
+      ]),
+    ),
+  };
+
   return (
     <ConnectWizard
       baseUrl={options.baseUrl}
       httpEnabled={options.httpEnabled}
       hosts={hosts}
       testCommand={buildTestCommand(options)}
+      skills={skills}
       isAdmin={session.role === 'admin'}
     />
   );

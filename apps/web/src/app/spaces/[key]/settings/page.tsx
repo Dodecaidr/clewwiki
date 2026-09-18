@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 
 import { ArchiveSpaceForm } from './archive-form';
 import { RepositoryForm } from './repository-form';
+import { RulesForm } from './rules-form';
 import { SpaceDetailsForm } from './space-form';
 import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getPageTree } from '@/lib/pages/service';
@@ -41,6 +42,7 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
 
   const t = await getTranslations('spaces');
   const tr = await getTranslations('repository');
+  const trules = await getTranslations('rules');
 
   if (session.role !== 'admin') {
     return (
@@ -77,6 +79,21 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
               icon: space.icon ?? '',
               homePageId: space.homePageId ?? '',
             }}
+          />
+        </CardBody>
+      </Card>
+
+      <Card id="rules" className="scroll-mt-6">
+        <CardHeader>
+          <CardTitle>{trules('settingsHeading')}</CardTitle>
+          <CardDescription>{trules('settingsIntro')}</CardDescription>
+        </CardHeader>
+        <CardBody>
+          <RulesForm
+            spaceKey={space.key}
+            pages={pages}
+            rulesPageId={space.rulesPageId ?? ''}
+            hasRules={space.rulesPageId !== null}
           />
         </CardBody>
       </Card>

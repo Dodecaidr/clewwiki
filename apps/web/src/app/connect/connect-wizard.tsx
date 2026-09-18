@@ -12,6 +12,14 @@ import type { Locale } from '@/i18n/locale';
 import type { AgentHost, ConnectSnippet } from '@/lib/connect/snippets';
 import { cn } from '@/lib/utils';
 
+export interface SkillsSetup {
+  /** The spaces the reader can reach, so the command can name a real one. */
+  spaceKeys: string[];
+  /** Built per space key, so switching the picker does not go to the server. */
+  install: Record<string, string>;
+  list: Record<string, string>;
+}
+
 export interface HostSetup {
   host: AgentHost;
   snippets: ConnectSnippet[];
@@ -86,17 +94,20 @@ export function ConnectWizard({
   httpEnabled,
   hosts,
   testCommand,
+  skills,
   isAdmin,
 }: {
   baseUrl: string;
   httpEnabled: boolean;
   hosts: HostSetup[];
   testCommand: string;
+  skills: SkillsSetup;
   isAdmin: boolean;
 }) {
   const t = useTranslations('connect');
   const [host, setHost] = useState<AgentHost>('claude-code');
   const [promptLocale, setPromptLocale] = useState<Locale>('en');
+  const [spaceKey, setSpaceKey] = useState<string>(skills.spaceKeys[0] ?? 'KEY');
 
   const setup = hosts.find((entry) => entry.host === host) ?? hosts[0];
   if (!setup) return null;
@@ -189,8 +200,36 @@ export function ConnectWizard({
         </CardBody>
       </Card>
 
+      {/* Skills are installed on disk, so this step is a command a person runs
+          rather than anything the agent can do for itself. */}
       <Card>
-        <StepHeader number={4} title={t('step4Title')} description={t('step4Intro')} />
+        <StepHeader number={4} title={t('stepSkillsTitle')} description={t('stepSkillsIntro')} />
+        <CardBody className="grid gap-3 text-sm">
+          {skills.spaceKeys.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t('stepSkillsNoSpaces')}</p>
+          ) : skills.spaceKeys.length > 1 ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs text-muted-foreground">{t('stepSkillsSpace')}</span>
+              <ToggleGroup
+                label={t('stepSkillsSpace')}
+                options={skills.spaceKeys}
+                value={spaceKey}
+                onChange={setSpaceKey}
+                renderLabel={(value) => value}
+              />
+            </div>
+          ) : null}
+          <CopyBlock code={skills.install[spaceKey] ?? skills.install.KEY ?? ''} wrap />
+          <p className="text-xs text-muted-foreground">{t('stepSkillsHint')}</p>
+          <div className="grid gap-1.5 border-t border-border pt-4">
+            <p className="text-xs text-muted-foreground">{t('stepSkillsList')}</p>
+            <CopyBlock code={skills.list[spaceKey] ?? skills.list.KEY ?? ''} wrap />
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <StepHeader number={5} title={t('step4Title')} description={t('step4Intro')} />
         <CardBody className="grid gap-3 text-sm">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-xs text-muted-foreground">{t('promptLanguage')}</span>

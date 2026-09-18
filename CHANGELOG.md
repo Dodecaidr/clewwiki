@@ -86,12 +86,46 @@ tagged after the UI design pass.
   `wiki.format_guide`: every supported construct with an example, the Mermaid
   keywords and a template per diagram type, the chart block JSON Schema, limits
   and an example per chart type, page conventions and the validation error
-  shape, generated from the rules the server enforces. The MCP server now has
-  fourteen tools, and the `/connect` onboarding prompt asks agents to read the
-  guide before writing and to use tables, callouts, diagrams and charts.
+  shape, generated from the rules the server enforces. The `/connect` onboarding
+  prompt asks agents to read the guide before writing and to use tables,
+  callouts, diagrams and charts.
 - A "Formatting, diagrams and charts" section in the guide.
 - `ALLOW_EXTERNAL_IMAGES` to let pages show images hosted on other `https://`
   sites; off by default.
+- **Rules of a space.** A space can designate one of its pages as the project's
+  working rules (`spaces.rules_page_id`), set under **Settings → Project rules**
+  by picking an existing page or creating one from a starter template in English
+  or Russian. `GET /api/v1/spaces/{key}/rules` (`pages:read`) and the MCP tool
+  `wiki.get_rules` return that page — id, path, title, content hash, body and
+  timestamp — so an agent gets a project's conventions in one call instead of
+  hoping somebody pasted them. The rules are a page, so they are written in the
+  same editor and keep a revision history. A **Rules** entry appears in each
+  space's sidebar and on its overview.
+- **Skills registry per space.** A new `skills` table holds the `SKILL.md`
+  convention as columns plus a body: slug (unique per space among live rows and
+  generated from the name), name, description, version, tags, authorship and a
+  soft delete. Bodies are bounded at 256 KB and front matter sent with a write is
+  parsed and validated, refusing with `validation` details naming the field and
+  the line the way an invalid chart block does. REST:
+  `GET`/`POST /api/v1/spaces/{key}/skills` and
+  `GET`/`PATCH`/`DELETE /api/v1/spaces/{key}/skills/{slug}`, space-scoped and
+  audited as `skill.created`, `skill.updated` and `skill.deleted`. MCP:
+  `wiki.list_skills` and `wiki.get_skill`, read-only. A **Skills** section in
+  each space lists, shows, creates, edits and deletes them, with the page editor
+  reused for the body.
+- **`clewwiki-mcp skills install`.** `@clewwiki/mcp-server` now carries a command
+  as well as a server: `clewwiki-mcp skills install --space KEY [--dir DIR]
+  [--only a,b] [--force]` fetches a space's skills with `CLEWWIKI_URL` and
+  `CLEWWIKI_TOKEN` and writes `<DIR>/<slug>/SKILL.md` (default
+  `~/.claude/skills`, where agent hosts read them), printing every file it wrote;
+  `clewwiki-mcp skills list --space KEY` shows what a space publishes. The
+  `/connect` page gains an "Install the project's skills" step with the command
+  filled in.
+- The MCP server now has seventeen tools, and the `/connect` onboarding prompt
+  asks agents to call `wiki.get_rules` and `wiki.list_skills` for the space
+  before starting work.
+- A "Rules and skills" section in the guide, explaining what each is, when to
+  write a skill instead of a page, and how agents get them.
 
 ### Changed
 
@@ -103,6 +137,12 @@ tagged after the UI design pass.
 
 ### Security
 
+- Skill bodies are untrusted stored text like page bodies: returned as data with
+  the content-is-data statement on both skill tools, never executed, and written
+  to files by the install command and nothing more. The command refuses a slug
+  that would land outside the target directory, refuses to follow a symbolic
+  link (and opens the file with `O_NOFOLLOW`), and leaves alone any `SKILL.md`
+  it did not write or that was edited afterwards unless `--force` is passed.
 - The sanitiser allowlist gains only the SVG elements and presentation
   attributes the chart renderer emits; no element or attribute that can load,
   link or run anything. Script, event handlers, `foreignObject`, styles,

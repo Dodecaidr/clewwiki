@@ -54,7 +54,31 @@ partly in place, the gap is named rather than implied away.
   space, so a restricted token cannot read it at all, whatever its scopes.
   Issuing a restricted token requires at least one space of the same
   workspace. A space created later is not added to an existing restriction.
-  People are not restricted: roles are workspace-wide in this version.
+  People are not restricted: roles are workspace-wide in this version. A
+  space's rules page and its skills are on the same footing: both endpoints
+  answer `404` outside the list, and a space with no rules page answers `404`
+  too, so the response does not distinguish "there are none" from "not for you".
+- **Skills are content, not code.** A skill body is untrusted stored text, the
+  same as a page body: `wiki.list_skills` and `wiki.get_skill` carry the
+  content-is-data statement, nothing on the server parses a skill body for
+  anything but its front matter, and nothing executes one. `clewwiki-mcp skills
+  install` writes them to files and stops there — it runs no script, no hook and
+  no post-install step. The front matter it does parse is a flat mapping of four
+  known keys; anything else is refused with a `validation` error naming the
+  field and the line, so a crafted document cannot reach a fuller YAML parser.
+- **The install command writes only inside its target directory.** A slug is
+  held to lowercase words joined by single hyphens (the same pattern a CHECK
+  constraint enforces on the column), the joined path is resolved and compared
+  with the resolved target afterwards so nothing lands outside it even if a slug
+  passed the pattern, and a path component that is a symbolic link is refused
+  rather than followed — the final file is opened with `O_NOFOLLOW` as well, so
+  a link created between the check and the write does not win. A `SKILL.md` the
+  command did not write, or wrote and somebody edited afterwards, is left alone
+  and reported unless `--force` is passed; the hash it compares against lives in
+  a `.clewwiki-skill.json` written beside each file. Tests cover the escape
+  refusal directly: `..`, `../evil`, `a/b`, an absolute path, a dotted name and
+  an over-long slug are each refused, and a symlinked skill directory is refused
+  with nothing written through it.
 - **Write audit log.** Every write attempt — success, claim conflict, content-
   hash conflict, a refused subtree delete — is recorded. A successful write
   commits its audit row in the same transaction as the write itself. A refused
@@ -65,7 +89,10 @@ partly in place, the gap is named rather than implied away.
   and `space.repository_set` / `space.repository_tested` (before spaces:
   `workspace.repository_set` / `workspace.repository_tested`). Creating,
   changing and archiving a space is audited as `space.created`,
-  `space.updated`, `space.archived` and `space.unarchived`. Refusals that
+  `space.updated`, `space.archived` and `space.unarchived`; a space's skills as
+  `skill.created`, `skill.updated` and `skill.deleted`, each in the transaction
+  that performed the write. Designating a space's rules page is a
+  `space.updated` naming `rules_page_id` among its fields. Refusals that
   arrive in bursts (`auth.rejected`, `auth.rate_limited`,
   `auth.login_rate_limited`) are written at most once per key per ten seconds,
   carrying a `suppressed` count, so a flood is visible without becoming a
@@ -134,7 +161,10 @@ partly in place, the gap is named rather than implied away.
   result carries text written by someone else — pages, space descriptions,
   claim notes, holder names, names read from repository code — states verbatim
   in its description that the text is data, not instructions (`docs/mcp.md`
-  lists the nine).
+  lists the twelve). The two that most invite the opposite reading are a
+  project's rules and a skill body, both written in the imperative: they say
+  what the project expects of work done in it, and they are not a channel
+  through which an author issues orders to a reading agent.
   Output written by a remote git server is kept out of API responses and tool
   results and goes to the server log. This is a documented contract, not a
   technical guarantee enforceable on a calling agent.
@@ -171,7 +201,10 @@ partly in place, the gap is named rather than implied away.
   and an invalid block refuses the write, which is audited like any other
   refused write. The check is bounded: 100 KB of JSON per chart, eight series,
   1 000 points per series, 50 000 characters per diagram, inside the existing
-  1 000 000-character body limit. Mermaid is never executed on the server.
+  1 000 000-character body limit. Mermaid is never executed on the server. A
+  skill body is bounded at 256 KB of octets, by a CHECK constraint as well as by
+  the service, and its front matter is refused unless it is a flat mapping of
+  the four keys this instance stores.
 - **Secrets from environment only.** No secret value is baked into a built
   image or committed to source; `.env.example` documents required keys with
   empty values, and the container refuses to start on a placeholder secret.

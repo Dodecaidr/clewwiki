@@ -325,6 +325,7 @@ lives in the implementation, not here):
 - `claims`
 - `claim_notes`
 - `anchors`
+- `skills`
 - `agent_write_audit`
 
 `page_revisions` is an append-only version history; ephemeral notes are
@@ -374,7 +375,59 @@ Lists and searches use the list as their filter rather than filtering
 afterwards.
 
 Archiving is a timestamp, not a deletion: an archived space keeps its pages
-readable, leaves the space list and "all spaces" search, and refuses new pages.
+readable, leaves the space list and "all spaces" search, and refuses new pages
+and new skills.
+
+### Rules of a space, and its skills
+
+Two things a space carries besides its pages, and they are stored differently
+because they are different kinds of thing.
+
+**The rules of a project are a page.** A space has a nullable `rules_page_id`
+pointing at one of its own pages, and `GET /api/v1/spaces/{key}/rules` returns
+that page's identity and body. Storing the rules as Markdown in a column of
+`spaces` would have been fewer moving parts and worse in every way that matters:
+rules are edited more often than anything else in a young project, and a page
+brings the revision history, the diff between versions, the claim protocol that
+stops two people rewriting them at once, the editor people already know, search,
+and export — all of it already built. The column says *which* page, nothing more;
+a deleted page clears it through the foreign key, and a page designated in
+another space is refused when it is set. The cost is one indirection on read,
+which is a join the rules endpoint makes once.
+
+**Skills are their own table.** A skill is not a page: it has no path, no parent,
+no technical/human counterpart, nothing to claim, and it is addressed by a slug
+that has to be a legal directory name on somebody else's laptop, because that is
+where it ends up. `skills` carries `space_id`, `slug` (unique per space among
+live rows, the way a page path is), `name`, `description`, `body`, `version`,
+`tags`, authorship on both ends and a soft-delete timestamp.
+
+The `SKILL.md` convention is front matter plus a Markdown body, and the choice
+worth recording is that **the stored body holds no front matter**. `name`,
+`description`, `version` and `tags` are columns, and the file is reassembled
+from them whenever one is produced — by the REST resource's `skill_md`, by the
+web UI's copy button, by the install command. The alternative, storing the file
+whole, would mean parsing YAML to render a list of thirty skills, would let the
+front matter and any indexed copy of it drift apart, and would make "rename this
+skill" a text edit inside a blob. A writer may still *send* a whole `SKILL.md`:
+`packages/content/src/skill.ts` takes the front matter off, fills in whatever the
+request did not pass, and refuses front matter that does not parse with a
+`validation` error naming the field and the line — the same treatment, and the
+same details shape, an invalid chart block gets. The YAML accepted is
+deliberately a fragment: a flat mapping of the four known keys. Anything richer
+is refused rather than half-understood.
+
+Bodies are bounded at 256 KB, checked in octets rather than characters by a
+CHECK constraint as well as in the service, because the limit exists to bound
+what a response and a written file carry and a body of Cyrillic is twice its
+character count.
+
+The install path lives in `packages/mcp-server` rather than anywhere else
+because agent hosts read skills from directories on disk, which no MCP tool call
+can write to — the package people already run as their server is the one place
+that is both installed on the right machine and allowed to touch the file
+system. It is a REST client like the rest of that package: it holds a token and
+has no other way in.
 
 Migration `0004_spaces` moved existing data in one transaction: a `MAIN` space
 per workspace that had pages or a repository, every page (soft-deleted ones

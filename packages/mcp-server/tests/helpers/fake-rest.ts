@@ -71,11 +71,31 @@ interface FakeClaim {
   released: boolean;
 }
 
+interface FakeSkill {
+  slug: string;
+  name: string;
+  description: string;
+  version: string | null;
+  tags: string[];
+  body: string;
+  updated_at: string;
+}
+
 export interface FakeRest {
   url: string;
   calls: RecordedCall[];
   page: FakePage;
+  /** The skills of `MAIN`, so a test can assert on what the CLI wrote. */
+  skills: FakeSkill[];
   close(): Promise<void>;
+}
+
+function skillMarkdown(skill: FakeSkill): string {
+  const lines = ['---', `name: ${skill.name}`, `description: ${skill.description}`];
+  if (skill.version) lines.push(`version: ${skill.version}`);
+  if (skill.tags.length > 0) lines.push(`tags: [${skill.tags.join(', ')}]`);
+  lines.push('---', '');
+  return `${lines.join('\n')}\n${skill.body}`;
 }
 
 function hashOf(body: string): string {
@@ -109,6 +129,26 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
     { key: 'MAIN', name: 'Main', description: 'The main project.', icon: null, page_count: 1, archived: false },
     { key: 'OPS', name: 'Operations', description: 'Runbooks.', icon: '🛠', page_count: 0, archived: false },
     { key: 'OLD', name: 'Old project', description: '', icon: null, page_count: 0, archived: true },
+  ];
+  const skills: FakeSkill[] = [
+    {
+      slug: 'release-checks',
+      name: 'Release checks',
+      description: 'Use before tagging a release.',
+      version: '1.2.0',
+      tags: ['release', 'ci'],
+      body: '# Release checks\n\nRun the suite, then tag.\n',
+      updated_at: new Date('2024-02-01T00:00:00Z').toISOString(),
+    },
+    {
+      slug: 'db-migrations',
+      name: 'Database migrations',
+      description: 'Use when adding a column.',
+      version: null,
+      tags: ['db'],
+      body: '# Migrations\n\nGenerate, then review the SQL.\n',
+      updated_at: new Date('2024-02-02T00:00:00Z').toISOString(),
+    },
   ];
   const knownSpace = (key: string | null): boolean =>
     key === null || spaces.some((space) => space.key === key.toUpperCase());
@@ -170,6 +210,64 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
         if (!needs('pages:read')) return;
         const includeArchived = url.searchParams.get('include_archived') === 'true';
         return send(200, { spaces: spaces.filter((space) => includeArchived || !space.archived) });
+      }
+
+      // The rules of a space: MAIN has a rules page, OPS has none.
+      if (method === 'GET' && /^\/api\/v1\/spaces\/[^/]+\/rules$/.test(path)) {
+        if (!needs('pages:read')) return;
+        const key = decodeURIComponent(path.split('/')[4] ?? '').toUpperCase();
+        if (!knownSpace(key)) return fail(404, 'not_found', 'Space not found');
+        if (key !== 'MAIN') {
+          return fail(404, 'not_found', 'This space has no rules page', { space: key });
+        }
+        return send(200, {
+          space: { key: 'MAIN', name: 'Main' },
+          page_id: page.page_id,
+          path: '/rules',
+          title: 'Project rules',
+          content_hash: hashOf('# Project rules\n'),
+          body: '# Project rules\n\nUse pnpm.\n',
+          updated_at: page.updated_at,
+        });
+      }
+
+      if (method === 'GET' && /^\/api\/v1\/spaces\/[^/]+\/skills$/.test(path)) {
+        if (!needs('pages:read')) return;
+        const key = decodeURIComponent(path.split('/')[4] ?? '').toUpperCase();
+        if (!knownSpace(key)) return fail(404, 'not_found', 'Space not found');
+        const tag = url.searchParams.get('tag');
+        const listed = key === 'MAIN' ? skills : [];
+        return send(200, {
+          space: { key, name: key === 'MAIN' ? 'Main' : key },
+          skills: listed
+            .filter((skill) => tag === null || skill.tags.includes(tag))
+            .map(({ body: _body, ...entry }) => entry),
+        });
+      }
+
+      if (method === 'GET' && /^\/api\/v1\/spaces\/[^/]+\/skills\/[^/]+$/.test(path)) {
+        if (!needs('pages:read')) return;
+        const parts = path.split('/');
+        const key = decodeURIComponent(parts[4] ?? '').toUpperCase();
+        const slug = decodeURIComponent(parts[6] ?? '');
+        if (!knownSpace(key)) return fail(404, 'not_found', 'Space not found');
+        const skill = key === 'MAIN' ? skills.find((entry) => entry.slug === slug) : undefined;
+        if (!skill) return fail(404, 'not_found', 'Skill not found');
+        return send(200, {
+          ...skill,
+          space: { key: 'MAIN', name: 'Main' },
+          skill_md: skillMarkdown(skill),
+          created_at: skill.updated_at,
+          created_by: { type: 'user', id: 'user-1' },
+          updated_by: { type: 'user', id: 'user-1' },
+          install: {
+            command: `npx -y @clewwiki/mcp-server skills install --space MAIN --only ${skill.slug}`,
+            invocation: `clewwiki-mcp skills install --space MAIN --only ${skill.slug}`,
+            path: `~/.claude/skills/${skill.slug}/SKILL.md`,
+            default_directory: '~/.claude/skills',
+            filename: 'SKILL.md',
+          },
+        });
       }
 
       if (method === 'GET' && path === '/api/v1/pages') {
@@ -422,6 +520,7 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
     url: `http://127.0.0.1:${address.port}`,
     calls,
     page,
+    skills,
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

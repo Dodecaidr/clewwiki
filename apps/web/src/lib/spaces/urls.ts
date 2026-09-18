@@ -27,3 +27,28 @@ export function newSpacePageHref(spaceKey: string, parentId?: string | null): st
   const base = `${spacePagesBase(spaceKey)}/new`;
   return parentId ? `${base}?parent=${encodeURIComponent(parentId)}` : base;
 }
+
+/**
+ * The rules of a space have a stable address whether or not a page has been
+ * designated yet: the sidebar always has somewhere to point, and the page
+ * behind it says what to do when there are no rules.
+ */
+export function spaceRulesHref(spaceKey: string): string {
+  return `${spaceHref(spaceKey)}/rules`;
+}
+
+export function spaceSkillsHref(spaceKey: string): string {
+  return `${spaceHref(spaceKey)}/skills`;
+}
+
+export function spaceSkillHref(spaceKey: string, slug: string): string {
+  return `${spaceSkillsHref(spaceKey)}/${encodeURIComponent(slug)}`;
+}
+
+export function spaceSkillEditHref(spaceKey: string, slug: string): string {
+  return `${spaceSkillHref(spaceKey, slug)}/edit`;
+}
+
+export function newSpaceSkillHref(spaceKey: string): string {
+  return `${spaceSkillsHref(spaceKey)}/new`;
+}

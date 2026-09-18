@@ -316,13 +316,14 @@ is unchanged; only where the image comes from differs.
 
 ### Connecting an AI coding agent (MCP)
 
-Agents talk to clewwiki through the Model Context Protocol with fourteen
-tools — `wiki.list_spaces`, `wiki.format_guide`, `wiki.search`,
+Agents talk to clewwiki through the Model Context Protocol with seventeen
+tools — `wiki.list_spaces`, `wiki.format_guide`, `wiki.get_rules`,
+`wiki.list_skills`, `wiki.get_skill`, `wiki.search`,
 `wiki.get_page`, `wiki.create_page`, `wiki.claim`, `wiki.write_page`,
 `wiki.release_claim` and the rest. An agent calls
 `wiki.list_spaces` first and passes the key of its project's space as `space`
-to `wiki.search`, `wiki.list_pages`, `wiki.get_presence`, and to
-`wiki.get_page` when it reads by path. Before writing it calls
+to `wiki.get_rules`, `wiki.list_skills`, `wiki.search`, `wiki.list_pages`,
+`wiki.get_presence`, and to `wiki.get_page` when it reads by path. Before writing it calls
 `wiki.format_guide` once: pages are Markdown with tables, callouts, Mermaid
 diagrams and chart blocks, and a chart or diagram block that does not validate
 is refused with `VALIDATION`, naming the block, its line and the field to fix. The full contract, with input and
@@ -826,6 +827,59 @@ space stays readable but drops out of the space list and of searches across
 all spaces, and takes no new pages. Roles are workspace-wide in this version:
 an editor can edit in every space.
 
+### Rules and skills
+
+Two things sit beside a space's pages rather than inside its tree, because they
+are not documentation about the project — they are how the project tells an
+agent how to work in it. Both are in the sidebar of every space.
+
+**Rules** are one page: the stack and its versions, the conventions, what agents
+must not do, where decisions live, what review expects. An administrator picks
+which page it is under the space's **Settings → Project rules**, or creates one
+there from a short starter template — headings and placeholders to fill in, no
+invented facts. Because the rules are an ordinary page they are written in the
+same editor, get a revision history, and a change to them reads as a diff. An
+agent fetches them in one call:
+
+```
+wiki.get_rules { "space": "MOBILE" }
+```
+
+```sh
+curl -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+  https://wiki.example.com/api/v1/spaces/MOBILE/rules
+```
+
+**Skills** are reusable instruction packages. A skill is a `SKILL.md`: front
+matter with a name and a description saying *when* to use it, then a Markdown
+body of instructions for one recurring job — a release checklist, the steps for
+adding a database migration, how this team writes a commit message. Write a page
+when the reader would ask "what is this?"; write a skill when they would ask
+"how do I do this, again?".
+
+Skills are created and edited under **Skills** in a space, with the same editor
+pages use. The front matter is not typed by hand: name, description, version and
+tags are fields, and the file is assembled from them.
+
+Agent hosts load skills from directories on disk, which no tool call can write
+to, so the MCP package is also the command that puts them there:
+
+```sh
+CLEWWIKI_URL=https://wiki.example.com CLEWWIKI_TOKEN=$CLEWWIKI_TOKEN \
+  npx -y @clewwiki/mcp-server skills install --space MOBILE
+```
+
+It writes `~/.claude/skills/<slug>/SKILL.md` for every skill of the space and
+prints what it wrote. `--dir` writes somewhere else, `--only a,b` installs a
+chosen few, and `--force` is needed to overwrite a `SKILL.md` the command did
+not write or that somebody edited after it did. `clewwiki-mcp skills list
+--space MOBILE` shows what a space publishes without writing anything. Agents
+can also read skills without installing them, with `wiki.list_skills` and
+`wiki.get_skill`.
+
+Skill bodies are stored text like page bodies: they are returned as data, never
+executed, and the install command writes files and stops there.
+
 ### From the UI
 
 Sign in and pick a space on the home page (or from **Go to space** in the
@@ -1248,8 +1302,14 @@ noise.
 | `GET /api/v1/spaces` | session or token | `pages:read` | The spaces the caller can reach, with page counts. `include_archived=true` adds archived ones. |
 | `POST /api/v1/spaces` | admin session | — | Create a space: `key`, `name`, `description`, `icon`. `409` when the key is taken. |
 | `GET /api/v1/spaces/{key}` | session or token | `pages:read` | One space. The repository link is shown in full to administrators only. |
-| `PATCH /api/v1/spaces/{key}` | admin session | — | Change `name`, `description`, `icon`, `home_page_id` or `repository`. The key cannot be changed. |
+| `PATCH /api/v1/spaces/{key}` | admin session | — | Change `name`, `description`, `icon`, `home_page_id`, `rules_page_id` or `repository`. The key cannot be changed. |
 | `POST /api/v1/spaces/{key}/archive`, `…/unarchive` | admin session | — | Archive a space, or bring it back. |
+| `GET /api/v1/spaces/{key}/rules` | session or token | `pages:read` | The space's working rules: the designated page's id, path, title, content hash, body and timestamp. `404` when no page is designated. |
+| `GET /api/v1/spaces/{key}/skills` | session or token | `pages:read` | The space's skills without their bodies: slug, name, description, version, tags, updated. Takes `tag`. |
+| `POST /api/v1/spaces/{key}/skills` | session or token | `pages:write` | Create a skill. The body may be a whole `SKILL.md`; front matter that does not parse is `400 validation` naming the field and the line. |
+| `GET /api/v1/spaces/{key}/skills/{slug}` | session or token | `pages:read` | One skill in full: body, assembled `SKILL.md`, and the install command. |
+| `PATCH /api/v1/spaces/{key}/skills/{slug}` | session or token | `pages:write` | Change a skill. Fields left out keep their stored values. |
+| `DELETE /api/v1/spaces/{key}/skills/{slug}` | session or token | `pages:write` + `pages:delete` | Remove a skill. The slug becomes free again. |
 | `GET /api/v1/spaces/{key}/export` | session or token | `pages:read` | The whole space as a ZIP of Markdown files mirroring the tree. Takes `format=md`. |
 | `GET /api/v1/pages` | session or token | `pages:read` | The page tree, without bodies. Takes `space`, `parent_id`, `path` (needs `space`), `kind`, `depth`; without `space`, the top of every space. |
 | `POST /api/v1/pages` | session or token | `pages:write` | Create a page. Requires `space`. An invalid ` ```chart ` or ` ```mermaid ` block in the body is `400 validation` with `block_index`, `line` and `errors`. |

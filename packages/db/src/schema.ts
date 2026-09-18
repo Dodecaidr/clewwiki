@@ -293,6 +293,17 @@ export const spaces = pgTable(
     homePageId: uuid('home_page_id').references((): AnyPgColumn => pages.id, {
       onDelete: 'set null',
     }),
+    /**
+     * The page holding this project's working rules, when one is designated.
+     *
+     * A page rather than a column of Markdown: rules are written in the same
+     * editor as everything else, they get revisions, and a diff of "what the
+     * rules used to say" is the whole point of keeping them. The column only
+     * says *which* page is the rules page; deleting that page clears it.
+     */
+    rulesPageId: uuid('rules_page_id').references((): AnyPgColumn => pages.id, {
+      onDelete: 'set null',
+    }),
     settings: jsonb('settings').$type<SpaceSettings>().notNull().default({}),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -584,6 +595,68 @@ export const anchors = pgTable(
   ],
 );
 
+/**
+ * Skills: reusable instruction packages an agent installs on its own machine.
+ *
+ * A skill is the `SKILL.md` convention — front matter naming the skill and
+ * saying when to use it, then a Markdown body — stored as columns plus a body
+ * rather than as one blob, so that listing a space's skills, filtering them by
+ * tag and showing a name never means parsing YAML out of text.
+ *
+ * Its own table rather than a kind of page, because a skill is not part of the
+ * page tree: it has no path, no parent, no technical/human counterpart and no
+ * claim, and it is addressed by a slug that has to be safe as a directory name
+ * on the machine that installs it. What it shares with pages — soft deletion,
+ * authorship on both ends, an audit row per change — it shares by shape.
+ *
+ * `slug` is unique per space among live rows, the same way a page path is, so a
+ * deleted skill's slug can be taken again.
+ */
+export const skills = pgTable(
+  'skills',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    /** Lowercase words joined by hyphens; also the directory the CLI writes. */
+    slug: text('slug').notNull(),
+    name: text('name').notNull(),
+    /** One line: what the skill does and when an agent should reach for it. */
+    description: text('description').notNull(),
+    /** The Markdown body, without front matter — that is rebuilt from the columns. */
+    body: text('body').notNull().default(''),
+    /** Free text, semver-shaped by convention and not by constraint. */
+    version: text('version'),
+    tags: text('tags').array().notNull().default([]),
+    createdByType: actorType('created_by_type').notNull(),
+    createdById: text('created_by_id').notNull(),
+    updatedByType: actorType('updated_by_type').notNull(),
+    updatedById: text('updated_by_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('skills_space_slug_key')
+      .on(table.spaceId, table.slug)
+      .where(isNull(table.deletedAt)),
+    index('skills_space_updated_idx').on(table.spaceId, table.updatedAt),
+    index('skills_workspace_idx').on(table.workspaceId),
+    check('skills_slug_format', sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
+    check('skills_slug_length', sql`char_length(${table.slug}) <= 80`),
+    check('skills_name_length', sql`char_length(${table.name}) between 1 and 100`),
+    check('skills_description_length', sql`char_length(${table.description}) between 1 and 1024`),
+    check('skills_version_length', sql`${table.version} is null or char_length(${table.version}) <= 40`),
+    // Octets, not characters: the limit exists to bound what a response and a
+    // written file carry, and a body of Cyrillic is twice its character count.
+    check('skills_body_size', sql`octet_length(${table.body}) <= 262144`),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type Space = typeof spaces.$inferSelect;
 export type NewSpace = typeof spaces.$inferInsert;
@@ -604,3 +677,5 @@ export type ClaimNote = typeof claimNotes.$inferSelect;
 export type Anchor = typeof anchors.$inferSelect;
 export type NewAnchor = typeof anchors.$inferInsert;
 export type AnchorStateValue = (typeof anchorState.enumValues)[number];
+export type Skill = typeof skills.$inferSelect;
+export type NewSkill = typeof skills.$inferInsert;

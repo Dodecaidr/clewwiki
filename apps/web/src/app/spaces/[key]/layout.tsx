@@ -13,7 +13,14 @@ import { getPageTree } from '@/lib/pages/service';
 import type { PageTreeNode } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceByKey } from '@/lib/spaces/service';
-import { newSpacePageHref, spaceHref, spacePagesBase, spaceSettingsHref } from '@/lib/spaces/urls';
+import {
+  newSpacePageHref,
+  spaceHref,
+  spacePagesBase,
+  spaceRulesHref,
+  spaceSettingsHref,
+  spaceSkillsHref,
+} from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 import { assertSameWorkspace } from '@/lib/workspace';
 
@@ -76,6 +83,8 @@ export default async function SpaceLayout({
   const t = await getTranslations('pages');
   const ts = await getTranslations('spaces');
   const ta = await getTranslations('anchors');
+  const trules = await getTranslations('rules');
+  const tsk = await getTranslations('skills');
   const format = await getFormatter();
   const [tree, claims, staleAnchors] = await Promise.all([
     getPageTree(session.workspace.id, space.id),
@@ -137,7 +146,25 @@ export default async function SpaceLayout({
 
       <div className="grid gap-8 lg:grid-cols-[13rem_minmax(0,1fr)]">
         <aside className="grid content-start gap-3">
-          <div className="flex items-center justify-between gap-2">
+          {/* Rules and skills sit above the tree rather than inside it: they
+              are not pages of the project, they are how the project tells an
+              agent how to work in it. */}
+          <nav aria-label={ts('sidebarResources')} className="grid gap-1 text-sm">
+            <Link
+              href={spaceRulesHref(space.key)}
+              className="rounded-(--radius-base) px-2 py-1 font-medium hover:bg-secondary"
+            >
+              {trules('title')}
+            </Link>
+            <Link
+              href={spaceSkillsHref(space.key)}
+              className="rounded-(--radius-base) px-2 py-1 font-medium hover:bg-secondary"
+            >
+              {tsk('title')}
+            </Link>
+          </nav>
+
+          <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
             <Link
               href={spaceHref(space.key)}
               className="text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
