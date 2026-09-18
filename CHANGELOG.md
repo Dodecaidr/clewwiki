@@ -9,7 +9,7 @@ tagged.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-09-19
+## [0.1.0] - 2026-09-18
 
 First tagged release. The application, the MCP server and the container
 image are published from this tag; earlier commits were development on
