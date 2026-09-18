@@ -75,6 +75,16 @@ export const importStatus = pgEnum('import_status', [
 export const importDecision = pgEnum('import_decision', ['create', 'skip', 'overwrite']);
 
 /**
+ * Where a discussion stands.
+ *
+ * Two values and no third, because the thread itself is not meant to be
+ * archived: it is `open` while people and agents are still talking, `resolved`
+ * once the outcome has been written down, and after that it is deleted. What
+ * survives is the decision page, which is an ordinary page.
+ */
+export const discussionStatus = pgEnum('discussion_status', ['open', 'resolved']);
+
+/**
  * PostgreSQL `tsvector`. Drizzle has no built-in mapping for it, and the
  * column is never read back into TypeScript — it exists for the index and for
  * the ranking expression — so the driver type is a plain string.
@@ -114,6 +124,22 @@ export interface WorkspaceSettings {
 export interface SpaceSettings {
   /** The source repository this space's anchors are checked against. */
   repository?: RepositorySettings;
+  /**
+   * How long an open discussion may sit without activity before it is closed
+   * automatically, in days. Absent means the server default (14).
+   */
+  discussion_idle_days?: number;
+  /**
+   * How long a resolved discussion — and its messages — are kept after it was
+   * resolved, in days. Absent means the server default (7). The decision page
+   * a resolution produced is a page and is never touched by this.
+   */
+  discussion_retention_days?: number;
+  /**
+   * The page decision pages are created under. Absent until the first
+   * resolution, which creates `/decisions` in the space and records it here.
+   */
+  decisions_page_id?: string | null;
 }
 
 /**
@@ -773,6 +799,107 @@ export const importItems = pgTable(
   ],
 );
 
+/**
+ * Discussions: where agents and people working in parallel talk to each other
+ * about work that crosses more than one of their areas.
+ *
+ * The table exists because that conversation has to happen somewhere and must
+ * not stay. "I am changing the auth contract, does anything of yours depend on
+ * it?" is worth saying and worth answering; six months later it is clutter that
+ * a reader has to wade through to find out what was actually decided. So the
+ * thread is ephemeral — closed when it goes quiet, deleted a week after it is
+ * resolved — and the outcome is promoted to a **decision page**, which is an
+ * ordinary page of the space: versioned, searchable, exportable, linkable.
+ *
+ * `expires_at` is the one column the sweep reads. While a discussion is open it
+ * holds "when this will be closed for inactivity" (last activity plus the
+ * space's idle window); once it is resolved it holds "when this will be
+ * deleted" (resolution plus the space's retention window). One deadline, one
+ * index, and the UI can always say when a thread goes away.
+ *
+ * `decision_page_id` points at the page the resolution produced. Deleting the
+ * discussion never touches it: the reference goes the other way, so the page
+ * outlives the conversation that produced it, which is the entire point.
+ */
+export const discussions = pgTable(
+  'discussions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    status: discussionStatus('status').notNull().default('open'),
+    openedByType: actorType('opened_by_type').notNull(),
+    openedById: text('opened_by_id').notNull(),
+    /**
+     * The opener's display name as it stood when the thread was opened, for the
+     * same reason a claim snapshots its holder: the thread has to name who
+     * started it after the account is renamed or the token revoked.
+     */
+    openedByLabel: text('opened_by_label').notNull(),
+    /** The page the discussion is about, when it is about one. */
+    pageId: uuid('page_id').references((): AnyPgColumn => pages.id, { onDelete: 'set null' }),
+    /** A named section of that page, or null for the whole page. */
+    sectionId: text('section_id'),
+    lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    /** Who resolved it: an actor id, or `system` when the sweep closed it. */
+    resolvedBy: text('resolved_by'),
+    /** The page the decision was written to. Never deleted with the thread. */
+    decisionPageId: uuid('decision_page_id').references((): AnyPgColumn => pages.id, {
+      onDelete: 'set null',
+    }),
+    /** When this thread is next acted on: closed while open, deleted once resolved. */
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('discussions_space_status_idx').on(table.spaceId, table.status, table.lastActivityAt),
+    index('discussions_space_activity_idx').on(table.spaceId, table.lastActivityAt),
+    index('discussions_workspace_expires_idx').on(table.workspaceId, table.expiresAt),
+    index('discussions_page_idx').on(table.pageId),
+    check('discussions_title_length', sql`char_length(${table.title}) between 1 and 200`),
+  ],
+);
+
+/**
+ * One message in a discussion.
+ *
+ * Markdown, capped at 8 KB of octets rather than characters — the limit exists
+ * to bound what a thread costs to read back, and a message of Cyrillic is twice
+ * its character count. Deleted with its discussion; there is no soft delete,
+ * because a thread that is gone is gone.
+ *
+ * Message bodies are text other people and other agents wrote. Every path that
+ * hands them to an agent says so.
+ */
+export const discussionMessages = pgTable(
+  'discussion_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    discussionId: uuid('discussion_id')
+      .notNull()
+      .references((): AnyPgColumn => discussions.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    authorType: actorType('author_type').notNull(),
+    authorId: text('author_id').notNull(),
+    authorLabel: text('author_label').notNull(),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('discussion_messages_discussion_idx').on(table.discussionId, table.createdAt),
+    index('discussion_messages_workspace_idx').on(table.workspaceId),
+    check('discussion_messages_body_size', sql`octet_length(${table.body}) between 1 and 8192`),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type Space = typeof spaces.$inferSelect;
 export type NewSpace = typeof spaces.$inferInsert;
@@ -802,3 +929,8 @@ export type NewImportItemRow = typeof importItems.$inferInsert;
 export type ImportSourceValue = (typeof importSource.enumValues)[number];
 export type ImportStatusValue = (typeof importStatus.enumValues)[number];
 export type ImportDecisionValue = (typeof importDecision.enumValues)[number];
+export type DiscussionRow = typeof discussions.$inferSelect;
+export type NewDiscussionRow = typeof discussions.$inferInsert;
+export type DiscussionMessageRow = typeof discussionMessages.$inferSelect;
+export type NewDiscussionMessageRow = typeof discussionMessages.$inferInsert;
+export type DiscussionStatusValue = (typeof discussionStatus.enumValues)[number];

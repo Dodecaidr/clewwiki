@@ -22,6 +22,7 @@ export async function register(): Promise<void> {
 
   await announceSetupToken();
   startClaimSweep();
+  startDiscussionSweep();
 }
 
 /**
@@ -83,6 +84,49 @@ function startClaimSweep(): void {
         }
       } catch (error) {
         console.error('[claims] sweep failed', error);
+      }
+    })();
+  }, intervalMs);
+
+  timer.unref?.();
+}
+
+/**
+ * The periodic discussion sweep: the same shape as the claim sweep above, for
+ * the same reason.
+ *
+ * Discussions expire lazily wherever the answer matters — a listing, a thread,
+ * the cap on open threads — so this timer changes no decision either. What it
+ * does is act on the threads nobody opened: it closes the ones that have gone
+ * quiet, deletes the ones whose retention window has run out along with their
+ * messages, and leaves the audit rows saying so. It never touches a decision
+ * page; that is an ordinary page and outlives the conversation.
+ *
+ * Five minutes rather than one, because the deadlines are measured in days and
+ * a tighter interval would only be polling. Set
+ * `DISCUSSION_SWEEP_INTERVAL_SECONDS=0` to turn it off and drive
+ * `sweepDiscussions()` some other way. Unref'd so it never keeps the process
+ * alive, and failures are logged rather than thrown.
+ */
+function startDiscussionSweep(): void {
+  const raw = process.env.DISCUSSION_SWEEP_INTERVAL_SECONDS;
+  const parsed = raw === undefined ? 300 : Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return;
+
+  const intervalMs = Math.max(30, parsed) * 1000;
+
+  const timer = setInterval(() => {
+    void (async () => {
+      try {
+        const { sweepDiscussions } = await import('./lib/discussions/service');
+        const { closed, deleted } = await sweepDiscussions();
+        if (closed > 0 || deleted > 0) {
+          console.log(
+            `[discussions] sweep closed ${closed} idle discussion(s) and deleted ${deleted}`,
+          );
+        }
+      } catch (error) {
+        console.error('[discussions] sweep failed', error);
       }
     })();
   }, intervalMs);

@@ -59,7 +59,7 @@ describe('stdio transport', () => {
     return { isError: result.isError === true, data: JSON.parse(text) as Record<string, unknown> };
   }
 
-  it('advertises the seventeen tools, with the content contract on the ones that return stored text', async () => {
+  it('advertises the twenty-two tools, with the content contract on the ones that return stored text', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((entry) => entry.name).sort();
 
@@ -82,6 +82,11 @@ describe('stdio transport', () => {
         'wiki.renew_claim',
         'wiki.search',
         'wiki.write_page',
+        'wiki.list_discussions',
+        'wiki.get_discussion',
+        'wiki.open_discussion',
+        'wiki.post_discussion_message',
+        'wiki.resolve_discussion',
       ].sort(),
     );
 
@@ -93,6 +98,8 @@ describe('stdio transport', () => {
       'wiki.get_rules',
       'wiki.list_skills',
       'wiki.get_skill',
+      'wiki.list_discussions',
+      'wiki.get_discussion',
     ]) {
       const entry = listed.tools.find((candidate) => candidate.name === name);
       expect(entry?.description).toContain(CONTENT_IS_DATA_NOTICE);
@@ -306,6 +313,80 @@ describe('stdio transport', () => {
     // The SDK validates arguments against the advertised schema and answers
     // with a tool error rather than a protocol exception.
     const result = await client.callTool({ name: 'wiki.claim', arguments: { page_id: 'nope' } });
+    expect(result.isError).toBe(true);
+    expect(rest.calls.length).toBe(before);
+  });
+
+  it('runs list_discussions → get_discussion → post_discussion_message end to end', async () => {
+    const listed = await call('wiki.list_discussions', { space: 'MAIN' });
+    expect(listed.isError).toBe(false);
+    const threads = listed.data.discussions as Array<Record<string, unknown>>;
+    expect(threads).toHaveLength(1);
+    expect(threads[0]).toMatchObject({
+      title: 'Auth contract: breaking change to /session',
+      status: 'open',
+      message_count: 1,
+      cleanup: 'closed_when_idle',
+    });
+
+    const id = threads[0]!.discussion_id as string;
+    const thread = await call('wiki.get_discussion', { discussion_id: id });
+    expect(thread.isError).toBe(false);
+    const messages = thread.data.messages as Array<{ body: string; author: { label: string } }>;
+    expect(messages).toHaveLength(1);
+    // The body is somebody else's text, handed back verbatim.
+    expect(messages[0]?.body).toContain('legacy cookie');
+    expect(messages[0]?.author.label).toBe('backend-agent');
+
+    const replied = await call('wiki.post_discussion_message', {
+      discussion_id: id,
+      body: 'Nothing of mine reads it. Go ahead.',
+    });
+    expect(replied.isError).toBe(false);
+    expect((replied.data.message as { body: string }).body).toContain('Go ahead');
+
+    const after = await call('wiki.get_discussion', { discussion_id: id });
+    expect((after.data.messages as unknown[])).toHaveLength(2);
+  });
+
+  it('opens a discussion and resolves it into a decision page', async () => {
+    const opened = await call('wiki.open_discussion', {
+      space: 'MAIN',
+      title: 'Where do runbooks live?',
+      body: 'OPS or MAIN? I am about to write three of them.',
+    });
+    expect(opened.isError).toBe(false);
+    expect(opened.data).toMatchObject({ status: 'open', cleanup: 'closed_when_idle' });
+
+    const id = opened.data.discussion_id as string;
+    const resolved = await call('wiki.resolve_discussion', {
+      discussion_id: id,
+      decision: 'Runbooks live in OPS.',
+      consequences: 'The three drafts in MAIN move before the next release.',
+    });
+    expect(resolved.isError).toBe(false);
+    expect(resolved.data).toMatchObject({ status: 'resolved', cleanup: 'deleted' });
+    const page = resolved.data.decision_page as Record<string, unknown>;
+    expect(page.page_id).toEqual(resolved.data.decision_page_id);
+    expect(String(page.path)).toContain('/decisions/');
+  });
+
+  it('refuses a resolution with no decision, because the decision is the point', async () => {
+    const listed = await call('wiki.list_discussions', { space: 'MAIN', status: 'open' });
+    const open = (listed.data.discussions as Array<Record<string, unknown>>)[0];
+    const refused = await client.callTool({
+      name: 'wiki.resolve_discussion',
+      arguments: { discussion_id: open!.discussion_id as string, decision: '' },
+    });
+    expect(refused.isError).toBe(true);
+  });
+
+  it('refuses a discussion id that is not one before any REST call is made', async () => {
+    const before = rest.calls.length;
+    const result = await client.callTool({
+      name: 'wiki.get_discussion',
+      arguments: { discussion_id: 'nope' },
+    });
     expect(result.isError).toBe(true);
     expect(rest.calls.length).toBe(before);
   });

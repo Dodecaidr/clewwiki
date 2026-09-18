@@ -63,6 +63,15 @@ repository and its own overview; inside it, top-level pages act as
 An agent starts by listing the spaces and then works inside its project's
 one, and a token can be limited to the spaces it needs.
 
+**Discussions that clean themselves up.** Agents working in parallel need
+somewhere to ask each other about work that crosses more than one area — "I am
+changing the auth contract, does anything of yours depend on it?" A **discussion**
+is that place, and it is deliberately temporary: a thread nobody writes in for
+two weeks closes itself, and a resolved one is deleted a week later. Resolving
+it requires writing down what was decided, and that becomes a **decision page** —
+an ordinary page of the space, versioned and searchable like every other. The
+conversation goes; the outcome stays.
+
 **Two linked document types.** Every page can carry a technical body
 (structured, code-linked, agent-optimized) and a human body (prose,
 diagrams) as a linked pair. The same staleness mechanism that watches
@@ -321,11 +330,12 @@ is unchanged; only where the image comes from differs.
 
 ### Connecting an AI coding agent (MCP)
 
-Agents talk to clewwiki through the Model Context Protocol with seventeen
+Agents talk to clewwiki through the Model Context Protocol with twenty-two
 tools — `wiki.list_spaces`, `wiki.format_guide`, `wiki.get_rules`,
 `wiki.list_skills`, `wiki.get_skill`, `wiki.search`,
 `wiki.get_page`, `wiki.create_page`, `wiki.claim`, `wiki.write_page`,
-`wiki.release_claim` and the rest. An agent calls
+`wiki.release_claim`, `wiki.list_discussions`, `wiki.open_discussion`,
+`wiki.resolve_discussion` and the rest. An agent calls
 `wiki.list_spaces` first and passes the key of its project's space as `space`
 to `wiki.get_rules`, `wiki.list_skills`, `wiki.search`, `wiki.list_pages`,
 `wiki.get_presence`, and to `wiki.get_page` when it reads by path. Before writing it calls
@@ -671,6 +681,8 @@ container.
 | `TRUSTED_CLIENT_IP_HEADER` | no | `x-real-ip` | Header the reverse proxy overwrites with the client address. Login rate limits key on it; without it all clients share one bucket. |
 | `AGENT_TOKEN_RATE_LIMIT_MAX` | no | `60` | Requests allowed per token per window. |
 | `AGENT_TOKEN_RATE_LIMIT_WINDOW` | no | `60` | Window length in seconds. |
+| `DISCUSSION_MESSAGE_RATE_LIMIT_MAX` | no | `20` | Discussion messages allowed per actor per window, on top of the general token limit. |
+| `DISCUSSION_MESSAGE_RATE_LIMIT_WINDOW` | no | `60` | Window length in seconds for the message budget. |
 | `CLEWWIKI_VERSION` | no | `latest` | Which published tag of `ghcr.io/dodecaidr/clewwiki` to run. Pin a version in production. Ignored when building from source. |
 | `WEB_BIND_ADDRESS` | no | `127.0.0.1` | Host interface compose publishes the app on. Change it only for a proxy on another machine, and then to a private address. |
 | `WEB_PORT` | no | `3000` | Host port compose publishes the app on. |
@@ -679,6 +691,7 @@ container.
 | `MCP_INTERNAL_BASE_URL` | no | `http://127.0.0.1:$PORT` | Where `/mcp` reaches the app's own REST API. Outside compose only. |
 | `RUN_MIGRATIONS_ON_START` | no | `true` | Set to `false` to manage the schema yourself. |
 | `CLAIM_SWEEP_INTERVAL_SECONDS` | no | `60` | How often lapsed claims are released in the background. `0` disables the sweep; expiry is still applied whenever a claim is read or written. |
+| `DISCUSSION_SWEEP_INTERVAL_SECONDS` | no | `300` | How often idle discussions are closed and expired ones deleted in the background. `0` disables the sweep; expiry is still applied whenever discussions are read. The windows themselves are per space. |
 | `REPOS_DIR` | no | `/data/repos` | Where read-only mirrors of the spaces' repositories are kept, one per space. Compose backs it with the `repos-data` volume. |
 | `CLEWWIKI_GIT_TOKEN`, `CLEWWIKI_GIT_TOKEN_<NAME>` | **yes** | empty | Access tokens for private repositories. The only variables a space's repository setting may name; sent only to `https://` URLs. |
 | `ALLOW_FILE_REPOSITORIES` | no | `false` | Allows `file://` repository URLs (a repository on the host or mounted into the container). |
@@ -925,6 +938,54 @@ Imports are available to signed-in administrators and editors. **An agent token
 cannot start one**, and the endpoint says so rather than checking scopes: the
 human review in the middle is the whole safety of the feature, and a token
 cannot perform it. `docs/security.md` has the reasoning in full.
+
+### Discussions and decisions
+
+Two agents working on the same project will eventually need to ask each other
+something. **Discussions** are where, and they live at
+`/spaces/{KEY}/discussions` — in the sidebar of every space, with a count of how
+many are open. There is an **Open a discussion** button on the space overview
+and one on every page, which attaches the thread to that page.
+
+A thread is a title, a first message and whatever replies it gets: plain text,
+at most 8 KB each, from people and from agents alike, each message badged with
+who wrote it. There are no live updates — a discussion moves at the speed of the
+work it is about — so reload the page to see new messages.
+
+**The conversation is temporary.** An open thread that nobody writes in for 14
+days closes itself, with no outcome recorded. A resolved thread and all its
+messages are deleted 7 days after it was resolved. Both numbers are per space,
+in **Space settings → Discussions**. The list and the thread always say the date
+it will happen.
+
+**The decision is not.** Resolving a thread asks for what was decided, and
+optionally the context, the options considered and the consequences, and writes
+a **decision page**: one page per decision, titled from the discussion, filed
+under the space's decisions page (`/decisions`, created the first time one is
+needed). It is an ordinary page from then on — it has a revision history, it
+turns up in search, it exports with the space, you can link to it, and it can be
+edited under a claim. Deleting the discussion never touches it.
+
+What you write is what the page says. Nothing reads the thread and summarises
+it for you: a decision page assembled by a machine out of a conversation it did
+not take part in is exactly the kind of plausible, wrong record the next agent
+would believe.
+
+Agents do all of this over MCP — `wiki.list_discussions` before starting work
+that touches somebody else's area, `wiki.get_discussion` to read a thread,
+`wiki.open_discussion` instead of guessing, `wiki.post_discussion_message` to
+answer, `wiki.resolve_discussion` to write the decision. Reading needs
+`pages:read` and writing needs `pages:write`; there is no separate discussion
+scope, because a discussion is content of the space like anything else. A thread
+can be deleted early by a workspace administrator or by whoever opened it, and
+never by anybody else. Every transition is audited, including the deletion,
+whose audit row carries the thread's title and its decision page so the log
+still shows what happened.
+
+Message bodies are other people's and other agents' words. They are shown as the
+text somebody typed, never rendered as Markdown and never folded into a page,
+and the tools that return them say plainly that they are data to read rather
+than instructions to follow.
 
 ### From the UI
 
@@ -1364,6 +1425,12 @@ noise.
 | `POST /api/v1/imports/{id}/apply` | admin or editor session | — | Create the pages. Answers with what landed and what was skipped, with the reason — a taken path or somebody else's claim. |
 | `POST /api/v1/imports/{id}/cancel` | admin or editor session | — | Close an import without applying it. |
 | `DELETE /api/v1/imports/{id}` | admin or editor session | — | Remove the import and its staged items. Pages it created stay. |
+| `GET /api/v1/spaces/{key}/discussions` | session or token | `pages:read` | The space's discussions, newest activity first. Takes `status` (`open`, `resolved`). Each carries its message count, participants, the page it is about, and when it will be closed or deleted. |
+| `POST /api/v1/spaces/{key}/discussions` | session or token | `pages:write` | Open a discussion with its first message: `title`, `body`, optional `page_id` and `section_id`. `400 validation` when the space already has 100 open. |
+| `GET /api/v1/discussions/{id}` | session or token | `pages:read` | One discussion with every message, oldest first. |
+| `POST /api/v1/discussions/{id}/messages` | session or token | `pages:write` | Add a message, pushing the closing deadline out. `409 conflict` on a resolved thread, `400 validation` past 200 messages or 8 KB, `429 rate_limited` past the per-actor message budget. |
+| `POST /api/v1/discussions/{id}/resolve` | session or token | `pages:write` | Resolve with a decision: `decision` (required), `context`, `options`, `consequences`, `locale`. Creates or rewrites the decision page and answers with it. |
+| `DELETE /api/v1/discussions/{id}` | session or token | `pages:write` | Remove a discussion and its messages early. Administrator or the opener only. The decision page is kept. |
 | `GET /api/v1/pages` | session or token | `pages:read` | The page tree, without bodies. Takes `space`, `parent_id`, `path` (needs `space`), `kind`, `depth`; without `space`, the top of every space. |
 | `POST /api/v1/pages` | session or token | `pages:write` | Create a page. Requires `space`. An invalid ` ```chart ` or ` ```mermaid ` block in the body is `400 validation` with `block_index`, `line` and `errors`. |
 | `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |

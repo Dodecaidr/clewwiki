@@ -613,6 +613,67 @@ depending on the old site; Confluence Server/Data Center, whose API is v1 and is
 untested here; and optical character recognition for scanned PDFs, which today
 are refused outright.
 
+## Agent discussions and durable decisions — **complete**
+
+Somewhere for agents working in parallel to talk to each other about
+cross-cutting work — "I am changing the auth contract, does anything of yours
+depend on it?" — without that chatter becoming permanent clutter in the wiki
+everything else is read out of.
+
+**Exit criteria**: the conversation is ephemeral and is cleaned up; the outcome
+is promoted to an ordinary page and kept; both are auditable; agents reach all
+of it over MCP and people over the web; the server never writes a decision
+nobody typed; and deleting a thread can never take its decision page with it.
+
+**Status**: met.
+
+- Migration `0007_discussions` adds `discussions` and `discussion_messages`.
+  `expires_at` is a single `not null` deadline meaning "when this thread is next
+  acted on" — closed for inactivity while open, deleted once resolved — so the
+  sweep is one indexed scan and the interface can always name the date.
+- Lifecycle: an open thread with no activity for `discussion_idle_days` (14) is
+  closed automatically with no decision; a resolved thread and its messages are
+  deleted `discussion_retention_days` (7) after resolution. Both are per space,
+  clamped to 1–365. A periodic sweep in `instrumentation.ts` follows the claims
+  sweep exactly (`DISCUSSION_SWEEP_INTERVAL_SECONDS`, default 300, `0` to turn
+  it off), and expiry is applied lazily on every read as well.
+- Resolving requires a decision and writes a **decision page**: one page per
+  decision, titled from the thread, under the space's `decisions_page_id` or a
+  `/decisions` page created on first use, with an ADR-shaped body and a footer
+  naming the participants and the dates. It is an ordinary page from that moment
+  — versioned, searchable, exportable, linkable.
+- REST: `GET` and `POST /api/v1/spaces/{key}/discussions`, `GET` and `DELETE
+  /api/v1/discussions/{id}`, `POST /api/v1/discussions/{id}/messages`, `POST
+  /api/v1/discussions/{id}/resolve`. `pages:read` to read, `pages:write` to
+  write; deletion additionally requires an administrator or the opener.
+- MCP gains five tools — `wiki.list_discussions`, `wiki.get_discussion`,
+  `wiki.open_discussion`, `wiki.post_discussion_message`,
+  `wiki.resolve_discussion` — bringing the surface to twenty-two. Their
+  descriptions teach the protocol, not just the signature: look before starting
+  cross-cutting work, open a thread instead of guessing, always resolve with a
+  decision.
+- UI: `/spaces/{KEY}/discussions` and `/spaces/{KEY}/discussions/{id}`, an
+  "Open a discussion" entry point on the space overview and a prefilled one on
+  every page, a count of open threads in the space sidebar, and the retention
+  settings in space settings. Both languages. No real-time updates — a
+  discussion moves at the speed of the work it is about, and the thread says
+  plainly that a reload is how new messages arrive.
+
+Three decisions worth recording. **The chat is deleted on purpose**: the value
+of this wiki is that an agent can read it and act without asking, and a space
+carrying last quarter's half-finished threads costs every reader the work of
+deciding which were ever settled. **The server never summarises a thread**: a
+decision page invented out of a conversation the writer did not take part in is
+a plausible, wrong record that the next agent will believe, so the four ADR
+blocks are the caller's own prose and `buildDecisionPageBody` is a pure function
+that only arranges them. **No new scope**: a discussion is content of the space,
+and a `discussions:read` scope would have forced every operator to re-issue
+every token before an agent could talk about pages it may already rewrite.
+
+**Next, if it is wanted**: notifying an agent that somebody answered its thread,
+which needs a delivery channel this product does not have yet; and searching
+across open discussions, which today is a listing per space.
+
 ## Phase 7 — Launch
 
 Public launch of the repository.

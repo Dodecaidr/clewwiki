@@ -13,6 +13,7 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { getFallbackShare, listAnchorsForPage } from '@/lib/anchors/service';
 import type { AnchorRecord } from '@/lib/anchors/service';
 import { getActiveClaimsForPage, getActiveNotesForPage } from '@/lib/claims/service';
+import { listOpenDiscussionsForPage } from '@/lib/discussions/service';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
 import { getAncestors, getPageById, listRevisions } from '@/lib/pages/service';
@@ -20,7 +21,9 @@ import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceById } from '@/lib/spaces/service';
 import {
+  newSpaceDiscussionHref,
   newSpacePageHref,
+  spaceDiscussionHref,
   spaceHref,
   spacePageEditHref,
   spacePageHref,
@@ -124,8 +127,17 @@ export default async function PageView({ params }: Props) {
   const ts = await getTranslations('spaces');
   const format = await getFormatter();
 
-  const [html, linked, revisions, activeClaims, notes, pageAnchors, fallbackShare, ancestors] =
-    await Promise.all([
+  const [
+    html,
+    linked,
+    revisions,
+    activeClaims,
+    notes,
+    pageAnchors,
+    fallbackShare,
+    ancestors,
+    openDiscussions,
+  ] = await Promise.all([
       renderLabels().then((labels) => renderMarkdown(page.body, labels)),
       page.linkedPageId
         ? getPageById(session.workspace.id, page.linkedPageId)
@@ -139,9 +151,11 @@ export default async function PageView({ params }: Props) {
       listAnchorsForPage(session.workspace.id, page.id),
       getFallbackShare(session.workspace.id, space.id),
       getAncestors(session.workspace.id, page),
+      listOpenDiscussionsForPage(session.workspace.id, page.id),
     ]);
 
   const ta = await getTranslations('anchors');
+  const tdis = await getTranslations('discussions');
   const repository = readRepositorySettings(space.settings);
 
   const anchorItems: AnchorPanelItem[] = pageAnchors.map((anchor) => ({
@@ -225,6 +239,16 @@ export default async function PageView({ params }: Props) {
                 className={buttonVariants({ variant: 'outline', size: 'sm' })}
               >
                 {t('addChild')}
+              </Link>
+            )}
+            {/* Prefilled with this page, so a question about it is attached to
+                it rather than to the space in general. */}
+            {space.archivedAt ? null : (
+              <Link
+                href={newSpaceDiscussionHref(space.key, page.id)}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                {tdis('openAbout')}
               </Link>
             )}
 
@@ -311,6 +335,21 @@ export default async function PageView({ params }: Props) {
               {t('claimExpires', { until: formatDateTime(format, claim.expiresAt) ?? '—' })}
             </span>
           </p>
+        ) : null}
+
+        {openDiscussions.length > 0 ? (
+          <ul className="grid gap-1 text-xs">
+            {openDiscussions.map((discussion) => (
+              <li key={discussion.id}>
+                <Link
+                  href={spaceDiscussionHref(space.key, discussion.id)}
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  {tdis('openAboutThisPage', { title: discussion.title })}
+                </Link>
+              </li>
+            ))}
+          </ul>
         ) : null}
 
         {notes.length > 0 ? (

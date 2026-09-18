@@ -311,6 +311,17 @@ export interface UpdateSpaceInput {
   rulesPageId?: string | null;
   /** `null` unlinks the repository. */
   repository?: RepositorySettings | null;
+  /**
+   * The space's discussion retention policy. Given whole, because the two
+   * windows and the decisions page are edited on one form and a half-applied
+   * policy is a policy nobody chose.
+   */
+  discussions?: {
+    idleDays: number;
+    retentionDays: number;
+    /** `null` clears it; the next resolution creates `/decisions` again. */
+    decisionsPageId: string | null;
+  };
 }
 
 /**
@@ -376,14 +387,30 @@ export async function updateSpace(input: UpdateSpaceInput): Promise<SpaceRecord>
       changes.rulesPageId = input.rulesPageId;
       changed.push('rules_page_id');
     }
+    // Both settings edits write the same JSON column, so they are folded into
+    // one object here rather than each overwriting the other's work.
+    let settings: SpaceSettings | null = null;
     const repositoryChanged = input.repository !== undefined;
     if (repositoryChanged) {
-      const settings: SpaceSettings = { ...current.settings };
+      settings = { ...current.settings };
       if (input.repository === null) delete settings.repository;
       else if (input.repository) settings.repository = input.repository;
-      changes.settings = settings;
       changed.push('repository');
     }
+    if (input.discussions !== undefined) {
+      const policy = input.discussions;
+      if (policy.decisionsPageId !== null) {
+        await requirePageInSpace(policy.decisionsPageId, 'decisions page');
+      }
+      settings = {
+        ...(settings ?? current.settings),
+        discussion_idle_days: policy.idleDays,
+        discussion_retention_days: policy.retentionDays,
+        decisions_page_id: policy.decisionsPageId,
+      };
+      changed.push('discussions');
+    }
+    if (settings !== null) changes.settings = settings;
 
     if (changed.length === 0) return current;
 

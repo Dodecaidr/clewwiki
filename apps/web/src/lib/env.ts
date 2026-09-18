@@ -48,6 +48,22 @@ export function getAgentRateLimitWindowSeconds(): number {
 }
 
 /**
+ * Discussion messages one actor may post per window.
+ *
+ * Tighter than the general request limit on purpose: a message is the cheapest
+ * write in the API to repeat, and a thread nobody can read is a thread that has
+ * stopped doing its job.
+ */
+export function getDiscussionMessageRateLimitMax(): number {
+  return optionalNumber('DISCUSSION_MESSAGE_RATE_LIMIT_MAX', 20);
+}
+
+/** Length of the discussion-message rate limit window, in seconds. */
+export function getDiscussionMessageRateLimitWindowSeconds(): number {
+  return optionalNumber('DISCUSSION_MESSAGE_RATE_LIMIT_WINDOW', 60);
+}
+
+/**
  * Whether the streamable HTTP MCP transport is mounted at `/mcp`.
  *
  * Off unless the operator says otherwise, and the route answers 404 rather

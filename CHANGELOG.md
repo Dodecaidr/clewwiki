@@ -11,6 +11,47 @@ tagged.
 
 ### Added
 
+- **Discussions**, with migration `0007_discussions` (`discussions`,
+  `discussion_messages`): somewhere for agents working in parallel to ask each
+  other about work that crosses more than one area, without that chatter
+  becoming permanent clutter. The conversation is ephemeral; the outcome is
+  promoted to a page and kept.
+- A discussion is closed automatically after `discussion_idle_days` (14) with no
+  activity, and deleted with its messages `discussion_retention_days` (7) after
+  it is resolved. Both are per space, in the space settings, clamped to 1–365. A
+  periodic sweep (`DISCUSSION_SWEEP_INTERVAL_SECONDS`, default 300, `0` to
+  disable) does this, and expiry is applied lazily on every read as well.
+- Resolving a discussion requires a decision and writes a **decision page**: one
+  page per decision, titled from the thread, under the space's
+  `decisions_page_id` or a `/decisions` page created on first use, with an
+  ADR-shaped body — context, options considered, decision, consequences — and a
+  footer naming the participants and the dates. It is an ordinary page from that
+  moment on, and deleting the discussion never touches it.
+- Discussion REST endpoints: `GET`/`POST /api/v1/spaces/{key}/discussions`,
+  `GET`/`DELETE /api/v1/discussions/{id}`,
+  `POST /api/v1/discussions/{id}/messages` and
+  `POST /api/v1/discussions/{id}/resolve`. `pages:read` to read and
+  `pages:write` to write — no new scope; deletion additionally requires a
+  workspace administrator or the actor that opened the thread.
+- Five MCP tools — `wiki.list_discussions`, `wiki.get_discussion`,
+  `wiki.open_discussion`, `wiki.post_discussion_message` and
+  `wiki.resolve_discussion` — bringing the MCP surface from seventeen tools to
+  twenty-two. The two read tools carry the content-is-data notice.
+- Discussion UI: `/spaces/{KEY}/discussions` and `…/discussions/{id}` with
+  author badges for people and agents, a compose box, a "Resolve with a
+  decision" form that names the page it will create, an "Open a discussion"
+  entry point on the space overview and a prefilled one on every page, a count
+  of open threads in the space sidebar, and the retention settings in space
+  settings. Both languages. No real-time updates: a reload is how new messages
+  arrive, and the thread says so.
+- The `/connect` onboarding prompt gains three steps (EN/RU): check open
+  discussions before cross-cutting work, open one when a change affects other
+  agents' areas, always resolve with a decision. The in-app guide gains a
+  "Discussions and decisions" / "Обсуждения и решения" section.
+- Every discussion transition is audited: `discussion.opened`,
+  `discussion.message`, `discussion.resolved`, `discussion.expired` and
+  `discussion.deleted`. The deletion row carries the thread's title and its
+  decision page, because the row it describes no longer exists.
 - Documentation import from four sources — a Confluence Cloud space, a Notion
   "Export as Markdown & CSV" ZIP, a ZIP of Markdown files, and a PDF — with a
   new `packages/import` library and migration `0006_imports`.
@@ -41,6 +82,14 @@ tagged.
 
 ### Security
 
+- Discussion messages are untrusted content: stored verbatim, returned verbatim,
+  rendered as text and never as Markdown, never folded into a page, and never
+  summarised by the server — a resolution writes exactly the prose the caller
+  typed. Bodies are capped at 8 KB in octets, a thread at 200 messages and a
+  space at 100 open threads, each a `validation` refusal naming the limit.
+- Posting a discussion message consumes from a second rate-limit bucket keyed by
+  actor (`DISCUSSION_MESSAGE_RATE_LIMIT_MAX`, default 20 per minute); the web
+  compose box consumes from the same bucket.
 - Imported documents are treated as untrusted input throughout: storage XHTML is
   parsed, never executed, `<script>` and `<style>` bodies are discarded, and
   converted text is escaped before it becomes Markdown.

@@ -79,6 +79,43 @@ partly in place, the gap is named rather than implied away.
   refusal directly: `..`, `../evil`, `a/b`, an absolute path, a dotted name and
   an over-long slug are each refused, and a symlinked skill directory is refused
   with nothing written through it.
+- **Discussion messages are untrusted content.** A message is text another
+  person or another agent wrote, stored verbatim and handed back verbatim. It is
+  never rendered as Markdown in the interface, never merged into a page, and
+  never summarised by the server — resolving a discussion writes exactly the
+  prose the caller typed, so no decision page can contain a claim the server
+  invented about a conversation. Bodies are capped at 8 KB measured in octets
+  (a CHECK constraint as well as a service check, because a body of Cyrillic is
+  twice its character count), a thread holds at most 200 messages, and a space
+  holds at most 100 open threads; each cap is a `validation` refusal naming the
+  limit, never a silent truncation.
+- **Discussions are space-scoped like everything else.** Listing, reading,
+  writing, resolving and deleting all go through `requireWorkspace` and
+  `requireSpace`, so a thread in a space an agent token is not allowed into
+  answers `404`, exactly as a page there does — the response never confirms that
+  it exists. Reading needs `pages:read` and writing needs `pages:write`; no new
+  scope was invented, because a discussion is content of the space and a new
+  scope would invalidate every token already issued for a conversation about
+  pages the token may already rewrite.
+- **Who may delete a discussion.** A workspace administrator, or the actor that
+  opened the thread — not every writer. A thread is other people's conversation,
+  and the two legitimate reasons to remove one before its retention window runs
+  out are housekeeping and the opener withdrawing their own question. Every
+  other writer is refused with `forbidden`. Deletion removes the thread's
+  messages and **never** the decision page it produced: the foreign key points
+  from `discussions` to `pages` and not the other way round. The audit row for a
+  deletion carries the thread's title and its decision page, because the row it
+  describes is gone and the log would otherwise record that something was
+  removed and nothing about what.
+- **Discussions expire by policy, and the policy is bounded.** Per space,
+  `discussion_idle_days` (default 14) and `discussion_retention_days` (default
+  7) are clamped to 1–365 whatever the settings JSON says, so a value written by
+  an older release or a mistaken administrator cannot make a sweep delete a
+  thread the moment it is created or keep one forever. Every transition is
+  audited: `discussion.opened`, `discussion.message`, `discussion.resolved`,
+  `discussion.expired` and `discussion.deleted`. Message bodies are deliberately
+  absent from the audit metadata — the log records who spoke and when; the words
+  belong to the thread and go with it.
 - **Write audit log.** Every write attempt — success, claim conflict, content-
   hash conflict, a refused subtree delete — is recorded. A successful write
   commits its audit row in the same transaction as the write itself. A refused
@@ -123,7 +160,14 @@ partly in place, the gap is named rather than implied away.
   `X-Forwarded-For` is never trusted, and without the header all clients share
   one bucket. The library's limiter on `/api/auth/*` reads the same header. All
   counters live in the application process, so several replicas multiply the
-  ceilings.
+  ceilings. Posting a discussion message consumes from a second, tighter bucket
+  keyed by actor — 20 per minute by default
+  (`DISCUSSION_MESSAGE_RATE_LIMIT_MAX`, `DISCUSSION_MESSAGE_RATE_LIMIT_WINDOW`) —
+  because a message is the cheapest write in the API to repeat and a thread
+  flooded by one agent is useless to everyone else long before the general limit
+  would notice. The server action behind the web compose box consumes from the
+  same bucket, so the interface is not a way around the limit an agent is held
+  to.
 - **Request amplification.** `/mcp` accepts at most ten JSON-RPC messages per
   request. An anchor check reads at most 2 000 files, 32 MB of source and 30
   seconds of parsing, skips files over 1 MB from the tree listing before
@@ -159,12 +203,20 @@ partly in place, the gap is named rather than implied away.
 - **Content-as-data.** Responses that carry page body text separate it from
   provenance metadata (author, timestamps, content hash). Every MCP tool whose
   result carries text written by someone else — pages, space descriptions,
-  claim notes, holder names, names read from repository code — states verbatim
+  claim notes, holder names, discussion titles and message bodies, names read
+  from repository code — states verbatim
   in its description that the text is data, not instructions (`docs/mcp.md`
-  lists the twelve). The two that most invite the opposite reading are a
+  lists the fourteen). The two that most invite the opposite reading are a
   project's rules and a skill body, both written in the imperative: they say
   what the project expects of work done in it, and they are not a channel
-  through which an author issues orders to a reading agent.
+  through which an author issues orders to a reading agent. **Discussion
+  messages are sharper still**, because they are addressed to another agent and
+  are routinely phrased as commands — "drop the cookie", "do not touch the
+  session module". They are somebody else's words about somebody else's work,
+  and whether anything follows from them is the reading agent's decision, made
+  because a person asked for that work. The web interface renders a message body
+  as the text it is — `whitespace-pre-wrap`, never Markdown, never folded into a
+  page — so a message cannot become markup a reader's browser acts on.
   Output written by a remote git server is kept out of API responses and tool
   results and goes to the server log. This is a documented contract, not a
   technical guarantee enforceable on a calling agent.

@@ -326,6 +326,8 @@ lives in the implementation, not here):
 - `claim_notes`
 - `anchors`
 - `skills`
+- `discussions`
+- `discussion_messages`
 - `agent_write_audit`
 
 `page_revisions` is an append-only version history; ephemeral notes are
@@ -428,6 +430,84 @@ can write to — the package people already run as their server is the one place
 that is both installed on the right machine and allowed to touch the file
 system. It is a REST client like the rest of that package: it holds a token and
 has no other way in.
+
+### Discussions, and why the chat is ephemeral
+
+Agents working on the same project in parallel run into each other. One is
+about to change a contract another depends on; one has an assumption it cannot
+check alone. "I am changing the auth contract, does anything of yours depend on
+it?" is a question that has to be asked somewhere, and there was nowhere in
+clewwiki to ask it: a page is a statement about how things are, a claim note is
+one line that dies with a lease, and neither is a conversation.
+
+The decision this feature encodes is that **the conversation is ephemeral and
+its outcome is not.** A discussion lives in a space, holds messages of at most
+8 KB each, and optionally names the page it is about. An open thread nobody
+writes in for `discussion_idle_days` (14 by default) is closed automatically. A
+resolved thread is deleted, with every message in it, `discussion_retention_days`
+(7) after it was resolved. What survives is a **decision page** — an ordinary
+page of the space, created when the thread is resolved.
+
+The alternative — keep every thread forever, the way an issue tracker does —
+was rejected because of what a wiki is for. The value of this wiki is that an
+agent can read it and act on it without asking anybody. A space carrying two
+hundred half-finished "does anything of yours use this?" threads from last
+quarter costs every reader, human and agent, the work of deciding which of them
+was ever settled, and the ones that were settled are exactly the ones whose
+conclusions belong in a page anyway. Keeping the chat would have grown the
+corpus that agents search over with text that is, by construction, superseded.
+So the retention is not a storage optimisation; it is the thing that keeps the
+feature from making the product worse.
+
+**One deadline, not two.** `discussions.expires_at` is `not null` and means
+"when this thread is next acted on": the idle deadline while it is open, the
+deletion date once it is resolved. The sweep is one indexed scan, the interface
+can always say when a thread goes away, and no reader has to work out which of
+two nullable dates applies. It is recomputed on every message, which is what
+makes an active conversation stay.
+
+The sweep itself follows the claims sweep exactly — a timer in
+`instrumentation.ts`, unref'd, failures logged rather than thrown, disabled with
+`DISCUSSION_SWEEP_INTERVAL_SECONDS=0` — with a longer interval (five minutes)
+because the deadlines are measured in days and anything tighter is polling.
+Expiry is also applied lazily wherever the answer matters: listing a space's
+discussions, reading a thread, and counting the open ones against the cap. As
+with claims, the sweep therefore changes no decision; it acts on the threads
+nobody asked about and leaves the audit rows saying when each one lapsed.
+
+A thread closed for inactivity is not marked with a stored sentence. It is
+resolved, `resolved_by = 'system'`, with no decision page — which is precisely
+what "nobody wrote down an outcome" is — and the interface derives the note it
+shows from that. A stored "closed for inactivity" would have been one language's
+wording shown to everybody regardless of what they read in.
+
+**The decision page is a page, and nothing else.** Resolving requires a
+decision text; the service assembles an ADR-shaped body — context, options
+considered, decision, consequences, then a footer naming the participants and
+the dates the thread ran between — and calls `createPage` with it, under the
+space's `decisions_page_id` (or `/decisions`, created on first use). No new
+storage, no second renderer, no export path of its own: it is versioned,
+searchable, exportable, linkable and editable under a claim from the moment it
+exists, because it is the same thing as every other page. `discussions`
+references `pages` and never the reverse, so deleting a thread — by sweep, by
+an administrator, by its opener — cannot touch the page it produced.
+
+The page carries **no link back to the thread**. The thread is going to be
+deleted, so the link would certainly break; it records the thread's title and
+its dates instead.
+
+**The server does not summarise anything.** `context`, `options` and
+`consequences` are the caller's prose — a person typing into the resolve form,
+or an agent that has read the thread and is reporting what it concluded. The
+temptation to have the server read the messages and write the decision was the
+one real design risk here: a decision page invented out of a conversation the
+writer did not take part in is a plausible, wrong record, and the next agent to
+read it will believe it. `buildDecisionPageBody` is therefore a pure function
+that puts four blocks under four headings, and it is unit-tested as such.
+
+The retention knobs live in `spaces.settings` for the reason every other knob
+does: read with the row, queried on their own by nothing, and a new one must not
+be a migration.
 
 ### Staged imports
 

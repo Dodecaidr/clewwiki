@@ -12,7 +12,9 @@ import { getPageById, listPages } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceByKey } from '@/lib/spaces/service';
 import {
+  newSpaceDiscussionHref,
   newSpacePageHref,
+  spaceDiscussionsHref,
   spaceImportHref,
   spacePageHref,
   spaceRulesHref,
@@ -50,6 +52,7 @@ export default async function SpaceOverview({ params }: Props) {
   const trules = await getTranslations('rules');
   const tsk = await getTranslations('skills');
   const timp = await getTranslations('imports');
+  const tdis = await getTranslations('discussions');
   const format = await getFormatter();
 
   /**
@@ -81,6 +84,20 @@ export default async function SpaceOverview({ params }: Props) {
       >
         {tsk('title')}
       </Link>
+      <Link
+        href={spaceDiscussionsHref(space.key)}
+        className={buttonVariants({ variant: 'outline', size: 'sm' })}
+      >
+        {tdis('title')}
+      </Link>
+      {space.archivedAt ? null : (
+        <Link
+          href={newSpaceDiscussionHref(space.key)}
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+        >
+          {tdis('new')}
+        </Link>
+      )}
       {canImport ? (
         <Link
           href={spaceImportHref(space.key)}

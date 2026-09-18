@@ -27,7 +27,7 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the seventeen tools docs/mcp.md names', () => {
+  it('registers exactly the twenty-two tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
       'wiki.list_spaces',
       'wiki.format_guide',
@@ -44,9 +44,15 @@ describe('tool surface', () => {
       'wiki.release_claim',
       'wiki.get_presence',
       'wiki.post_note',
+      'wiki.list_discussions',
+      'wiki.get_discussion',
+      'wiki.open_discussion',
+      'wiki.post_discussion_message',
+      'wiki.resolve_discussion',
       'wiki.check_anchors',
       'wiki.link_docs',
     ]);
+    expect(TOOLS).toHaveLength(22);
   });
 
   it('names every tool whose result carries text written by others', () => {
@@ -63,6 +69,8 @@ describe('tool surface', () => {
         'wiki.write_page',
         'wiki.get_presence',
         'wiki.post_note',
+        'wiki.list_discussions',
+        'wiki.get_discussion',
         'wiki.check_anchors',
       ].sort(),
     );
@@ -97,6 +105,8 @@ describe('tool surface', () => {
       'wiki.get_page',
       'wiki.list_pages',
       'wiki.get_presence',
+      'wiki.list_discussions',
+      'wiki.get_discussion',
     ]);
   });
 
@@ -460,6 +470,134 @@ describe('wiki.create_page', () => {
       code: 'CONFLICT',
       details: { existing_page_id: '66666666-6666-4666-8666-666666666666' },
     });
+  });
+});
+
+describe('discussion tools', () => {
+  const never: FetchLike = () => {
+    throw new Error('no REST call should have been made');
+  };
+  const DISCUSSION_ID = '33333333-3333-4333-8333-333333333333';
+
+  it('lists a space\'s discussions, passing the status filter through', async () => {
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { discussions: [] }));
+    await tool('wiki.list_discussions').run(clientWith(fetchMock), {
+      space: 'main',
+      status: 'open',
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://wiki.example.com/api/v1/spaces/main/discussions?status=open',
+    );
+  });
+
+  it('reads one discussion by id', async () => {
+    const fetchMock = vi
+      .fn<FetchLike>()
+      .mockResolvedValue(jsonResponse(200, { discussion_id: DISCUSSION_ID, messages: [] }));
+    await tool('wiki.get_discussion').run(clientWith(fetchMock), { discussion_id: DISCUSSION_ID });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `https://wiki.example.com/api/v1/discussions/${DISCUSSION_ID}`,
+    );
+  });
+
+  it('opens a discussion in a space, sending only the fields it was given', async () => {
+    const fetchMock = vi
+      .fn<FetchLike>()
+      .mockResolvedValue(jsonResponse(201, { discussion_id: DISCUSSION_ID }));
+    await tool('wiki.open_discussion').run(clientWith(fetchMock), {
+      space: 'MAIN',
+      title: 'Auth contract',
+      body: 'Does anything of yours read the legacy cookie?',
+    });
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://wiki.example.com/api/v1/spaces/MAIN/discussions',
+    );
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({
+      title: 'Auth contract',
+      body: 'Does anything of yours read the legacy cookie?',
+    });
+  });
+
+  it('posts a message to a discussion', async () => {
+    const fetchMock = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(201, {}));
+    await tool('wiki.post_discussion_message').run(clientWith(fetchMock), {
+      discussion_id: DISCUSSION_ID,
+      body: 'Nothing of mine reads it.',
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `https://wiki.example.com/api/v1/discussions/${DISCUSSION_ID}/messages`,
+    );
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
+      body: 'Nothing of mine reads it.',
+    });
+  });
+
+  it('resolves a discussion, forwarding every block of the decision the caller wrote', async () => {
+    const fetchMock = vi
+      .fn<FetchLike>()
+      .mockResolvedValue(jsonResponse(200, { decision_page: { page_id: 'p' } }));
+    await tool('wiki.resolve_discussion').run(clientWith(fetchMock), {
+      discussion_id: DISCUSSION_ID,
+      decision: 'Drop the cookie in 2.0.',
+      context: 'Two services still read it.',
+      options: 'Keep it, deprecate it, drop it.',
+      consequences: 'OPS reruns its integration suite.',
+      locale: 'ru',
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `https://wiki.example.com/api/v1/discussions/${DISCUSSION_ID}/resolve`,
+    );
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
+      decision: 'Drop the cookie in 2.0.',
+      context: 'Two services still read it.',
+      options: 'Keep it, deprecate it, drop it.',
+      consequences: 'OPS reruns its integration suite.',
+      locale: 'ru',
+    });
+  });
+
+  it('refuses a resolution with no decision before any REST call is made', async () => {
+    await expect(
+      tool('wiki.resolve_discussion').run(clientWith(never), { discussion_id: DISCUSSION_ID }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(
+      tool('wiki.resolve_discussion').run(clientWith(never), {
+        discussion_id: DISCUSSION_ID,
+        decision: '',
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+
+  it('refuses a message larger than the 8 KB the server stores', async () => {
+    await expect(
+      tool('wiki.post_discussion_message').run(clientWith(never), {
+        discussion_id: DISCUSSION_ID,
+        body: 'x'.repeat(8_193),
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+
+  it('refuses an empty title, a bad space key and a discussion id that is not one', async () => {
+    await expect(
+      tool('wiki.open_discussion').run(clientWith(never), { space: 'MAIN', title: '  ', body: 'x' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(
+      tool('wiki.list_discussions').run(clientWith(never), { space: 'not a key!' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(
+      tool('wiki.get_discussion').run(clientWith(never), { discussion_id: 'nope' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+
+  it('teaches the protocol in the descriptions, not only the shape of the call', () => {
+    expect(tool('wiki.list_discussions').description).toContain('before starting work');
+    expect(tool('wiki.open_discussion').description).toContain('instead of guessing');
+    expect(tool('wiki.resolve_discussion').description).toMatch(/never simply\s+abandon it/);
+    // The server assembling a decision out of a thread is the thing this
+    // feature must never do; the tool says so where an agent will read it.
+    expect(tool('wiki.resolve_discussion').description).toContain('never summarises');
   });
 });
 

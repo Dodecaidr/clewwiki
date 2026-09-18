@@ -4,11 +4,13 @@ import { getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { ArchiveSpaceForm } from './archive-form';
+import { DiscussionSettingsForm } from './discussions-form';
 import { RepositoryForm } from './repository-form';
 import { RulesForm } from './rules-form';
 import { SpaceDetailsForm } from './space-form';
 import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { buttonVariants } from '@/components/ui/button';
+import { readDiscussionPolicy } from '@/lib/discussions/retention';
 import { getPageTree } from '@/lib/pages/service';
 import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
@@ -47,6 +49,7 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
   const tr = await getTranslations('repository');
   const trules = await getTranslations('rules');
   const timp = await getTranslations('imports');
+  const tdis = await getTranslations('discussions');
 
   if (session.role !== 'admin') {
     return (
@@ -58,6 +61,7 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
   }
 
   const repository = readRepositorySettings(space.settings);
+  const policy = readDiscussionPolicy(space.settings);
   const pages = flattenTree(await getPageTree(session.workspace.id, space.id));
 
   return (
@@ -131,6 +135,24 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
               testFailed: tr('testFailed'),
               errorForbidden: tr('errorForbidden'),
               errorValidation: tr('errorValidation'),
+            }}
+          />
+        </CardBody>
+      </Card>
+
+      <Card id="discussions" className="scroll-mt-6">
+        <CardHeader>
+          <CardTitle>{tdis('settingsHeading')}</CardTitle>
+          <CardDescription>{tdis('settingsIntro')}</CardDescription>
+        </CardHeader>
+        <CardBody>
+          <DiscussionSettingsForm
+            spaceKey={space.key}
+            pages={pages}
+            initial={{
+              idleDays: policy.idleDays,
+              retentionDays: policy.retentionDays,
+              decisionsPageId: policy.decisionsPageId ?? '',
             }}
           />
         </CardBody>

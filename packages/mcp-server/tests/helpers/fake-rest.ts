@@ -12,9 +12,10 @@ import type { AddressInfo } from 'node:net';
  * else: a bearer token must be present, a write must carry both a live claim
  * and a matching base hash, and a path is looked up inside a space.
  *
- * It holds two spaces, `MAIN` and `OPS`, and one page in `MAIN`. Pages created
- * through it are kept only to answer a second creation at the same path with
- * the conflict the real API gives.
+ * It holds two spaces, `MAIN` and `OPS`, one page in `MAIN`, its skills, and
+ * one open discussion whose first message was written by somebody other than
+ * the caller. Pages created through it are kept only to answer a second
+ * creation at the same path with the conflict the real API gives.
  */
 
 export interface FakeRestOptions {
@@ -81,12 +82,40 @@ interface FakeSkill {
   updated_at: string;
 }
 
+interface FakeDiscussionMessage {
+  message_id: string;
+  author: { type: 'user' | 'agent'; id: string; label: string };
+  body: string;
+  created_at: string;
+}
+
+interface FakeDiscussion {
+  discussion_id: string;
+  space: { key: string; name: string };
+  title: string;
+  status: 'open' | 'resolved';
+  opened_by: { type: 'user' | 'agent'; id: string; label: string };
+  opened_at: string;
+  page_id: string | null;
+  section_id: string | null;
+  last_activity_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  decision_page_id: string | null;
+  cleanup: 'closed_when_idle' | 'deleted';
+  expires_at: string;
+  closed_for_inactivity: boolean;
+  messages: FakeDiscussionMessage[];
+}
+
 export interface FakeRest {
   url: string;
   calls: RecordedCall[];
   page: FakePage;
   /** The skills of `MAIN`, so a test can assert on what the CLI wrote. */
   skills: FakeSkill[];
+  /** The discussions of `MAIN`, so a test can see what a tool call left behind. */
+  discussions: FakeDiscussion[];
   close(): Promise<void>;
 }
 
@@ -152,6 +181,55 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
   ];
   const knownSpace = (key: string | null): boolean =>
     key === null || spaces.some((space) => space.key === key.toUpperCase());
+
+  /**
+   * One open discussion in `MAIN`, enough to exercise listing, reading,
+   * replying and resolving. Its messages are written by somebody other than the
+   * caller, which is the case the content-is-data notice exists for.
+   */
+  const discussions: FakeDiscussion[] = [
+    {
+      discussion_id: randomUUID(),
+      space: { key: 'MAIN', name: 'Main' },
+      title: 'Auth contract: breaking change to /session',
+      status: 'open',
+      opened_by: { type: 'agent', id: 'token-2', label: 'backend-agent' },
+      opened_at: new Date('2024-03-01T00:00:00Z').toISOString(),
+      page_id: null,
+      section_id: null,
+      last_activity_at: new Date('2024-03-01T00:00:00Z').toISOString(),
+      resolved_at: null,
+      resolved_by: null,
+      decision_page_id: null,
+      cleanup: 'closed_when_idle',
+      expires_at: new Date('2024-03-15T00:00:00Z').toISOString(),
+      closed_for_inactivity: false,
+      messages: [
+        {
+          message_id: randomUUID(),
+          author: { type: 'agent', id: 'token-2', label: 'backend-agent' },
+          body: 'I am dropping the legacy cookie from /session. Does anything of yours read it?',
+          created_at: new Date('2024-03-01T00:00:00Z').toISOString(),
+        },
+      ],
+    },
+  ];
+
+  const summarise = (entry: FakeDiscussion) => {
+    const { messages, ...rest } = entry;
+    return {
+      ...rest,
+      message_count: messages.length,
+      participants: [
+        ...new Map(
+          messages.map((message) => [
+            `${message.author.type}:${message.author.label}`,
+            { type: message.author.type, label: message.author.label },
+          ]),
+        ).values(),
+      ],
+    };
+  };
 
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -267,6 +345,134 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
             default_directory: '~/.claude/skills',
             filename: 'SKILL.md',
           },
+        });
+      }
+
+      if (method === 'GET' && /^\/api\/v1\/spaces\/[^/]+\/discussions$/.test(path)) {
+        if (!needs('pages:read')) return;
+        const key = decodeURIComponent(path.split('/')[4] ?? '').toUpperCase();
+        if (!knownSpace(key)) return fail(404, 'not_found', 'Space not found');
+        const status = url.searchParams.get('status');
+        const listed = key === 'MAIN' ? discussions : [];
+        return send(200, {
+          space: { key, name: key === 'MAIN' ? 'Main' : key },
+          discussions: listed
+            .filter((entry) => status === null || entry.status === status)
+            .map(summarise),
+        });
+      }
+
+      if (method === 'POST' && /^\/api\/v1\/spaces\/[^/]+\/discussions$/.test(path)) {
+        if (!needs('pages:write')) return;
+        const key = decodeURIComponent(path.split('/')[4] ?? '').toUpperCase();
+        const target = spaces.find((space) => space.key === key);
+        if (!target) return fail(404, 'not_found', 'Space not found');
+        const payload = (body ?? {}) as { title?: string; body?: string; page_id?: string };
+        const now = new Date().toISOString();
+        const message: FakeDiscussionMessage = {
+          message_id: randomUUID(),
+          author: { type: 'agent', id: 'token-1', label: 'test-agent' },
+          body: payload.body ?? '',
+          created_at: now,
+        };
+        const fresh: FakeDiscussion = {
+          discussion_id: randomUUID(),
+          space: { key: target.key, name: target.name },
+          title: payload.title ?? '',
+          status: 'open',
+          opened_by: message.author,
+          opened_at: now,
+          page_id: payload.page_id ?? null,
+          section_id: null,
+          last_activity_at: now,
+          resolved_at: null,
+          resolved_by: null,
+          decision_page_id: null,
+          cleanup: 'closed_when_idle',
+          expires_at: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+          closed_for_inactivity: false,
+          messages: [message],
+        };
+        discussions.push(fresh);
+        const { messages: _messages, ...rest } = fresh;
+        return send(201, { ...rest, message });
+      }
+
+      if (method === 'GET' && /^\/api\/v1\/discussions\/[^/]+$/.test(path)) {
+        if (!needs('pages:read')) return;
+        const id = decodeURIComponent(path.split('/')[4] ?? '');
+        const found = discussions.find((entry) => entry.discussion_id === id);
+        if (!found) return fail(404, 'not_found', 'Discussion not found');
+        return send(200, { ...summarise(found), messages: found.messages });
+      }
+
+      if (method === 'POST' && /^\/api\/v1\/discussions\/[^/]+\/messages$/.test(path)) {
+        if (!needs('pages:write')) return;
+        const id = decodeURIComponent(path.split('/')[4] ?? '');
+        const found = discussions.find((entry) => entry.discussion_id === id);
+        if (!found) return fail(404, 'not_found', 'Discussion not found');
+        if (found.status !== 'open') {
+          return fail(409, 'conflict', 'This discussion is resolved', {
+            discussion_id: id,
+            decision_page_id: found.decision_page_id,
+          });
+        }
+        const payload = (body ?? {}) as { body?: string };
+        const message: FakeDiscussionMessage = {
+          message_id: randomUUID(),
+          author: { type: 'agent', id: 'token-1', label: 'test-agent' },
+          body: payload.body ?? '',
+          created_at: new Date().toISOString(),
+        };
+        found.messages.push(message);
+        found.last_activity_at = message.created_at;
+        const { messages: _messages, ...rest } = found;
+        return send(201, { ...rest, message });
+      }
+
+      if (method === 'POST' && /^\/api\/v1\/discussions\/[^/]+\/resolve$/.test(path)) {
+        if (!needs('pages:write')) return;
+        const id = decodeURIComponent(path.split('/')[4] ?? '');
+        const found = discussions.find((entry) => entry.discussion_id === id);
+        if (!found) return fail(404, 'not_found', 'Discussion not found');
+        const payload = (body ?? {}) as { decision?: string; consequences?: string };
+        if (!payload.decision) {
+          return fail(400, 'validation', 'Resolving a discussion needs a decision');
+        }
+        const now = new Date().toISOString();
+        const decisionPageId = randomUUID();
+        found.status = 'resolved';
+        found.resolved_at = now;
+        found.resolved_by = 'token-1';
+        found.decision_page_id = decisionPageId;
+        found.cleanup = 'deleted';
+        found.expires_at = new Date(Date.now() + 7 * 86_400_000).toISOString();
+        const { messages: _messages, ...rest } = found;
+        return send(200, {
+          ...rest,
+          decision_page: {
+            page_id: decisionPageId,
+            path: '/decisions/auth-contract-breaking-change-to-session',
+            title: found.title,
+            content_hash: hashOf(payload.decision),
+            version: 1,
+            created: true,
+          },
+        });
+      }
+
+      if (method === 'DELETE' && /^\/api\/v1\/discussions\/[^/]+$/.test(path)) {
+        if (!needs('pages:write')) return;
+        const id = decodeURIComponent(path.split('/')[4] ?? '');
+        const index = discussions.findIndex((entry) => entry.discussion_id === id);
+        if (index === -1) return fail(404, 'not_found', 'Discussion not found');
+        const [removed] = discussions.splice(index, 1);
+        return send(200, {
+          discussion_id: id,
+          deleted: true,
+          title: removed?.title ?? '',
+          messages_deleted: removed?.messages.length ?? 0,
+          decision_page_id: removed?.decision_page_id ?? null,
         });
       }
 
@@ -521,6 +727,7 @@ export async function startFakeRest(options: FakeRestOptions): Promise<FakeRest>
     calls,
     page,
     skills,
+    discussions,
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

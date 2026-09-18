@@ -53,6 +53,25 @@ export function newSpaceSkillHref(spaceKey: string): string {
   return `${spaceSkillsHref(spaceKey)}/new`;
 }
 
+/**
+ * A space's discussions. A stable address whether or not any thread exists:
+ * the sidebar always has somewhere to point, and the page behind it explains
+ * what discussions are for when there are none.
+ */
+export function spaceDiscussionsHref(spaceKey: string): string {
+  return `${spaceHref(spaceKey)}/discussions`;
+}
+
+export function spaceDiscussionHref(spaceKey: string, discussionId: string): string {
+  return `${spaceDiscussionsHref(spaceKey)}/${encodeURIComponent(discussionId)}`;
+}
+
+/** The form that opens one, optionally prefilled with the page it is about. */
+export function newSpaceDiscussionHref(spaceKey: string, pageId?: string | null): string {
+  const base = `${spaceDiscussionsHref(spaceKey)}/new`;
+  return pageId ? `${base}?page=${encodeURIComponent(pageId)}` : base;
+}
+
 /** Where documentation from another system is brought in. */
 export function spaceImportHref(spaceKey: string): string {
   return `${spaceHref(spaceKey)}/import`;
