@@ -5,12 +5,14 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    "./chart": "./src/chart/index.ts",
-    "./mermaid": "./src/mermaid.ts",
-    "./callouts": "./src/callouts.ts",
     "./blocks": "./src/blocks.ts",
+    "./callouts": "./src/callouts.ts",
+    "./chart": "./src/chart/index.ts",
     "./guide": "./src/guide.ts",
-    "./skill": "./src/skill.ts"
+    "./mermaid": "./src/mermaid.ts",
+    "./paths": "./src/paths.ts",
+    "./skill": "./src/skill.ts",
+    "./slug": "./src/slug.ts"
   },
   "scripts": {
     "test": "vitest run",

@@ -11,7 +11,13 @@ import { renderLabels } from '@/lib/pages/render-labels';
 import { getPageById, listPages } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceByKey } from '@/lib/spaces/service';
-import { newSpacePageHref, spacePageHref, spaceRulesHref, spaceSkillsHref } from '@/lib/spaces/urls';
+import {
+  newSpacePageHref,
+  spaceImportHref,
+  spacePageHref,
+  spaceRulesHref,
+  spaceSkillsHref,
+} from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -43,7 +49,17 @@ export default async function SpaceOverview({ params }: Props) {
   const tp = await getTranslations('pages');
   const trules = await getTranslations('rules');
   const tsk = await getTranslations('skills');
+  const timp = await getTranslations('imports');
   const format = await getFormatter();
+
+  /**
+   * Bringing documentation in is offered where a space starts, because an empty
+   * space is exactly where somebody has a Confluence export and nowhere to put
+   * it. Only for an account that may write, and only while the space takes
+   * pages.
+   */
+  const canImport =
+    (session.role === 'admin' || session.role === 'editor') && space.archivedAt === null;
 
   /**
    * The two things an agent is told to read before it starts. They are on the
@@ -65,6 +81,14 @@ export default async function SpaceOverview({ params }: Props) {
       >
         {tsk('title')}
       </Link>
+      {canImport ? (
+        <Link
+          href={spaceImportHref(space.key)}
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+        >
+          {timp('title')}
+        </Link>
+      ) : null}
     </div>
   );
 

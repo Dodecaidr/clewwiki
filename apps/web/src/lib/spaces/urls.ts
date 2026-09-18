@@ -52,3 +52,13 @@ export function spaceSkillEditHref(spaceKey: string, slug: string): string {
 export function newSpaceSkillHref(spaceKey: string): string {
   return `${spaceSkillsHref(spaceKey)}/new`;
 }
+
+/** Where documentation from another system is brought in. */
+export function spaceImportHref(spaceKey: string): string {
+  return `${spaceHref(spaceKey)}/import`;
+}
+
+/** One staged import: its preview while it waits, its result once applied. */
+export function spaceImportRunHref(spaceKey: string, importId: string): string {
+  return `${spaceImportHref(spaceKey)}/${importId}`;
+}

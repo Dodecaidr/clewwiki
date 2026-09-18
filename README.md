@@ -885,6 +885,47 @@ can also read skills without installing them, with `wiki.list_skills` and
 Skill bodies are stored text like page bodies: they are returned as data, never
 executed, and the install command writes files and stops there.
 
+### Import
+
+Documentation that already exists somewhere else can be brought into a space
+from four sources. The button is on the space overview and in **Space
+settings**; the page is `/spaces/{KEY}/import`.
+
+**An import is staged, not applied.** Whatever the source contained is read
+into a tree of pages you can see before any of it exists: each one with the
+path it would take, the Markdown it would get, and a note about everything the
+conversion could not carry across faithfully. You untick what you do not want,
+change a path where the page belongs somewhere else, and press the import
+button. Only then are pages created. A page already sitting at a target path is
+left alone unless you choose to replace it, and a page somebody holds a claim on
+is skipped with their name against it — an import does not take an edit away
+from the person making it. Every page it creates is audited as `page.imported`.
+
+| Source | Converts | Does not |
+|---|---|---|
+| **Confluence** (Cloud REST API v2) | The page hierarchy of one space; headings, lists, tables, task lists, blockquotes, rules; the `code` macro with its language and `noformat`; `info`, `note`, `tip`, `warning` and `panel` panels as GitHub alerts; `expand` as a heading and its content; links between imported pages, rewritten to the new pages | Attachments and images are not uploaded — they are rewritten to their absolute Confluence URL and warned about, so they keep working only while that site does. A macro with no Markdown equivalent (Jira lists, page trees, includes, charts) becomes a visible `> [!NOTE]` naming it, never a silent omission. Comments, labels, restrictions and page history are not read. Server and Data Center are **untested**: their API is v1 and shaped differently. |
+| **Notion export** | The ZIP from "Export as Markdown & CSV", with or without subpages. The folder structure becomes the tree, and Notion's hash suffixes are stripped from every name and path. Emoji callouts become GitHub alerts, with the emoji choosing the kind. A database's CSV becomes a GFM table on its own page when it is small, and the row pages land below it. Links between exported pages are rewritten | A toggle becomes a bold summary followed by its content, always open, with a warning — page bodies render Markdown and drop raw HTML, so a real `<details>` would vanish. A database past 100 rows or 12 columns is described rather than inlined. Images and files in the export are not uploaded. |
+| **Markdown folder** | A ZIP of `.md`, `.mdx` or `.markdown` files. Directories become the tree; `README.md`, `index.md` and `_index.md` become the page for the directory they sit in; front matter `title` wins over the file name, and the first `#` heading wins over that only when there is no front matter. Relative links between documents are rewritten to the pages they become | Images referenced by a relative path stay as they were and get a warning: there is no attachment store. MDX components are not rendered — a file containing them is imported with a warning that the raw HTML will not survive. Anything that is not Markdown is ignored. |
+| **PDF** | Text, with structure inferred: headings from font-size clustering where the file has one, otherwise from the shape of the line (short, no sentence punctuation, followed by body text, or opening with a section number); paragraphs from vertical gaps, with words rejoined across a hyphenated line break; tables from columns that agree on their x positions; monospaced runs kept in a fence. A long document can be split into one page per top-level heading | Everything about a PDF import is an approximation and it says so: every page carries a warning, the preview shows the reconstructed Markdown, and it always lands in review. A block that looks like a table but whose columns do not agree is kept as preformatted text with a warning rather than guessed at. A scanned PDF has no text to read and is refused — optical character recognition is out of scope. Images are not extracted. |
+
+**Confluence credentials are used once and never stored.** The form asks for the
+site address, the space key, your Atlassian account e-mail and an API token; the
+last two are held in memory for that one run, sent as a single `Authorization`
+header, and written nowhere — not to the database, not to the audit log, not to
+a log line. What the import row records is the site address and the space key.
+Use a token belonging to an account that can read the space and nothing more,
+and revoke it afterwards if it was made for the migration.
+
+Limits: 200 MB per upload, 5 000 pages per import, 10 MB per page, and 10
+imports waiting for review in one space at a time. An archive is refused if it
+expands past 800 MB or holds more than 20 000 entries. Anything over a limit is
+`400 validation` naming it.
+
+Imports are available to signed-in administrators and editors. **An agent token
+cannot start one**, and the endpoint says so rather than checking scopes: the
+human review in the middle is the whole safety of the feature, and a token
+cannot perform it. `docs/security.md` has the reasoning in full.
+
 ### From the UI
 
 Sign in and pick a space on the home page (or from **Go to space** in the
@@ -1316,6 +1357,13 @@ noise.
 | `PATCH /api/v1/spaces/{key}/skills/{slug}` | session or token | `pages:write` | Change a skill. Fields left out keep their stored values. |
 | `DELETE /api/v1/spaces/{key}/skills/{slug}` | session or token | `pages:write` + `pages:delete` | Remove a skill. The slug becomes free again. |
 | `GET /api/v1/spaces/{key}/export` | session or token | `pages:read` | The whole space as a ZIP of Markdown files mirroring the tree. Takes `format=md`. |
+| `POST /api/v1/spaces/{key}/imports` | admin or editor session | — | Start an import. JSON for Confluence (`base_url`, `space_key`, `email`, `api_token` — the last two are used once and never stored); `multipart/form-data` with `source` and `file` for a Notion ZIP, a Markdown ZIP or a PDF. Answers `201` with the import in `needs_review`; nothing is written to pages. Refused to agent tokens. |
+| `GET /api/v1/spaces/{key}/imports` | admin or editor session | — | The imports of a space, newest first. |
+| `GET /api/v1/imports/{id}` | admin or editor session | — | One import: status, counts, and every staged item with its target path, warnings, converted Markdown, the page already at that path, and who holds a claim on it. |
+| `PATCH /api/v1/imports/{id}/items/{itemId}` | admin or editor session | — | The reviewer's edit: `decision` (`create`, `skip`, `overwrite`) and `target_path`. `409` once the import is no longer open for review, or when another item already targets that path. |
+| `POST /api/v1/imports/{id}/apply` | admin or editor session | — | Create the pages. Answers with what landed and what was skipped, with the reason — a taken path or somebody else's claim. |
+| `POST /api/v1/imports/{id}/cancel` | admin or editor session | — | Close an import without applying it. |
+| `DELETE /api/v1/imports/{id}` | admin or editor session | — | Remove the import and its staged items. Pages it created stay. |
 | `GET /api/v1/pages` | session or token | `pages:read` | The page tree, without bodies. Takes `space`, `parent_id`, `path` (needs `space`), `kind`, `depth`; without `space`, the top of every space. |
 | `POST /api/v1/pages` | session or token | `pages:write` | Create a page. Requires `space`. An invalid ` ```chart ` or ` ```mermaid ` block in the body is `400 validation` with `block_index`, `line` and `errors`. |
 | `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |
@@ -1345,8 +1393,11 @@ noise.
 A browser session can call these endpoints too, but a request that changes
 state must then come from the instance's own origin (`Origin` equal to
 `BETTER_AUTH_URL`, or `Sec-Fetch-Site: same-origin`) and carry
-`Content-Type: application/json`; anything else is `403 forbidden`. Requests
-with an agent token are not affected.
+`Content-Type: application/json`; anything else is `403 forbidden`. The one
+exception is the import upload, which cannot be JSON: it takes
+`multipart/form-data` and requires a matching `Origin` header outright, rather
+than accepting `Sec-Fetch-Site` in its place. Requests with an agent token are
+not affected.
 
 All of them refuse to answer for a workspace other than the caller's own — and,
 for a token limited to some spaces, for a space outside its list — with `404`

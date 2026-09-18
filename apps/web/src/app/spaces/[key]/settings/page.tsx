@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
@@ -7,11 +8,13 @@ import { RepositoryForm } from './repository-form';
 import { RulesForm } from './rules-form';
 import { SpaceDetailsForm } from './space-form';
 import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { buttonVariants } from '@/components/ui/button';
 import { getPageTree } from '@/lib/pages/service';
 import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
 import { getSpaceByKey } from '@/lib/spaces/service';
 import { flattenTree } from '@/lib/spaces/tree';
+import { spaceImportHref } from '@/lib/spaces/urls';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +46,7 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
   const t = await getTranslations('spaces');
   const tr = await getTranslations('repository');
   const trules = await getTranslations('rules');
+  const timp = await getTranslations('imports');
 
   if (session.role !== 'admin') {
     return (
@@ -129,6 +133,21 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
               errorValidation: tr('errorValidation'),
             }}
           />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{timp('title')}</CardTitle>
+          <CardDescription>{timp('settingsIntro')}</CardDescription>
+        </CardHeader>
+        <CardBody>
+          <Link
+            href={spaceImportHref(space.key)}
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            {timp('openImport')}
+          </Link>
         </CardBody>
       </Card>
 

@@ -52,6 +52,28 @@ export const claimReleaseReason = pgEnum('claim_release_reason', [
  */
 export const anchorState = pgEnum('anchor_state', ['fresh', 'stale', 'moved-renamed', 'lost']);
 
+/** Where an import's content came from. */
+export const importSource = pgEnum('import_source', ['confluence', 'notion', 'markdown', 'pdf']);
+
+/**
+ * How far an import has got.
+ *
+ * `needs_review` is the state that matters: parsing has finished, the items are
+ * staged, and nothing has been written to `pages`. Every import stops there and
+ * waits for a person, whichever source it came from.
+ */
+export const importStatus = pgEnum('import_status', [
+  'pending',
+  'running',
+  'needs_review',
+  'applied',
+  'failed',
+  'cancelled',
+]);
+
+/** What a reviewer decided about one staged item. */
+export const importDecision = pgEnum('import_decision', ['create', 'skip', 'overwrite']);
+
 /**
  * PostgreSQL `tsvector`. Drizzle has no built-in mapping for it, and the
  * column is never read back into TypeScript — it exists for the index and for
@@ -657,6 +679,100 @@ export const skills = pgTable(
   ],
 );
 
+/**
+ * Imports: a batch of documentation brought in from somewhere else.
+ *
+ * The table exists because an import is staged rather than applied. Parsing a
+ * Confluence space or a PDF produces a guess about structure, and a guess must
+ * not silently become somebody's wiki — so the parsed result lands in
+ * `import_items`, a person reads it, edits the target paths, unticks what they
+ * do not want, and only then does anything reach `pages`. That review step is
+ * the product decision this schema encodes.
+ *
+ * `params` records what the import was pointed at and never how it got in. A
+ * Confluence import stores the site address and the space key; the e-mail and
+ * API token it used exist in memory for the length of one request and are
+ * written nowhere — not here, not in the audit log, not in an error message.
+ *
+ * An import is deleted with its items once it has been applied and nobody needs
+ * the record any more; the pages it created are ordinary pages and stay.
+ */
+export const imports = pgTable(
+  'imports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** The space the pages will be created in. An import never spans spaces. */
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    source: importSource('source').notNull(),
+    status: importStatus('status').notNull().default('pending'),
+    /**
+     * The person who started it. Agent tokens cannot import — an import is a
+     * bulk, irreversible-by-default write of somebody else's documents, and it
+     * is reviewed by a human before it happens — so this is always a user.
+     */
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    /** What the import was pointed at. Never a credential. */
+    params: jsonb('params').$type<Record<string, unknown>>().notNull().default({}),
+    /** Counts filled in as the import progresses: parsed, created, skipped. */
+    stats: jsonb('stats').$type<Record<string, unknown>>().notNull().default({}),
+    /** Why it failed, in the words the caller was given. */
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('imports_space_created_idx').on(table.spaceId, table.createdAt),
+    index('imports_workspace_status_idx').on(table.workspaceId, table.status),
+  ],
+);
+
+/**
+ * One page-to-be of an import.
+ *
+ * `source_id` is the identity the source itself used — a Confluence page id, a
+ * path inside a ZIP — and `parent_source_id` refers to it, so the tree survives
+ * re-ordering and a reviewer moving a page. `markdown` holds the converted body
+ * with its intra-import links still as placeholders; they are resolved when the
+ * preview is rendered and again when the import is applied, which is what keeps
+ * a link correct after a target path is edited.
+ *
+ * `decision` is the reviewer's: `create` by default, `skip` for anything they
+ * do not want, `overwrite` for a path that already has a page and should be
+ * replaced. `created_page_id` is filled in when the item is applied, so an
+ * import that is applied twice does not create the same page twice.
+ */
+export const importItems = pgTable(
+  'import_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    importId: uuid('import_id')
+      .notNull()
+      .references((): AnyPgColumn => imports.id, { onDelete: 'cascade' }),
+    sourceId: text('source_id').notNull(),
+    title: text('title').notNull(),
+    /** Absolute, normalised, unique within the import. A reviewer may change it. */
+    targetPath: text('target_path').notNull(),
+    parentSourceId: text('parent_source_id'),
+    markdown: text('markdown').notNull().default(''),
+    /** What the converter could not carry across, as `{code, detail}` objects. */
+    warnings: jsonb('warnings').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    decision: importDecision('decision').notNull().default('create'),
+    createdPageId: uuid('created_page_id').references((): AnyPgColumn => pages.id, {
+      onDelete: 'set null',
+    }),
+    ordering: integer('ordering').notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex('import_items_import_source_key').on(table.importId, table.sourceId),
+    index('import_items_import_ordering_idx').on(table.importId, table.ordering),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type Space = typeof spaces.$inferSelect;
 export type NewSpace = typeof spaces.$inferInsert;
@@ -679,3 +795,10 @@ export type NewAnchor = typeof anchors.$inferInsert;
 export type AnchorStateValue = (typeof anchorState.enumValues)[number];
 export type Skill = typeof skills.$inferSelect;
 export type NewSkill = typeof skills.$inferInsert;
+export type ImportRow = typeof imports.$inferSelect;
+export type NewImportRow = typeof imports.$inferInsert;
+export type ImportItemRow = typeof importItems.$inferSelect;
+export type NewImportItemRow = typeof importItems.$inferInsert;
+export type ImportSourceValue = (typeof importSource.enumValues)[number];
+export type ImportStatusValue = (typeof importStatus.enumValues)[number];
+export type ImportDecisionValue = (typeof importDecision.enumValues)[number];

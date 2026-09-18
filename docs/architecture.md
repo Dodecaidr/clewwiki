@@ -429,6 +429,74 @@ that is both installed on the right machine and allowed to touch the file
 system. It is a REST client like the rest of that package: it holds a token and
 has no other way in.
 
+### Staged imports
+
+Documentation arrives from four places — a Confluence space, a Notion export, a
+folder of Markdown, a PDF — and the structural decision is that **an import is
+staged, never applied on arrival**. `createImport` parses the source and writes
+`import_items`; the import stops at `needs_review`; `applyImport` is a separate
+call a person makes afterwards. Nothing reaches `pages` in between.
+
+The obvious alternative — parse and write in one step — was rejected because
+every one of the four sources produces a guess. A Confluence page tree is real
+structure and converts well; a PDF has no structure at all, only glyphs at
+coordinates, and its headings and tables are inferred from font sizes and x
+positions. Writing either straight into a wiki means the first time anybody
+reads the guess is after five hundred pages exist, and undoing a bulk write is
+much more work than reviewing one. Staging also gives the two things a
+migration actually needs: a target path a person can change before it becomes a
+URL, and a per-item record of everything the converter could not carry across.
+
+That record is the second decision: **nothing is dropped silently.** Every
+converter attaches typed warnings to the page they belong to — an unsupported
+Confluence macro, an attachment that stays behind, a Notion toggle that lost its
+fold, a PDF table the reader could not read with confidence. A macro with no
+Markdown equivalent becomes a visible `> [!NOTE]` naming it, so it is legible in
+the finished page as well as in the preview. A reviewer can see every place the
+import had to decide something.
+
+`packages/import` holds the whole pipeline and depends on nothing from the
+application: no database, no Next.js, no filesystem. It reads bytes and produces
+`ImportNode`s, which is what makes every converter testable against a fixture
+and what lets the ZIP reader and the Confluence client be written against their
+own limits. The application layer (`apps/web/src/lib/imports`) does the parts
+that need a database: staging, preview, applying, auditing.
+
+**Placement uses the application's own slug generator.** A second implementation
+of "what segment does this title get" would drift the first time one of them
+learned a transliteration rule, and an import that puts a page somewhere other
+than where the form would have put it is a bug nobody notices until the links
+break. So `pages/paths.ts` and `pages/slug.ts` moved into
+`@clewwiki/content` — `./paths` and `./slug` — and `apps/web` now re-exports
+them from the same module paths it always used. `packages/import` imports the
+same functions. Placement deliberately does *not* avoid paths the space already
+has: a collision is shown as a collision, with the natural path, and the
+reviewer decides between leaving it out, replacing what is there and moving it.
+Numbering it `-2` silently would hide the decision and produce a second copy of
+a page nobody asked for.
+
+**Links are resolved twice, from a placeholder.** A converter cannot know where
+a page will land — the tree is not placed until every node is read, and a
+reviewer may move one afterwards — so a link to another page of the same import
+is written as `clewwiki-import:<source id>` and stored that way. The preview
+resolves it to target paths, which is what the reviewer is deciding about;
+applying resolves it to the addresses of the pages the run creates. That second
+resolution is why `createPage` takes an optional `id`: a batch of pages that
+link to each other has to know where they will be before it writes the first
+body, and drawing the ids first is cheaper and more honest than writing every
+page twice. A placeholder nobody claims becomes plain text with the link's own
+label, and the item carries an `unresolved-link` warning.
+
+**Applying respects claims.** An overwrite goes through the ordinary claim
+protocol — take a lease, write under it, give it back — so a page somebody else
+is holding refuses the lease and the item is reported as skipped with the
+holder's name. An import is a bulk write, which is exactly the situation claims
+exist for, and "I was importing" is not a reason to take an edit away from the
+person making it. Each item is its own transaction inside `createPage`: one page
+that cannot be written does not roll back the pages that already were, because
+after a partial failure a reviewer is better served by a list of what landed
+than by nothing at all.
+
 Migration `0004_spaces` moved existing data in one transaction: a `MAIN` space
 per workspace that had pages or a repository, every page (soft-deleted ones
 included) assigned to it, uniqueness moved to `(space_id, path)`, the

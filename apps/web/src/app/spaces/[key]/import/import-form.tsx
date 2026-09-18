@@ -1,0 +1,177 @@
+'use client';
+
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { useTranslations } from 'next-intl';
+
+import { Alert } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Field, Input, Select } from '@/components/ui/field';
+
+/**
+ * Choosing a source and handing it over.
+ *
+ * Confluence is a form of fields; the other three are a file. The credential
+ * fields are `type="password"` and `autoComplete="off"`, and they are sent once
+ * — the component never puts them in component state that outlives the submit,
+ * and the server never writes them down. The hint under them says so, because a
+ * person typing an API token into a form deserves to be told what happens to it.
+ */
+
+export type ImportSource = 'confluence' | 'notion' | 'markdown' | 'pdf';
+
+const SOURCES: ImportSource[] = ['confluence', 'notion', 'markdown', 'pdf'];
+
+const ACCEPT: Record<Exclude<ImportSource, 'confluence'>, string> = {
+  notion: '.zip,application/zip',
+  markdown: '.zip,application/zip',
+  pdf: '.pdf,application/pdf',
+};
+
+export interface ImportFormProps {
+  spaceKey: string;
+  /** Where a started import is reviewed; the id is appended. */
+  reviewBase: string;
+}
+
+export function ImportForm({ spaceKey, reviewBase }: ImportFormProps) {
+  const t = useTranslations('imports');
+  const router = useRouter();
+  const [source, setSource] = useState<ImportSource>('confluence');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const form = event.currentTarget;
+    setPending(true);
+    setError(null);
+
+    try {
+      const endpoint = `/api/v1/spaces/${encodeURIComponent(spaceKey)}/imports`;
+      const response =
+        source === 'confluence'
+          ? await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                source: 'confluence',
+                base_url: valueOf(form, 'base_url'),
+                space_key: valueOf(form, 'space_key'),
+                email: valueOf(form, 'email'),
+                api_token: valueOf(form, 'api_token'),
+              }),
+            })
+          : await fetch(endpoint, { method: 'POST', body: uploadBody(form, source) });
+
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(messageOf(body) ?? t('errorGeneric'));
+        return;
+      }
+      const id = idOf(body);
+      if (id === null) {
+        setError(t('errorGeneric'));
+        return;
+      }
+      // The credential fields are cleared before anything navigates, so a
+      // back button cannot bring a token back onto the screen.
+      form.reset();
+      router.push(`${reviewBase}/${id}`);
+    } catch {
+      setError(t('errorGeneric'));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="grid gap-5">
+      <Field label={t('sourceLabel')} htmlFor="import-source" hint={t(`source_${source}_hint`)}>
+        <Select
+          id="import-source"
+          name="source"
+          value={source}
+          onChange={(event) => setSource(event.target.value as ImportSource)}
+        >
+          {SOURCES.map((value) => (
+            <option key={value} value={value}>
+              {t(`source_${value}`)}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      {source === 'confluence' ? (
+        <>
+          <Field label={t('baseUrl')} htmlFor="base_url" hint={t('baseUrlHint')}>
+            <Input id="base_url" name="base_url" required placeholder="https://example.atlassian.net" />
+          </Field>
+          <Field label={t('confluenceSpaceKey')} htmlFor="space_key" hint={t('confluenceSpaceKeyHint')}>
+            <Input id="space_key" name="space_key" required placeholder="ENG" />
+          </Field>
+          <Field label={t('email')} htmlFor="email" hint={t('emailHint')}>
+            <Input id="email" name="email" type="email" required autoComplete="off" />
+          </Field>
+          <Field label={t('apiToken')} htmlFor="api_token" hint={t('apiTokenHint')}>
+            <Input id="api_token" name="api_token" type="password" required autoComplete="off" />
+          </Field>
+          <Alert tone="info">{t('credentialsNotice')}</Alert>
+        </>
+      ) : (
+        <>
+          <Field label={t('file')} htmlFor="file" hint={t(`file_${source}_hint`)}>
+            <Input id="file" name="file" type="file" required accept={ACCEPT[source]} />
+          </Field>
+          {source === 'pdf' ? (
+            <>
+              <Field label={t('split')} htmlFor="split" hint={t('splitHint')}>
+                <Select id="split" name="split" defaultValue="single">
+                  <option value="single">{t('splitSingle')}</option>
+                  <option value="h1">{t('splitH1')}</option>
+                </Select>
+              </Field>
+              <Alert tone="info">{t('pdfNotice')}</Alert>
+            </>
+          ) : null}
+        </>
+      )}
+
+      {error ? <Alert tone="error">{error}</Alert> : null}
+
+      <div className="flex items-center gap-3">
+        <Button type="submit" disabled={pending}>
+          {pending ? t('reading') : t('start')}
+        </Button>
+        {pending ? <span className="text-sm text-muted-foreground">{t('readingHint')}</span> : null}
+      </div>
+    </form>
+  );
+}
+
+function valueOf(form: HTMLFormElement, name: string): string {
+  const field = form.elements.namedItem(name);
+  return field instanceof HTMLInputElement || field instanceof HTMLSelectElement ? field.value : '';
+}
+
+function uploadBody(form: HTMLFormElement, source: ImportSource): FormData {
+  const data = new FormData();
+  data.set('source', source);
+  const field = form.elements.namedItem('file');
+  const file = field instanceof HTMLInputElement ? field.files?.[0] : undefined;
+  if (file) data.set('file', file);
+  if (source === 'pdf') data.set('split', valueOf(form, 'split'));
+  return data;
+}
+
+function messageOf(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const error = (body as { error?: { message?: unknown } }).error;
+  return typeof error?.message === 'string' ? error.message : null;
+}
+
+function idOf(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const id = (body as { id?: unknown }).id;
+  return typeof id === 'string' ? id : null;
+}

@@ -9,7 +9,54 @@ tagged.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- Documentation import from four sources — a Confluence Cloud space, a Notion
+  "Export as Markdown & CSV" ZIP, a ZIP of Markdown files, and a PDF — with a
+  new `packages/import` library and migration `0006_imports`.
+- Imports are staged: the source is parsed into `import_items` and reviewed by
+  a person at `/spaces/{KEY}/import` — a tree with editable target paths,
+  per-item warnings, conflicts and claim holders marked, and checkboxes to
+  leave items out — before any page is created.
+- Import REST endpoints: `POST`/`GET /api/v1/spaces/{key}/imports`,
+  `GET`/`DELETE /api/v1/imports/{id}`,
+  `PATCH /api/v1/imports/{id}/items/{itemId}`,
+  `POST /api/v1/imports/{id}/apply` and `POST /api/v1/imports/{id}/cancel`.
+  Administrators and editors, signed-in sessions only.
+- Every page an import creates is audited as `page.imported`; the import itself
+  is audited as `import.created`, `import.applied`, `import.cancelled`,
+  `import.deleted` and `import.failed`.
+- An "Импорт" / "Import" section in the in-app guide, and entry points on the
+  space overview and in space settings, in both languages.
+
+### Changed
+
+- The path and slug generators moved from `apps/web/src/lib/pages` into
+  `@clewwiki/content` (`./paths`, `./slug`), so the import pipeline and the
+  application produce identical paths from identical titles. The application's
+  own modules re-export them, so every existing import site is unchanged.
+- `createPage` accepts an optional `id`, used only by the import pipeline: a
+  batch of pages that link to each other has to resolve those links before the
+  first body is written.
+
+### Security
+
+- Imported documents are treated as untrusted input throughout: storage XHTML is
+  parsed, never executed, `<script>` and `<style>` bodies are discarded, and
+  converted text is escaped before it becomes Markdown.
+- Confluence credentials are used for one run and stored nowhere — not in
+  `imports.params`, the audit log, or any log line. The site address must be
+  `https`.
+- ZIP archives are read defensively: central-directory only, no encrypted
+  archives, entry and expansion caps, bounded inflate, and unsafe entry names
+  skipped.
+- Upload limits: 200 MB per upload, 5 000 pages per import, 10 MB per page, and
+  10 imports awaiting review per space.
+- Agent tokens cannot import, and the endpoints refuse a bearer token with an
+  explanation rather than a scope check.
+- The import upload endpoint requires a matching `Origin` header outright,
+  because a multipart request cannot carry the `Content-Type: application/json`
+  that the rest of the cross-origin rule relies on.
 
 ## [0.1.0] - 2026-09-18
 

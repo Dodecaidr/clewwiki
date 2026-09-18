@@ -563,6 +563,56 @@ wanted.
 **Next: per-space permissions.** Membership per space (viewer, editor, admin),
 spaces an account cannot see, and the UI and REST checks that follow from it.
 
+## Documentation import — **complete**
+
+Bringing existing documentation in, so a team's first hour with clewwiki is not
+retyping what it already wrote. Four sources: a Confluence Cloud space, a Notion
+"Export as Markdown & CSV" ZIP, a ZIP of Markdown files, and a PDF.
+
+**Exit criteria**: each source produces a page tree with the structure it had,
+in the Markdown this project renders; nothing a converter cannot carry across is
+dropped silently; an import is reviewed by a person before any page exists; a
+path that is taken and a page somebody is holding are never overwritten by
+accident; Confluence credentials are used once and stored nowhere; every created
+page is audited; and the Confluence API is mocked in tests.
+
+**Status**: met.
+
+- `packages/import` is the pipeline, pure and framework-free: source adapters
+  produce a normalised tree, converters emit GFM with callouts as GitHub alerts,
+  a placement step assigns paths with the application's own slug generator, and
+  a link rewriter resolves intra-import links. `pages/paths.ts` and
+  `pages/slug.ts` moved into `@clewwiki/content` so both sides call one
+  generator; `apps/web` re-exports them from the paths it always used.
+- Migration `0006_imports` adds `imports` and `import_items`. An import stops at
+  `needs_review` and writes nothing to `pages` until `POST
+  /api/v1/imports/{id}/apply`.
+- REST: `POST` and `GET /api/v1/spaces/{key}/imports`, `GET` and `DELETE
+  /api/v1/imports/{id}`, `PATCH /api/v1/imports/{id}/items/{itemId}`, `POST
+  /api/v1/imports/{id}/apply` and `…/cancel`. Administrators and editors, human
+  session only.
+- UI: `/spaces/{KEY}/import` chooses a source and takes its input; the run page
+  shows the tree with editable target paths, per-item warnings, conflicts and
+  claim holders, checkboxes to leave items out, and the result afterwards —
+  every page created with a link, everything skipped with the reason. Entry
+  points on the space overview and in space settings, in both languages.
+- `unpdf` 1.8.1 is the one new runtime dependency, pinned exactly.
+
+Four decisions worth recording. **Staging rather than writing**: every source
+produces a guess about structure, a PDF most of all, and the first reading of a
+guess must not be after five hundred pages exist. **Nothing dropped silently**:
+an unsupported Confluence macro becomes a visible note naming it, and every
+lossy conversion attaches a typed warning to its page. **No uploads**: an
+imported image keeps pointing at the system it came from and says so, because an
+attachment store is a different threat surface and belongs to its own decision.
+**Agent tokens cannot import**: the human review is the safety property, and a
+token cannot perform it.
+
+**Next, if it is wanted**: an attachment store, so Confluence images stop
+depending on the old site; Confluence Server/Data Center, whose API is v1 and is
+untested here; and optical character recognition for scanned PDFs, which today
+are refused outright.
+
 ## Phase 7 — Launch
 
 Public launch of the repository.

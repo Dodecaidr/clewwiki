@@ -397,6 +397,14 @@ export async function listRevisions(
 /* ------------------------------------------------------------------ */
 
 export interface CreatePageInput {
+  /**
+   * The id the page is created with, when the caller needs to know it in
+   * advance. Only the import pipeline uses it: a batch of pages that link to
+   * each other has to resolve those links before the first body is written, and
+   * it cannot do that without knowing where the pages will be. Everything else
+   * leaves it out and lets PostgreSQL generate one.
+   */
+  id?: string;
   workspaceId: string;
   /** The space the page is created in. Parents are looked up inside it. */
   spaceId: string;
@@ -599,6 +607,7 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
       const [inserted] = await tx
         .insert(pages)
         .values({
+          ...(input.id === undefined ? {} : { id: input.id }),
           workspaceId: input.workspaceId,
           spaceId: space.id,
           parentId: target.parentId,

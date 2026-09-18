@@ -19,11 +19,20 @@ const nextConfig: NextConfig = {
   // The app lives in a workspace, so tracing has to start at the repo root or
   // the standalone bundle misses the linked packages.
   outputFileTracingRoot: path.join(rootDir, '..', '..'),
-  transpilePackages: ['@clewwiki/db', '@clewwiki/anchors', '@clewwiki/content', '@clewwiki/mcp-server'],
+  transpilePackages: [
+    '@clewwiki/db',
+    '@clewwiki/anchors',
+    '@clewwiki/content',
+    '@clewwiki/import',
+    '@clewwiki/mcp-server',
+  ],
   // The Postgres driver opens raw sockets and must not be bundled. The
   // tree-sitter runtime is an Emscripten module that loads its own
-  // WebAssembly; bundling it rewrites the module layout it depends on.
-  serverExternalPackages: ['postgres', 'web-tree-sitter'],
+  // WebAssembly; bundling it rewrites the module layout it depends on. `unpdf`
+  // ships a serverless PDF.js build that resolves its own standard fonts and
+  // character maps at run time from its package directory, which only survives
+  // if the package stays a package.
+  serverExternalPackages: ['postgres', 'web-tree-sitter', 'unpdf'],
   poweredByHeader: false,
   typescript: {
     ignoreBuildErrors: false,

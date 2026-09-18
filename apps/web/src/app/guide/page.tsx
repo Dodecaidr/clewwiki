@@ -99,6 +99,10 @@ const SECTIONS: Section[] = [
     blocks: [p('p1'), p('p2'), p('p3'), code('install'), p('p4'), p('p5'), p('p6')],
   },
   {
+    id: 'import',
+    blocks: [p('p1'), p('p2'), p('p3'), p('p4'), p('p5'), p('p6')],
+  },
+  {
     id: 'claims',
     blocks: [p('p1'), p('p2'), p('p3'), p('p4'), p('p5'), p('p6')],
   },

@@ -50,3 +50,30 @@ export function checkSessionMutation(request: RequestLike, baseUrl: string): Csr
   }
   return { ok: true };
 }
+
+/**
+ * The same check for the one endpoint that takes a file.
+ *
+ * An upload cannot be JSON, so the content-type half of the rule above does not
+ * apply — and `multipart/form-data` is exactly what a plain HTML form *can*
+ * send cross-origin without a preflight. The origin half therefore has to carry
+ * the whole check on its own, and it is tightened to compensate: a matching
+ * `Origin` header is required outright, rather than being one of two ways to
+ * pass. A browser sends `Origin` on every cross-origin form POST, so a forged
+ * submission is refused whether or not it also sets `Sec-Fetch-Site`.
+ */
+export function checkUploadMutation(request: RequestLike, baseUrl: string): CsrfDecision {
+  if (SAFE_METHODS.has(request.method.toUpperCase())) return { ok: true };
+
+  const expected = originOf(baseUrl);
+  const origin = request.headers.get('origin');
+  if (origin === null || expected === null || origin !== expected) {
+    return { ok: false, message: 'Cross-origin request refused for a cookie-authenticated upload' };
+  }
+
+  const contentType = request.headers.get('content-type') ?? '';
+  if (!/^multipart\/form-data\s*(;|$)/i.test(contentType.trim())) {
+    return { ok: false, message: 'Content-Type must be multipart/form-data' };
+  }
+  return { ok: true };
+}

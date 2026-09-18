@@ -226,6 +226,63 @@ partly in place, the gap is named rather than implied away.
   The CORS/Origin allowlist defaults to empty as a direct mitigation against
   DNS rebinding, a known risk class for locally or network-exposed MCP HTTP
   servers.
+- **Imported documents are untrusted input.** An import carries somebody else's
+  files into this instance, and every stage treats them as data. Confluence
+  storage XHTML is read by a parser that builds a tree and nothing else — it
+  executes nothing, and `<script>` and `<style>` bodies are read to their
+  closing tag and discarded rather than becoming content. Converted bodies are
+  Markdown and go through the same renderer as anything else, which drops raw
+  HTML and sanitises what is left. Text that came out of a document is escaped
+  before it is emitted, so a heading containing `[x](javascript:…)` becomes
+  those characters rather than a link. Nothing in an imported document is ever
+  read as an instruction, however it is phrased — the rule the rest of the
+  product already applies to stored page content applies here at the door.
+- **Archives are read defensively.** The ZIP reader walks the central directory
+  rather than trusting local headers, refuses encrypted archives, caps entries
+  (20 000) and expanded size (800 MB), and passes `maxOutputLength` to inflate
+  so an entry that under-reports itself cannot exhaust memory. Entry names that
+  are absolute, contain `..`, a backslash, a null byte or a drive letter are
+  skipped; no import writes to the filesystem at all, so a traversal name could
+  at worst have been a map key.
+- **Import credentials are used once and never stored.** The Confluence import
+  asks for an Atlassian account e-mail and an API token. They live in the
+  request handler's scope, are turned into a single `Authorization` header
+  inside the client, and are written nowhere: not to `imports.params`, not to
+  the audit log, not to a log line, not into an error message — the client's
+  own errors name neither the address nor the account, and a rejected
+  credential answers "Confluence refused the e-mail and API token" and stops
+  there. What is recorded is the site origin and the space key. The address
+  must be `https`, refused otherwise, because an API token sent over plain HTTP
+  is a token handed to the network. Operators should use a token belonging to
+  an account that can read the space and nothing more, and revoke it once the
+  migration is done. This is the same principle as the repository setting,
+  which stores the *name* of an environment variable and never a token; the
+  import differs only in that it needs no persistence at all.
+- **Upload limits are enforced at the edge and while parsing.** 200 MB per
+  upload, checked from `File.size` before a byte is read; 5 000 pages and 10 MB
+  of Markdown per page, checked inside the adapters; 10 imports waiting for
+  review per space, so staged copies of other people's documents cannot
+  accumulate unbounded. Anything over a limit is `400 validation` naming it.
+  Finished imports can be purged (`purgeFinishedImports`), because staged
+  Markdown is a copy of somebody else's documentation and there is no reason to
+  keep it once the import is over.
+- **Agent tokens cannot import.** The import endpoints refuse a bearer token
+  outright, with `forbidden` and a message saying why, rather than checking
+  scopes. The reason is structural: the safety of an import is the human review
+  in the middle of it — a person looks at the tree, the paths and the warnings
+  and decides what becomes pages. A token has no way to perform that judgement,
+  so a scope that let one import would either skip the review, which is the
+  whole protection, or stage something no one ever looks at. It would also hand
+  a leaked token a way to write hundreds of pages in one call and, for
+  Confluence, a place to have credentials for another system typed in. The
+  refusal is the feature.
+- **The upload endpoint has its own cross-origin check.** A multipart request
+  cannot carry `Content-Type: application/json`, which is half of the CSRF rule
+  everywhere else, and `multipart/form-data` is exactly what a cross-origin HTML
+  form can send without a preflight. So the origin half is tightened instead: a
+  matching `Origin` header is required outright, rather than being one of two
+  ways to pass. A browser sends `Origin` on every cross-origin form POST, so a
+  forged submission is refused whether or not it also sets `Sec-Fetch-Site`.
 - **CI scanning.** Every push and pull request runs `pnpm audit --audit-level
   high` as a blocking step and a gitleaks secret scan over the full history.
   Every job runs with `contents: read`, and third-party actions are pinned to a
@@ -248,6 +305,13 @@ partly in place, the gap is named rather than implied away.
   cover this threat model.
 - SSO/OIDC — a scope decision, not a security gap; credential-based login
   already satisfies the self-hosted-without-a-cloud-provider requirement.
+- Attachment and image storage — no import uploads files, and no endpoint
+  accepts one outside the import ZIP it parses in memory. An imported image
+  keeps pointing at the system it came from, or is reported as a warning. A
+  file store is a different threat surface (content sniffing, serving
+  attacker-supplied bytes from this origin) and is deliberately not opened here.
+- Optical character recognition for scanned PDFs — a PDF with no extractable
+  text is refused rather than passed to an external service.
 
 ## Pre-release review
 

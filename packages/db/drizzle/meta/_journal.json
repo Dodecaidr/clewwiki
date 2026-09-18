@@ -43,6 +43,13 @@
       "when": 1789720809755,
       "tag": "0005_rules_and_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789725682950,
+      "tag": "0006_imports",
+      "breakpoints": true
     }
   ]
 }
