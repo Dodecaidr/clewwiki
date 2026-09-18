@@ -4,6 +4,7 @@ import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { ImportForm } from './import-form';
+import { getImportMaxUploadMb } from '@/lib/env';
 import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { listImports } from '@/lib/imports/service';
 import { getSessionContext } from '@/lib/session';
@@ -73,7 +74,11 @@ export default async function SpaceImportPage({ params }: { params: Promise<{ ke
           <CardDescription>{t('formIntro')}</CardDescription>
         </CardHeader>
         <CardBody>
-          <ImportForm spaceKey={space.key} reviewBase={spaceImportHref(space.key)} />
+          <ImportForm
+            spaceKey={space.key}
+            reviewBase={spaceImportHref(space.key)}
+            uploadLimitMb={getImportMaxUploadMb()}
+          />
         </CardBody>
       </Card>
 

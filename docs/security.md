@@ -319,7 +319,7 @@ partly in place, the gap is named rather than implied away.
   product already applies to stored page content applies here at the door.
 - **Archives are read defensively.** The ZIP reader walks the central directory
   rather than trusting local headers, refuses encrypted archives, caps entries
-  (20 000) and expanded size (800 MB), and passes `maxOutputLength` to inflate
+  (20 000) and expanded size (256 MB by default, `IMPORT_MAX_EXPANDED_MB`), and passes `maxOutputLength` to inflate
   so an entry that under-reports itself cannot exhaust memory. Entry names that
   are absolute, contain `..`, a backslash, a null byte or a drive letter are
   skipped; no import writes to the filesystem at all, so a traversal name could
@@ -338,8 +338,43 @@ partly in place, the gap is named rather than implied away.
   migration is done. This is the same principle as the repository setting,
   which stores the *name* of an environment variable and never a token; the
   import differs only in that it needs no persistence at all.
+- **An import only talks to the public host it was given.** The Confluence
+  address is typed by a person, and after that the server at that address
+  decides what is requested next — through redirects and through the `next` link
+  of every listing — on a request that carries a credential. Left alone that is
+  server-side request forgery: a way for any editor to make the instance probe
+  its own loopback, its private network or a cloud metadata endpoint, reading
+  the outcome from the error. So the address must be `https` and must not be, or
+  resolve to, a loopback, private, carrier-grade NAT, link-local, multicast or
+  reserved address, in IPv4, IPv6 or IPv4-mapped form, and every address a name
+  resolves to must pass (`assertPublicHost`); a `next` link is followed only as
+  a path on the origin that was given, and one naming any other origin ends the
+  import; redirects are not followed; and a response is read up to 64 MB and no
+  further. **The check is not raceable.** Checking an address and then
+  connecting to its name would be two resolutions, and a name server that says
+  "public" to the first and `127.0.0.1` to the second — DNS rebinding — would
+  pass one and land the other. The import's transport therefore gives the socket
+  a `lookup` of its own that resolves the name, refuses unless every address is
+  public, and returns what it checked: the address validated is the address
+  dialled, and there is no second lookup to answer differently. TLS still
+  verifies the certificate against the host name. Restricting the container's
+  egress to outbound `443` remains good practice, and is no longer what this
+  control depends on.
+- **What one import can cost is bounded, and the bound is the operator's.** An
+  import holds its upload and everything a ZIP expands to in memory until it is
+  staged. Both are capped — `IMPORT_MAX_UPLOAD_MB` (200) and
+  `IMPORT_MAX_EXPANDED_MB` (256) — only Markdown and CSV entries are expanded at
+  all, and importing is for signed-in people. On a host with less memory than
+  the two together, lower them: a process that runs out is killed, not refused.
+- **Imported markup cannot exhaust the reader.** The storage-format reader is
+  iterative, recognises no DOCTYPE and therefore no entity definitions, bounds
+  the depth of the tree it builds (256) because everything that walks the tree
+  recurses, and reads a body in linear time.
 - **Upload limits are enforced at the edge and while parsing.** 200 MB per
-  upload, checked from `File.size` before a byte is read; 5 000 pages and 10 MB
+  upload, refused from the declared `Content-Length` before a byte is read —
+  `413` when it is over the limit, `411` when it is absent, since a body of
+  unknown length cannot be bounded without buffering it — and checked again from
+  `File.size` once parsed; 5 000 pages and 10 MB
   of Markdown per page, checked inside the adapters; 10 imports waiting for
   review per space, so staged copies of other people's documents cannot
   accumulate unbounded. Anything over a limit is `400 validation` naming it.

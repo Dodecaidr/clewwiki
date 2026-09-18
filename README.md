@@ -684,6 +684,8 @@ container.
 | `AGENT_TOKEN_RATE_LIMIT_WINDOW` | no | `60` | Window length in seconds. |
 | `DISCUSSION_MESSAGE_RATE_LIMIT_MAX` | no | `20` | Discussion messages allowed per actor per window, on top of the general token limit. |
 | `DISCUSSION_MESSAGE_RATE_LIMIT_WINDOW` | no | `60` | Window length in seconds for the message budget. |
+| `IMPORT_MAX_UPLOAD_MB` | no | `200` | Largest import upload. Refused from the declared `Content-Length`, before the body is read. |
+| `IMPORT_MAX_EXPANDED_MB` | no | `256` | Most an uploaded ZIP may expand to. The upload and what it expands to are held in memory together until the import is staged, so on a host with little memory lower both: a container that runs out is killed, not refused. |
 | `CLEWWIKI_VERSION` | no | `latest` | Which published tag of `ghcr.io/dodecaidr/clewwiki` to run. Pin a version in production. Ignored when building from source. |
 | `WEB_BIND_ADDRESS` | no | `127.0.0.1` | Host interface compose publishes the app on. Change it only for a proxy on another machine, and then to a private address. |
 | `WEB_PORT` | no | `3000` | Host port compose publishes the app on. |
@@ -930,9 +932,10 @@ a log line. What the import row records is the site address and the space key.
 Use a token belonging to an account that can read the space and nothing more,
 and revoke it afterwards if it was made for the migration.
 
-Limits: 200 MB per upload, 5 000 pages per import, 10 MB per page, and 10
-imports waiting for review in one space at a time. An archive is refused if it
-expands past 800 MB or holds more than 20 000 entries. Anything over a limit is
+Limits: 200 MB per upload (`IMPORT_MAX_UPLOAD_MB`), 5 000 pages per import, 10 MB
+per page, and 10 imports waiting for review in one space at a time. An archive
+is refused if it expands past 256 MB (`IMPORT_MAX_EXPANDED_MB`) or holds more
+than 20 000 entries. Anything over a limit is
 `400 validation` naming it.
 
 Imports are available to signed-in administrators and editors. **An agent token
@@ -1472,7 +1475,7 @@ noise.
 | `PATCH /api/v1/spaces/{key}/skills/{slug}` | session or token | `pages:write` | Change a skill. Fields left out keep their stored values. |
 | `DELETE /api/v1/spaces/{key}/skills/{slug}` | session or token | `pages:write` + `pages:delete` | Remove a skill. The slug becomes free again. |
 | `GET /api/v1/spaces/{key}/export` | session or token | `pages:read` | The whole space as a ZIP of Markdown files mirroring the tree. Takes `format=md`. |
-| `POST /api/v1/spaces/{key}/imports` | admin or editor session | — | Start an import. JSON for Confluence (`base_url`, `space_key`, `email`, `api_token` — the last two are used once and never stored); `multipart/form-data` with `source` and `file` for a Notion ZIP, a Markdown ZIP or a PDF. Answers `201` with the import in `needs_review`; nothing is written to pages. Refused to agent tokens. |
+| `POST /api/v1/spaces/{key}/imports` | admin or editor session | — | Start an import. JSON for Confluence (`base_url`, `space_key`, `email`, `api_token` — the last two are used once and never stored); `multipart/form-data` with `source` and `file` for a Notion ZIP, a Markdown ZIP or a PDF. Answers `201` with the import in `needs_review`; nothing is written to pages. `413` when the declared `Content-Length` is over 200 MB and `411` when it is absent; `400 validation` for a Confluence address that is not a public `https` host. Refused to agent tokens. |
 | `GET /api/v1/spaces/{key}/imports` | admin or editor session | — | The imports of a space, newest first. |
 | `GET /api/v1/imports/{id}` | admin or editor session | — | One import: status, counts, and every staged item with its target path, warnings, converted Markdown, the page already at that path, and who holds a claim on it. |
 | `PATCH /api/v1/imports/{id}/items/{itemId}` | admin or editor session | — | The reviewer's edit: `decision` (`create`, `skip`, `overwrite`) and `target_path`. `409` once the import is no longer open for review, or when another item already targets that path. |

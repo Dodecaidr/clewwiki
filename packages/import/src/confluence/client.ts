@@ -13,11 +13,42 @@
  * of one run and drops them. `describe()` exists so a caller can record what
  * the import connected to without going near the secret.
  *
- * `fetchImpl` is injectable so the whole client is testable without a network,
- * which is how the suite exercises pagination, rate limiting and error mapping.
+ * **The address is somebody's input, and so is everything the server says.** A
+ * person types the address, and from then on the server at that address decides
+ * what the client requests next, through redirects and through the `next` link
+ * of every listing. Left alone, that is a way to make this process send
+ * requests — with a credential attached — to any host it can reach: a metadata
+ * endpoint, an admin port on the loopback, a service on the private network. So:
+ *
+ * - the address must be `https` and must not resolve to a loopback, private,
+ *   link-local or otherwise non-public address (`assertPublicHost`);
+ * - a `next` link is followed only as a path on the origin that was typed — an
+ *   absolute link to anywhere else ends the import;
+ * - redirects are not followed at all;
+ * - a response is read up to a fixed size and no further.
+ *
+ * A check followed by a request would be two lookups, and a name server that
+ * answers differently the second time — DNS rebinding — would pass the first
+ * and land the second. So the default transport (`transport.ts`) makes the same
+ * check inside the one resolution the socket uses: the address validated is the
+ * address dialled. The check made here, before any request, is what gives a
+ * clean refusal for a literal address and what still holds when a test injects
+ * its own `fetchImpl`.
+ *
+ * `fetchImpl` and `lookup` are injectable so the whole client is testable
+ * without a network, which is how the suite exercises pagination, rate
+ * limiting, error mapping and every refusal above.
  */
 
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+
 import { ImportError } from '../limits';
+import { isNonPublicAddress } from './address';
+import { createGuardedFetch } from './transport';
+
+export { isNonPublicAddress } from './address';
+export { createGuardedFetch, createGuardedLookup } from './transport';
 
 export interface ConfluenceCredentials {
   /** `https://example.atlassian.net`, with or without `/wiki`. */
@@ -49,10 +80,58 @@ export interface ConfluenceClientOptions {
   sleep?: (ms: number) => Promise<void>;
   /** Page size asked for; Confluence caps it at 250. */
   pageSize?: number;
+  /** Resolves a host name to its addresses. Replaced in tests. */
+  lookup?: (hostname: string) => Promise<string[]>;
+  /** Largest response body read, in bytes. */
+  maxResponseBytes?: number;
 }
 
 const DEFAULT_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 60_000;
+
+/**
+ * A listing of 250 pages with their bodies is a few megabytes. This is far
+ * above that and far below what would hurt: the server on the other end picks
+ * the size of its answer, and an answer is held in memory while it is parsed.
+ */
+const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+
+async function systemLookup(hostname: string): Promise<string[]> {
+  const found = await dnsLookup(hostname, { all: true, verbatim: true });
+  return found.map((entry) => entry.address);
+}
+
+/**
+ * Refuses an address that is, or resolves to, anything but public hosts. Every
+ * address a name resolves to must be public: one private record among several
+ * is how a name is made to land where it should not.
+ */
+export async function assertPublicHost(
+  hostname: string,
+  lookup: (hostname: string) => Promise<string[]> = systemLookup,
+): Promise<void> {
+  const refusal = new ImportError(
+    'validation',
+    'The Confluence address must be a public host. Addresses on a private network, the loopback and link-local ranges are not imported from.',
+  );
+  const bare = hostname.replace(/^\[|\]$/g, '');
+  if (bare === '' || bare.toLowerCase() === 'localhost' || bare.toLowerCase().endsWith('.localhost')) {
+    throw refusal;
+  }
+  if (isIP(bare) !== 0) {
+    if (isNonPublicAddress(bare)) throw refusal;
+    return;
+  }
+  let addresses: string[];
+  try {
+    addresses = await lookup(bare);
+  } catch {
+    throw new ImportError('validation', 'The Confluence address could not be resolved');
+  }
+  if (addresses.length === 0 || addresses.some((address) => isNonPublicAddress(address))) {
+    throw refusal;
+  }
+}
 
 export class ConfluenceClient {
   private readonly origin: string;
@@ -62,15 +141,21 @@ export class ConfluenceClient {
   private readonly maxRetries: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly pageSize: number;
+  private readonly lookup: ((hostname: string) => Promise<string[]>) | undefined;
+  private readonly maxResponseBytes: number;
+  private hostChecked = false;
 
   constructor(credentials: ConfluenceCredentials, options: ConfluenceClientOptions = {}) {
     this.origin = normalizeBaseUrl(credentials.baseUrl);
     this.authorization = `Basic ${Buffer.from(`${credentials.email}:${credentials.apiToken}`, 'utf8').toString('base64')}`;
-    this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
     this.maxRetries = options.maxRetries ?? 5;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.pageSize = Math.min(Math.max(options.pageSize ?? 100, 1), 250);
+    this.lookup = options.lookup;
+    this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    this.fetchImpl =
+      options.fetchImpl ?? createGuardedFetch({ maxResponseBytes: this.maxResponseBytes });
   }
 
   /** What may be written down about this connection: an origin, never a secret. */
@@ -78,18 +163,58 @@ export class ConfluenceClient {
     return { base_url: this.origin };
   }
 
-  /** The `/wiki` prefix Confluence Cloud serves the API under. */
+  /**
+   * The URL of an API path. Only a path: whatever the server suggested has
+   * already been reduced to one by `nextLink`, so there is no input here that
+   * can name another host.
+   */
   private url(path: string): string {
-    return path.startsWith('http') ? path : `${this.origin}/wiki${path.startsWith('/') ? path : `/${path}`}`;
+    return `${this.origin}/wiki${path.startsWith('/') ? path : `/${path}`}`;
+  }
+
+  /** Reads a body up to the cap and no further, whatever `Content-Length` claimed. */
+  private async readBody(response: Response): Promise<string> {
+    const tooLarge = new ImportError('unavailable', 'Confluence answered with more than this import will read');
+    const declared = Number(response.headers.get('content-length') ?? '');
+    if (Number.isFinite(declared) && declared > this.maxResponseBytes) throw tooLarge;
+    if (!response.body) return response.text();
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > this.maxResponseBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw tooLarge;
+      }
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks).toString('utf8');
   }
 
   private async request(path: string): Promise<unknown> {
+    if (!this.hostChecked) {
+      await assertPublicHost(new URL(this.origin).hostname, this.lookup);
+      this.hostChecked = true;
+    }
     const target = this.url(path);
     for (let attempt = 0; ; attempt += 1) {
       const response = await this.fetchImpl(target, {
         headers: { Authorization: this.authorization, Accept: 'application/json' },
-        redirect: 'follow',
+        // Never followed: a redirect is the server choosing where the next
+        // request, and the credential on it, goes.
+        redirect: 'manual',
       });
+
+      if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+        throw new ImportError(
+          'validation',
+          'Confluence answered with a redirect. Give the address of the site itself, such as https://example.atlassian.net',
+        );
+      }
 
       if (response.status === 429 || response.status === 503) {
         if (attempt >= this.maxRetries) {
@@ -110,8 +235,9 @@ export class ConfluenceClient {
         throw new ImportError('unavailable', `Confluence answered ${response.status}`);
       }
 
+      const text = await this.readBody(response);
       try {
-        return (await response.json()) as unknown;
+        return JSON.parse(text) as unknown;
       } catch {
         throw new ImportError('unavailable', 'Confluence answered with something that is not JSON');
       }
@@ -150,7 +276,7 @@ export class ConfluenceClient {
         if (page !== null) pages.push(page);
         if (pages.length >= limit) break;
       }
-      next = nextLink(body);
+      next = nextLink(body, this.origin);
     }
     return pages;
   }
@@ -210,12 +336,36 @@ function asString(value: unknown): string | null {
   return null;
 }
 
-function nextLink(body: unknown): string | null {
+/**
+ * The next page of a listing, as a path under `/wiki` on the origin the import
+ * was given — or an error. The link is the server's say-so about where to send
+ * the next authenticated request, so an absolute link is accepted only when it
+ * points back at that same origin, and is reduced to its path either way.
+ */
+export function nextLink(body: unknown, origin: string): string | null {
   const links = record(record(body)?.['_links']);
   const next = asString(links?.['next']);
   if (next === null || next === '') return null;
-  // v2 answers with a path relative to `/wiki`; both forms are accepted.
-  return next.startsWith('/wiki') ? next.slice('/wiki'.length) : next;
+
+  let path = next;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(next) || next.startsWith('//')) {
+    let parsed: URL;
+    try {
+      parsed = new URL(next, origin);
+    } catch {
+      throw new ImportError('unavailable', 'Confluence answered with a next link that is not a URL');
+    }
+    if (parsed.origin !== origin) {
+      throw new ImportError(
+        'unavailable',
+        'Confluence pointed the next page of the listing at another host, which an import does not follow',
+      );
+    }
+    path = `${parsed.pathname}${parsed.search}`;
+  }
+  if (!path.startsWith('/')) path = `/${path}`;
+  // v2 answers with a path relative to the site root; both forms are accepted.
+  return path.startsWith('/wiki/') ? path.slice('/wiki'.length) : path;
 }
 
 function toPage(value: unknown, origin: string): ConfluencePage | null {

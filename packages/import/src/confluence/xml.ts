@@ -31,6 +31,13 @@ export interface XmlText {
 
 export type XmlNode = XmlElement | XmlText;
 
+/**
+ * Deepest nesting the tree is given. Real storage format is a few dozen levels
+ * at the outside; the bound is for a document built to overflow the stack of
+ * whatever reads the tree next.
+ */
+export const MAX_DEPTH = 256;
+
 /** Elements that never have a closing tag in the documents this reads. */
 const VOID_ELEMENTS = new Set([
   'area',
@@ -132,6 +139,9 @@ function parseAttributes(source: string): Record<string, string> {
  * the same mistake.
  */
 export function parseXml(source: string): XmlElement {
+  // Lowercased once, and only if a `<script>` or `<style>` needs its end found:
+  // doing it per element makes a body of many of them quadratic.
+  let lowered: string | null = null;
   const root: XmlElement = { type: 'element', name: '#root', attrs: {}, children: [] };
   const stack: XmlElement[] = [root];
   const top = (): XmlElement => stack[stack.length - 1] ?? root;
@@ -211,11 +221,15 @@ export function parseXml(source: string): XmlElement {
     top().children.push(element);
 
     if (!selfClosing && !VOID_ELEMENTS.has(name)) {
-      stack.push(element);
+      // Past the depth bound an element is kept but no longer nested into: its
+      // content lands in the deepest element allowed. Everything that walks
+      // this tree recurses, and the document came from somebody else's server.
+      if (stack.length <= MAX_DEPTH) stack.push(element);
       // A `<script>` or `<style>` body is not markup and must not be parsed as
       // such; it is read to its closing tag and thrown away with the element.
       if (name === 'script' || name === 'style') {
-        const end = source.toLowerCase().indexOf(`</${name}`, cursor);
+        lowered ??= source.toLowerCase();
+        const end = lowered.indexOf(`</${name}`, cursor);
         cursor = end === -1 ? source.length : end;
       }
     }

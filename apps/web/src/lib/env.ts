@@ -64,6 +64,25 @@ export function getDiscussionMessageRateLimitWindowSeconds(): number {
 }
 
 /**
+ * Largest import upload, in megabytes. The whole upload is held in memory while
+ * it is parsed, so this is a statement about the instance's memory as much as
+ * about what people may import.
+ */
+export function getImportMaxUploadMb(): number {
+  return optionalNumber('IMPORT_MAX_UPLOAD_MB', 200);
+}
+
+/**
+ * Most an uploaded archive may expand to, in megabytes. Expanded entries are
+ * held in memory alongside the upload until the import is staged: the two
+ * together are what one import can cost, and a container with less memory than
+ * that is killed rather than refused. Lower both on a small instance.
+ */
+export function getImportMaxExpandedMb(): number {
+  return optionalNumber('IMPORT_MAX_EXPANDED_MB', 256);
+}
+
+/**
  * Whether the streamable HTTP MCP transport is mounted at `/mcp`.
  *
  * Off unless the operator says otherwise, and the route answers 404 rather

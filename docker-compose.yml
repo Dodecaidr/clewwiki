@@ -54,6 +54,14 @@ services:
       AGENT_TOKEN_RATE_LIMIT_WINDOW: ${AGENT_TOKEN_RATE_LIMIT_WINDOW:-60}
       RUN_MIGRATIONS_ON_START: ${RUN_MIGRATIONS_ON_START:-true}
       CLAIM_SWEEP_INTERVAL_SECONDS: ${CLAIM_SWEEP_INTERVAL_SECONDS:-60}
+      DISCUSSION_SWEEP_INTERVAL_SECONDS: ${DISCUSSION_SWEEP_INTERVAL_SECONDS:-300}
+      DISCUSSION_MESSAGE_RATE_LIMIT_MAX: ${DISCUSSION_MESSAGE_RATE_LIMIT_MAX:-20}
+      DISCUSSION_MESSAGE_RATE_LIMIT_WINDOW: ${DISCUSSION_MESSAGE_RATE_LIMIT_WINDOW:-60}
+      # One import holds its upload and everything it expands to in memory at
+      # once. On a host with little memory lower both, or an import that is
+      # within the limits can still get the container killed.
+      IMPORT_MAX_UPLOAD_MB: ${IMPORT_MAX_UPLOAD_MB:-200}
+      IMPORT_MAX_EXPANDED_MB: ${IMPORT_MAX_EXPANDED_MB:-256}
       MCP_HTTP_ENABLED: ${MCP_HTTP_ENABLED:-false}
       MCP_HTTP_ALLOWED_ORIGINS: ${MCP_HTTP_ALLOWED_ORIGINS:-}
       # First-run setup requires a one-time token. Leave it empty and the app

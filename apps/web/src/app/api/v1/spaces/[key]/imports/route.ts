@@ -125,7 +125,40 @@ async function readJson(request: Request): Promise<ReadResult> {
   };
 }
 
+/** What a multipart envelope adds around the file: boundaries, headers, the other fields. */
+const MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
+
+/**
+ * Refuses an upload by its declared size, before a byte of it is read.
+ *
+ * `request.formData()` buffers the whole body, so a limit checked on the parsed
+ * file is checked after the memory has been spent. The declared length is
+ * checked first instead, and it has to be declared: a body of unknown length
+ * cannot be bounded without reading it. The server does not read past the
+ * length a request declares, so a false one buys nothing.
+ */
+function refuseOversizedUpload(request: Request): ReturnType<typeof apiError> | null {
+  const limits = importLimits();
+  const header = request.headers.get('content-length');
+  if (header === null || !/^\d+$/.test(header.trim())) {
+    return apiError(411, 'validation', 'An upload must declare its size (Content-Length)');
+  }
+  const declared = Number(header.trim());
+  if (declared > limits.uploadBytes + MULTIPART_OVERHEAD_BYTES) {
+    return apiError(
+      413,
+      'validation',
+      `The upload is larger than the ${Math.round(limits.uploadBytes / (1024 * 1024))} MB limit`,
+      { bytes: declared, limit: limits.uploadBytes },
+    );
+  }
+  return null;
+}
+
 async function readUpload(request: Request): Promise<ReadResult> {
+  const oversized = refuseOversizedUpload(request);
+  if (oversized) return { response: oversized };
+
   let form: FormData;
   try {
     form = await request.formData();

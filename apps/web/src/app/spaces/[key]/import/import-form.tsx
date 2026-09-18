@@ -30,11 +30,13 @@ const ACCEPT: Record<Exclude<ImportSource, 'confluence'>, string> = {
 
 export interface ImportFormProps {
   spaceKey: string;
+  /** The instance's upload limit, shown next to the file field. */
+  uploadLimitMb: number;
   /** Where a started import is reviewed; the id is appended. */
   reviewBase: string;
 }
 
-export function ImportForm({ spaceKey, reviewBase }: ImportFormProps) {
+export function ImportForm({ spaceKey, reviewBase, uploadLimitMb }: ImportFormProps) {
   const t = useTranslations('imports');
   const router = useRouter();
   const [source, setSource] = useState<ImportSource>('confluence');
@@ -120,7 +122,7 @@ export function ImportForm({ spaceKey, reviewBase }: ImportFormProps) {
         </>
       ) : (
         <>
-          <Field label={t('file')} htmlFor="file" hint={t(`file_${source}_hint`)}>
+          <Field label={t('file')} htmlFor="file" hint={t(`file_${source}_hint`, { limit: uploadLimitMb })}>
             <Input id="file" name="file" type="file" required accept={ACCEPT[source]} />
           </Field>
           {source === 'pdf' ? (

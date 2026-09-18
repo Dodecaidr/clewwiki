@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { convertStorageToMarkdown } from '../src/confluence/storage';
-import { parseXml, textOf } from '../src/confluence/xml';
+import { MAX_DEPTH, parseXml, textOf } from '../src/confluence/xml';
 
 /**
  * One test per construct the converter claims to support, then one realistic
@@ -43,6 +43,40 @@ describe('storage-format reader', () => {
     expect(result.markdown).not.toContain('alert');
     expect(result.markdown).toContain('before');
     expect(result.markdown).toContain('after');
+  });
+});
+
+describe('storage-format reader, hostile input', () => {
+  type Element = ReturnType<typeof parseXml>;
+
+  function depthOf(node: Element): number {
+    let depth = 0;
+    let current: Element | undefined = node;
+    while (current) {
+      const next: Element | undefined = current.children.find(
+        (child): child is Element => child.type === 'element',
+      );
+      if (!next) break;
+      depth += 1;
+      current = next;
+    }
+    return depth;
+  }
+
+  it('bounds the depth of the tree, keeping the text', () => {
+    const nested = `${'<div>'.repeat(50_000)}deep${'</div>'.repeat(50_000)}`;
+    const tree = parseXml(nested);
+    expect(depthOf(tree)).toBeLessThanOrEqual(MAX_DEPTH + 1);
+    // Everything that walks the tree recurses; this is the call that overflowed.
+    expect(textOf(tree)).toBe('deep');
+  });
+
+  it('reads a body of many script elements in linear time', () => {
+    const body = `${'<script>x</script>'.repeat(40_000)}<p>after</p>`;
+    const started = performance.now();
+    const tree = parseXml(body);
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(textOf(tree)).toContain('after');
   });
 });
 

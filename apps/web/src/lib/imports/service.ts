@@ -12,6 +12,7 @@ import { InvalidPathError, normalizePath } from '@clewwiki/content/paths';
 import { recordAudit } from '../audit';
 import { acquireClaim, getActiveClaimsForPage, releaseClaim } from '../claims/service';
 import { getDatabase } from '../db';
+import { getImportMaxExpandedMb, getImportMaxUploadMb } from '../env';
 import { PageServiceError, isPageServiceError } from '../pages/errors';
 import { createPage, updatePage } from '../pages/service';
 import { spacePageHref } from '../spaces/urls';
@@ -104,7 +105,11 @@ const itemColumns = {
 export const MAX_OPEN_IMPORTS_PER_SPACE = 10;
 
 export function importLimits(): ImportLimits {
-  return DEFAULT_IMPORT_LIMITS;
+  return {
+    ...DEFAULT_IMPORT_LIMITS,
+    uploadBytes: getImportMaxUploadMb() * 1024 * 1024,
+    expandedBytes: getImportMaxExpandedMb() * 1024 * 1024,
+  };
 }
 
 /* ------------------------------------------------------------------ */

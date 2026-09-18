@@ -24,9 +24,13 @@ export const DEFAULT_IMPORT_LIMITS: ImportLimits = {
   uploadBytes: 200 * 1024 * 1024,
   pages: 5_000,
   pageBytes: 10 * 1024 * 1024,
-  // Four times the upload cap: enough for Markdown, which compresses well,
-  // and far short of what a zip bomb needs to exhaust a process.
-  expandedBytes: 800 * 1024 * 1024,
+  // What is expanded is held in memory until the import is staged, so this is
+  // sized by what a small container can spare rather than by what an archive
+  // might hold. Only Markdown and CSV entries are expanded at all — images and
+  // attachments are never read — and a quarter of a gigabyte of those is more
+  // documentation than any space has. An instance with memory to spare raises
+  // it (`IMPORT_MAX_EXPANDED_MB`).
+  expandedBytes: 256 * 1024 * 1024,
   zipEntries: 20_000,
 };
 

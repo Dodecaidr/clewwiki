@@ -180,12 +180,28 @@ describe.skipIf(!probe.reachable)('documentation import', () => {
     });
   }
 
-  function upload(account: TestAccount, target: string, form: FormData): Request {
-    return new Request(`${BASE}${target}`, {
-      method: 'POST',
-      body: form,
-      headers: { cookie: account.cookie, origin: BASE },
-    });
+  /**
+   * A multipart request as a browser sends it: with the length of its body
+   * declared. `new Request(url, { body: form })` leaves `Content-Length` out,
+   * which no real upload does and which the endpoint refuses.
+   */
+  async function upload(
+    account: TestAccount,
+    target: string,
+    form: FormData,
+    overrides: Record<string, string> = {},
+  ): Promise<Request> {
+    const encoded = new Response(form);
+    const bytes = new Uint8Array(await encoded.arrayBuffer());
+    const headers: Record<string, string> = {
+      cookie: account.cookie,
+      origin: BASE,
+      'content-type': encoded.headers.get('content-type') ?? '',
+      'content-length': String(bytes.byteLength),
+      ...overrides,
+    };
+    for (const [name, value] of Object.entries(headers)) if (value === '') delete headers[name];
+    return new Request(`${BASE}${target}`, { method: 'POST', body: bytes, headers });
   }
 
   function bearer(token: string, target: string, init: RequestInit = {}): Request {
@@ -232,7 +248,7 @@ describe.skipIf(!probe.reachable)('documentation import', () => {
     form.set('source', 'markdown');
     form.set('file', new File([zip as BlobPart], 'docs.zip', { type: 'application/zip' }));
     return json(
-      await importsRoute.POST(upload(account, `/api/v1/spaces/${key}/imports`, form), keyParams(key)),
+      await importsRoute.POST(await upload(account, `/api/v1/spaces/${key}/imports`, form), keyParams(key)),
     );
   }
 
@@ -385,7 +401,7 @@ describe.skipIf(!probe.reachable)('documentation import', () => {
       form.set('source', 'markdown');
       form.set('file', new File([DOCS_ZIP as BlobPart], 'docs.zip'));
       const response = await importsRoute.POST(
-        upload(admin, `/api/v1/spaces/${otherSpaceKey}/imports`, form),
+        await upload(admin, `/api/v1/spaces/${otherSpaceKey}/imports`, form),
         keyParams(otherSpaceKey),
       );
       expect(response.status).toBe(404);
@@ -684,12 +700,82 @@ describe.skipIf(!probe.reachable)('documentation import', () => {
       form.set('file', new File([], 'empty.zip'));
       const { status, body } = await json(
         await importsRoute.POST(
-          upload(admin, `/api/v1/spaces/${spaceKey}/imports`, form),
+          await upload(admin, `/api/v1/spaces/${spaceKey}/imports`, form),
           keyParams(spaceKey),
         ),
       );
       expect(status).toBe(400);
       expect(String(body['error']?.message)).toMatch(/empty/i);
+    });
+
+    it('refuses an upload by its declared size, before reading it', async () => {
+      const form = new FormData();
+      form.set('source', 'markdown');
+      form.set('file', new File([DOCS_ZIP as BlobPart], 'docs.zip'));
+
+      // The body here is small; what is refused is what the request claims.
+      const huge = await json(
+        await importsRoute.POST(
+          await upload(admin, `/api/v1/spaces/${spaceKey}/imports`, form, {
+            'content-length': String(5 * 1024 * 1024 * 1024),
+          }),
+          keyParams(spaceKey),
+        ),
+      );
+      expect(huge.status).toBe(413);
+      expect(huge.body['error']?.details).toMatchObject({ limit: 200 * 1024 * 1024 });
+
+      for (const declared of ['', 'lots', '-1']) {
+        const undeclared = await importsRoute.POST(
+          await upload(admin, `/api/v1/spaces/${spaceKey}/imports`, form, {
+            'content-length': declared,
+          }),
+          keyParams(spaceKey),
+        );
+        expect(undeclared.status, JSON.stringify(declared)).toBe(411);
+      }
+    });
+
+    it('holds an import to the limits the operator set', async () => {
+      const previous = {
+        upload: process.env.IMPORT_MAX_UPLOAD_MB,
+        expanded: process.env.IMPORT_MAX_EXPANDED_MB,
+      };
+      process.env.IMPORT_MAX_UPLOAD_MB = '1';
+      process.env.IMPORT_MAX_EXPANDED_MB = '1';
+      try {
+        const form = new FormData();
+        form.set('source', 'markdown');
+        form.set('file', new File([DOCS_ZIP as BlobPart], 'docs.zip'));
+        const declaredTooLarge = await json(
+          await importsRoute.POST(
+            await upload(admin, `/api/v1/spaces/${spaceKey}/imports`, form, {
+              'content-length': String(3 * 1024 * 1024),
+            }),
+            keyParams(spaceKey),
+          ),
+        );
+        expect(declaredTooLarge.status).toBe(413);
+        expect(declaredTooLarge.body['error']?.details).toMatchObject({ limit: 1024 * 1024 });
+
+        // A few kilobytes on the wire, three megabytes once expanded: the upload
+        // limit lets it in and the expansion limit is what stops it.
+        const bomb = buildZip([{ name: 'big.md', content: `# Big\n\n${'a'.repeat(3 * 1024 * 1024)}` }]);
+        expect(bomb.byteLength).toBeLessThan(64 * 1024);
+        const expandsTooFar = await startMarkdownImport(admin, spaceKey, bomb);
+        expect(expandsTooFar.status).toBe(400);
+        expect(String(expandsTooFar.body['error']?.message)).toMatch(/expands/i);
+      } finally {
+        for (const [name, value] of [
+          ['IMPORT_MAX_UPLOAD_MB', previous.upload],
+          ['IMPORT_MAX_EXPANDED_MB', previous.expanded],
+        ] as const) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      }
+      // Back at the defaults the same archive is simply an import.
+      expect((await startMarkdownImport(admin, spaceKey)).status).toBe(201);
     });
 
     it('refuses an unknown source', async () => {
@@ -698,7 +784,7 @@ describe.skipIf(!probe.reachable)('documentation import', () => {
       form.set('file', new File([DOCS_ZIP as BlobPart], 'docs.zip'));
       const { status } = await json(
         await importsRoute.POST(
-          upload(admin, `/api/v1/spaces/${spaceKey}/imports`, form),
+          await upload(admin, `/api/v1/spaces/${spaceKey}/imports`, form),
           keyParams(spaceKey),
         ),
       );
