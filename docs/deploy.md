@@ -252,7 +252,7 @@ is unchanged; only where the image comes from differs.
 
 ## Connecting an AI coding agent (MCP)
 
-Agents talk to clewwiki through the Model Context Protocol with twenty-eight
+Agents talk to clewwiki through the Model Context Protocol with thirty
 tools — `wiki.list_spaces`, `wiki.format_guide`, `wiki.get_rules`,
 `wiki.list_skills`, `wiki.get_skill`, `wiki.search`,
 `wiki.get_page`, `wiki.create_page`, `wiki.claim`, `wiki.write_page`,

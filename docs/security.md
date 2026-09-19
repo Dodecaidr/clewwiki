@@ -348,6 +348,17 @@ partly in place, the gap is named rather than implied away.
   the image, each audited as `image.uploaded`, so an imported image is visible
   to exactly whoever can see its page. Only images a document refers to are
   staged; the rest of an archive's pictures are not kept.
+- **The inbox leaks nothing a listing would not.** What came back to a person or
+  an agent — answers, replies, reviews — is not stored as notifications. It is a
+  query over discussions, comments and reviews, run when the inbox is opened and
+  held to the caller's `spaceIds` at that moment, the same allowlist every other
+  read is held to. So there is no copy of a title or an excerpt that could
+  outlive the thing it quotes or the membership that made it visible: leaving a
+  restricted space empties the inbox of it, a deleted discussion is gone from
+  it, a deleted page takes its comments with it. The endpoint has no parameter
+  naming another actor; the only row it writes is the caller's own read mark
+  (`inbox_marks`). `tests/space-visibility-guard.test.ts` fails if interface
+  code reads an inbox without passing `spaceIds`.
 - **Images from other sites.** Pages can also reference images by address.
   The Content-Security-Policy allows images from the instance itself
   only, so a page cannot make every reader's browser contact a third-party

@@ -5,6 +5,7 @@ import { signOutAction } from '@/app/actions';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import { SearchBox } from '@/components/search-box';
 import { Button } from '@/components/ui/button';
+import { countUnread } from '@/lib/inbox/service';
 import { getSessionContext } from '@/lib/session';
 import { spaceHref } from '@/lib/spaces/urls';
 import { findSpaces } from '@/lib/spaces/visibility';
@@ -16,6 +17,13 @@ export async function SiteHeader() {
   const tc = await getTranslations('common');
   const session = await getSessionContext();
   const spaces = session ? await findSpaces(session) : [];
+  const unread = session
+    ? await countUnread({
+        workspaceId: session.workspace.id,
+        actor: { type: 'user', id: session.userId },
+        spaceIds: session.spaceIds,
+      })
+    : 0;
 
   return (
     <header className="border-b border-border">
@@ -56,6 +64,17 @@ export async function SiteHeader() {
                   </ul>
                 </details>
               ) : null}
+              <Link href="/inbox" className={linkClass}>
+                {t('inbox')}
+                {unread > 0 ? (
+                  <span
+                    className="ml-1.5 rounded-full bg-foreground px-1.5 py-0.5 text-[10px] font-semibold text-background"
+                    aria-label={t('inboxUnread', { count: unread })}
+                  >
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                ) : null}
+              </Link>
               <Link href="/presence" className={linkClass}>
                 {t('presence')}
               </Link>

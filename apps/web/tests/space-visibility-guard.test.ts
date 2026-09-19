@@ -46,7 +46,7 @@ describe('interface code and restricted spaces', () => {
   });
 
   it('scopes every listing that spans spaces to the spaces the session can see', () => {
-    const spanning = /\b(getPresence|listSpaceSummaries|searchPages)\s*\(([\s\S]*?)\)\s*;/g;
+    const spanning = /\b(getPresence|listSpaceSummaries|searchPages|getInbox|countUnread)\s*\(([\s\S]*?)\)\s*;/g;
     const offenders: string[] = [];
     let seen = 0;
     for (const file of interfaceFiles) {
@@ -57,7 +57,7 @@ describe('interface code and restricted spaces', () => {
       }
     }
     // The pattern has to be finding the calls for their absence from the list to mean anything.
-    expect(seen).toBeGreaterThanOrEqual(3);
+    expect(seen).toBeGreaterThanOrEqual(5);
     expect(offenders).toEqual([]);
   });
 

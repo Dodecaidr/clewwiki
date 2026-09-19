@@ -1189,6 +1189,30 @@ export const pageImages = pgTable(
 );
 
 /**
+ * How far each person and each agent has read their inbox.
+ *
+ * The inbox itself is not stored. What somebody should hear about — an answer
+ * in a discussion they took part in, a reply under their comment, a comment on
+ * or a review of what they wrote — is already in the tables those things live
+ * in, and is read from there when the inbox is opened, under the visibility the
+ * caller has at that moment. A stored notification would outlive the discussion
+ * it came from and the membership that made it visible. So the only thing kept
+ * is this: one timestamp per actor, everything after it is unread.
+ */
+export const inboxMarks = pgTable(
+  'inbox_marks',
+  {
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    actorType: actorType('actor_type').notNull(),
+    actorId: text('actor_id').notNull(),
+    seenAt: timestamp('seen_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.actorType, table.actorId] })],
+);
+
+/**
  * Who may see a restricted space.
  *
  * Membership is about visibility and nothing more: a member of a restricted
