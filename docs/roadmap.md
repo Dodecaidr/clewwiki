@@ -602,7 +602,8 @@ inline, since it has to open from disk. A page lists its images under
 **Images**, marks the ones its current text no longer shows, and removes one
 for good — the screenshot that should not have been uploaded is a person's
 problem, not an API client's. Not built: an MCP tool (agents have Mermaid and
-chart blocks, and REST), re-encoding to strip metadata, and images in imports.
+chart blocks, and REST) and re-encoding to strip metadata. Images in imports
+came later; see Documentation import.
 
 **Deliberately not yet: roles inside a space** (viewer, editor, admin). Membership
 is visibility only. Read-only membership has to be enforced on every write path,
@@ -647,17 +648,30 @@ Four decisions worth recording. **Staging rather than writing**: every source
 produces a guess about structure, a PDF most of all, and the first reading of a
 guess must not be after five hundred pages exist. **Nothing dropped silently**:
 an unsupported Confluence macro becomes a visible note naming it, and every
-lossy conversion attaches a typed warning to its page. **No uploads**: an
-imported image keeps pointing at the system it came from and says so, because an
-attachment store is a different threat surface and belongs to its own decision.
+lossy conversion attaches a typed warning to its page. **No uploads** — at
+first: an imported image kept pointing at the system it came from and said so,
+because an attachment store is a different threat surface and belonged to its
+own decision. That decision was image uploads, and imports followed it (below).
 **Agent tokens cannot import**: the human review is the safety property, and a
 token cannot perform it.
 
-**Next, if it is wanted**: carrying images across in an import — pages now take
-image uploads, so what is missing is the importers fetching and storing them —
-so Confluence images stop depending on the old site; Confluence Server/Data Center, whose API is v1 and is
-untested here; and optical character recognition for scanned PDFs, which today
-are refused outright.
+**Images carried across — built (0.3.0).** A Notion export and a Markdown
+archive bring the PNG, JPEG, GIF and WebP files their documents show; a
+Confluence import downloads the ones attached to the pages it reads. They are
+judged when the import is *staged* — type from the bytes, the instance's size
+limit, room in the workspace's store — so what will not be carried is a warning
+the reviewer reads before applying, not a broken picture found afterwards. What
+passes waits in the database (`import_images`, migration `0013_import_images`)
+and becomes the page's own image when the page is written, one copy per page,
+because an image is exactly as visible as its page. Confluence Cloud serves
+attachments through a redirect to its media host, so image downloads — and no
+other request — follow redirects: three at most, `https` and public hosts only,
+and the credential goes to the origin that was typed and to no other host. That
+path is tested against a simulated site and **not yet against a live one**.
+
+**Next, if it is wanted**: Confluence Server/Data Center, whose API is v1 and is
+untested here; images inside a PDF, which are not extracted; and optical
+character recognition for scanned PDFs, which today are refused outright.
 
 ## Agent discussions and durable decisions — **complete**
 
@@ -797,10 +811,10 @@ complete.
 **Release checklist**, in order:
 
 - [ ] UI design pass.
-- [ ] Community files done: `SECURITY.md`, `CONTRIBUTING.md`,
+- [x] Community files done: `SECURITY.md`, `CONTRIBUTING.md`,
       `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, issue and pull request
       templates.
-- [ ] Release workflow done: `.github/workflows/release.yml` builds and
+- [x] Release workflow done: `.github/workflows/release.yml` builds and
       publishes the container image to GHCR, publishes
       `@clewwiki/mcp-server` to npm, and creates the GitHub Release, all on
       a `v*.*.*` tag push.
@@ -809,11 +823,11 @@ complete.
       publisher on npmjs.com, so there is no npm secret in the repository. The
       first version had to be published with a token, because a publisher can
       only be attached to a package that exists.
-- [ ] Owner sets the `ghcr.io/dodecaidr/clewwiki` package to public after
+- [x] Owner sets the `ghcr.io/dodecaidr/clewwiki` package to public after
       the first successful push from the release workflow — a newly
       created GHCR package defaults to private, and `docker compose pull`
       against a private package fails for anyone without registry access.
-- [ ] Tag `v0.1.0`.
+- [x] Tag `v0.1.0`.
 - [ ] Verify `docker compose pull && docker compose up -d` and `npx -y
       @clewwiki/mcp-server` both work from a clean machine, against the
       just-published image and package — not a local build.
