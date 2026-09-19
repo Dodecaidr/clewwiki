@@ -25,6 +25,7 @@ import {
   requireClaimForWrite,
 } from '../claims/service';
 import { getDatabase } from '../db';
+import { attachUploadedImages } from '../images/attach';
 import type { DbExecutor, Transaction } from '../db';
 
 /**
@@ -693,6 +694,16 @@ export async function createPage(input: CreatePageInput): Promise<PageRecord> {
         },
         tx,
       );
+
+      // Images the author uploaded while writing, before there was a page to
+      // upload them to, become this page's — in the transaction that makes it.
+      await attachUploadedImages(tx, {
+        workspaceId: input.workspaceId,
+        spaceId: space.id,
+        pageId: inserted.id,
+        actor: input.actor,
+        body: inserted.body,
+      });
 
       if (linkToPageId === null) return inserted;
 

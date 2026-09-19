@@ -241,7 +241,7 @@ grant only the scopes the agent needs:
 | `identity:read` | Call `GET /api/v1/me`. Needed by anything that wants to confirm who it is. |
 | `pages:read` | Read pages, the page tree, search results, exports, claims, notes and anchors. |
 | `pages:write` | Create, change, move and link pages; take and release claims; leave notes; manage and re-check anchors. |
-| `pages:delete` | Soft-delete a page and everything below it, or move it with everything below it to another space. Needs `pages:write` as well. Kept separate because one call takes a whole subtree out of a space. |
+| `pages:delete` | Soft-delete a page and everything below it, move it with everything below it to another space, or remove an uploaded image for good. Needs `pages:write` as well. Kept separate because one call takes a whole subtree out of a space. |
 | `audit:read` | Read the audit log. |
 
 Under **Spaces**, keep **All spaces**, or choose **Only selected spaces** and
@@ -698,6 +698,8 @@ container.
 | `REPOS_DIR` | no | `/data/repos` | Where read-only mirrors of the spaces' repositories are kept, one per space. Compose backs it with the `repos-data` volume. |
 | `CLEWWIKI_GIT_TOKEN`, `CLEWWIKI_GIT_TOKEN_<NAME>` | **yes** | empty | Access tokens for private repositories. The only variables a space's repository setting may name; sent only to `https://` URLs. |
 | `ALLOW_FILE_REPOSITORIES` | no | `false` | Allows `file://` repository URLs (a repository on the host or mounted into the container). |
+| `IMAGE_MAX_UPLOAD_MB` | no | `5` | Largest image a page accepts, at most `10`. `0` switches image uploads off; pages then take images by address only. |
+| `IMAGE_STORE_MAX_MB` | no | `2048` | Most the images of one workspace may occupy together. They are stored in the database, so this is also how much they can add to a backup. |
 | `ALLOW_EXTERNAL_IMAGES` | no | `false` | Shows images that pages reference on other `https://` sites. Off, the browser loads images from this instance only, so a page cannot make readers' browsers contact a third-party server. |
 | `CLEWWIKI_MIGRATIONS_DIR` | no | set by the image | Where the app looks for migration SQL. Outside a container only. |
 | `CLEWWIKI_GRAMMARS_DIR` | no | set by the image | Where the app looks for the tree-sitter grammar `.wasm` files. Outside a container only. |
@@ -1136,7 +1138,8 @@ that page already chosen as the parent:
 - **Body** is edited on the **Visual** tab, like a word processor, or on the
   **Markdown** tab as source — the page is stored as Markdown either way.
   Type `/` for a block: headings, lists and task lists, tables, callouts,
-  code blocks, images by address (there are no uploads), Mermaid diagrams from
+  code blocks, images — uploaded from the **Image** dialog, pasted as a
+  screenshot, dropped as a file, or given by address — Mermaid diagrams from
   a template, and charts drawn from a table of data. A page opened and saved
   without edits is stored byte for byte as it was, and an edit rewrites only
   the blocks it touched; a page the editor cannot promise that for opens on the
@@ -1566,6 +1569,11 @@ noise.
 | `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |
 | `PATCH /api/v1/pages/{id}` | session or token | `pages:write` | Update or move a page under a claim. Requires `claim_id` and `base_content_hash`. Writes a revision and bumps the version. A changed body is held to the same chart and diagram validation as a new page. |
 | `DELETE /api/v1/pages/{id}` | session or token | `pages:write` + `pages:delete` | Soft-delete a page and everything below it. `409 conflict` while another actor holds a live claim in the subtree, unless the caller is an administrator. |
+| `GET /api/v1/pages/{id}/images` | session or token | `pages:read` | The images uploaded into a page, newest first, without their bytes. |
+| `POST /api/v1/pages/{id}/images` | session or token | `pages:write` | Upload an image. The request body is the image itself (`Content-Type: image/png`, `image/jpeg`, `image/gif` or `image/webp`, with `Content-Length`); what it is gets decided from its bytes. Answers the relative `url` to use in a page body. Takes no claim: an image shows nowhere until a write refers to it. The same bytes again answer `200` with the image already stored. `413` past `IMAGE_MAX_UPLOAD_MB`, `409 conflict` when the workspace's store is full, `403` when uploads are off. |
+| `POST /api/v1/spaces/{key}/images` | session or token | `pages:write` | Upload an image for a page that does not exist yet. Only its uploader can see it until they create a page in that space whose body refers to it; then it is the page's. Removed after a day if no page claims it. |
+| `GET /api/v1/images/{imageId}` | session or token | `pages:read` | The image, to whoever can see its page. Served as the detected type only, with `nosniff`, a sandboxing `Content-Security-Policy` and `Cross-Origin-Resource-Policy: same-origin`, and always revalidated (`ETag`, `304`). `404` for an image of a deleted page. |
+| `DELETE /api/v1/images/{imageId}` | session or token | `pages:write` + `pages:delete` | Remove an image for good. Revisions that refer to it keep their text and lose the picture. |
 | `POST /api/v1/pages/{id}/move` | session or token | `pages:write` + `pages:delete` | Move a page and everything below it to another space: `space`, and `parent_id` or `parent_path` in it (neither means top level). The caller must see both spaces. Content, versions, comments and pending reviews are untouched; a pair that would span two spaces is unpaired and listed in `unlinked_page_ids`. `409 conflict` while another actor holds a live claim in the subtree, when the target has a page at one of the paths or is archived, and while the source space uses one of the pages as its home, rules or decisions page. A move inside a space is a `PATCH` with `parent_id` or `path`. |
 | `POST /api/v1/pages/{id}/restore` | admin session | — | Restore a soft-deleted page and the subtree deleted with it. `409 conflict` when a live page has taken one of its paths or its parent is gone or moved. |
 | `GET /api/v1/pages/{id}/tree` | session or token | `pages:read` | The subtree rooted at a page, nested. |

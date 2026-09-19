@@ -23,6 +23,7 @@ export async function register(): Promise<void> {
   await announceSetupToken();
   startClaimSweep();
   startDiscussionSweep();
+  startImageSweep();
 }
 
 /**
@@ -130,6 +131,29 @@ function startDiscussionSweep(): void {
       }
     })();
   }, intervalMs);
+
+  timer.unref?.();
+}
+
+/**
+ * Removes images uploaded from a new-page form whose page was never created.
+ * Hourly is plenty: what it removes has been waiting a day, and is visible to
+ * nobody but whoever uploaded it.
+ */
+function startImageSweep(): void {
+  const timer = setInterval(() => {
+    void (async () => {
+      try {
+        const { sweepUnattachedImages } = await import('./lib/images/sweep');
+        const { removed } = await sweepUnattachedImages();
+        if (removed > 0) {
+          console.log(`[images] sweep removed ${removed} image(s) no page claimed`);
+        }
+      } catch (error) {
+        console.error('[images] sweep failed', error);
+      }
+    })();
+  }, 60 * 60 * 1000);
 
   timer.unref?.();
 }

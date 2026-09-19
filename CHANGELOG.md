@@ -11,6 +11,24 @@ tagged.
 
 ### Added
 
+- **Image uploads.** Pages take PNG, JPEG, GIF and WebP images: choose a file in
+  the editor's **Image** dialog, paste a screenshot, or drop a file into the
+  page. Over REST, `POST /api/v1/pages/{id}/images` with the image as the request
+  body answers the relative `url` to put in a page body; `GET` on the same path
+  lists a page's images, `GET /api/v1/images/{id}` serves one and `DELETE`
+  removes it for good (`pages:delete`). Images are stored in the database —
+  migration `0012_images` — so they are in the same backup as the pages.
+- An image is as visible as its page: hidden with a restricted space, moving
+  with the page to another space, gone when the page is deleted. One uploaded
+  while writing a new page (`POST /api/v1/spaces/{key}/images`) is visible to its
+  uploader alone until their new page refers to it, and is removed after a day
+  if none does. The HTML export carries the page's own images inline.
+- What an upload is gets decided from its bytes, never from its declared type or
+  name, and SVG is not accepted. An image is served as that type only, with
+  `nosniff`, a sandboxing Content-Security-Policy and `same-origin` resource
+  policy, and is always revalidated. `IMAGE_MAX_UPLOAD_MB` (5, at most 10; `0`
+  switches uploads off) and `IMAGE_STORE_MAX_MB` (2048 per workspace) bound it,
+  and uploads are rate limited per actor.
 - **Moving a page to another space.** **Move** on a page asks for a space and a
   parent in it, and takes the page there with everything below it. Nothing is
   rewritten, so no version is made: history, comments and changes waiting for a

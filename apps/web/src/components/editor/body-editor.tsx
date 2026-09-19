@@ -75,6 +75,7 @@ export function BodyEditor({
   handleRef,
   renderPreview,
   session,
+  imageUploadEndpoint,
 }: {
   name: string;
   initialBody: string;
@@ -84,6 +85,8 @@ export function BodyEditor({
   handleRef: React.RefObject<BodyEditorHandle | null>;
   renderPreview: (markdown: string) => Promise<string>;
   session?: BodySession;
+  /** Where the visual editor sends image files; the page's endpoint, or its space's for a new page. */
+  imageUploadEndpoint?: string;
 }) {
   const t = useTranslations('editor');
   const hintId = useId();
@@ -245,6 +248,7 @@ export function BodyEditor({
                 ? { provider: session.provider, parsed: session.parsed, editable: session.editable }
                 : undefined
             }
+            imageUploadEndpoint={imageUploadEndpoint}
             ariaLabel={t('body')}
             describedBy={`${hintId}${issues.length > 0 ? ` ${issuesId}` : ''}`}
           />
