@@ -32,6 +32,11 @@ export interface EditorViews {
   rawInline?: NodeViewRenderer;
   /** Callout titles shown in the editor, by kind. */
   calloutLabels?: Partial<Record<CalloutKind, string>>;
+  /**
+   * False in a live session: undo there is the shared document's, which undoes
+   * this person's edits and nobody else's, and the two histories must not both run.
+   */
+  history?: boolean;
 }
 
 /** `spread` records a loose list (blank lines between items) so it is written back loose. */
@@ -154,6 +159,7 @@ export function createEditorExtensions(views: EditorViews = {}): AnyExtension[] 
       // It appends an empty paragraph to every document whose last block is not
       // one, which would count as an edit on a page nobody touched.
       trailingNode: false,
+      ...(views.history === false ? { undoRedo: false as const } : {}),
       code: false,
       codeBlock: false,
       link: {

@@ -775,6 +775,14 @@ export interface UpdatePageInput {
    * winning — the claim says nobody else may write, the hash says nobody did.
    */
   baseContentHash: string;
+  /**
+   * Who holds `claimId`, when that is not the author. A live editing session
+   * holds one claim for everybody in it, under an identity of its own, and the
+   * person who saves is still the author of the revision. Nothing reachable
+   * from a request sets this: a handler passes the caller as `actor` and the
+   * claim is checked against the caller.
+   */
+  claimActor?: PageActor;
 }
 
 /**
@@ -845,7 +853,7 @@ async function runUpdatePage(input: UpdatePageInput): Promise<PageRecord> {
       workspaceId: input.workspaceId,
       pageId: current.id,
       claimId: input.claimId,
-      actor: input.actor,
+      actor: input.claimActor ?? input.actor,
     });
 
     if (input.baseContentHash !== current.contentHash) {

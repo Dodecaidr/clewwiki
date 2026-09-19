@@ -718,6 +718,28 @@ reaches the agent without anybody pasting it.
 needs the same delivery channel discussions are waiting for — and comments on a
 selection inside a paragraph rather than the whole of it.
 
+## Editing together — **built**
+
+Several people in one page at once, with cursors, over a CRDT (Yjs) bound to the
+visual editor.
+
+- A room holds **one claim** for everybody in it (`collab:<pageId>`), so agents
+  see a single writer and their protocol does not change.
+- The server relays and stores the shared document as opaque bytes; the browser
+  that saves serialises it to Markdown through the ordinary write path. Unchanged
+  blocks keep their bytes, verified over the agent-page corpus through a second
+  browser's copy.
+- Server-sent events and `POST`s, not a WebSocket: no second process or port.
+- Idle sessions give the page back; unsaved text is persisted
+  (`page_collab_states`, migration `0010_collab`) and survives a restart.
+
+**Known limits.** One application process per instance. With somebody else in
+the session the Markdown tab is read-only. Title, parent, kind and summary are
+ordinary form fields, not shared: whoever saves the form sets them.
+
+**Next, if it is wanted**: carrying updates between processes with
+`LISTEN`/`NOTIFY`; shared form fields; following another person's cursor.
+
 ## Phase 7 — Launch
 
 Public launch of the repository.

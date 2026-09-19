@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { acquireClaim, releaseClaim } from '@/lib/claims/service';
+import { saveRoom } from '@/lib/collab/rooms';
 import { blockIssuesFromDetails } from '@/lib/pages/content-blocks';
 import { isPageServiceError } from '@/lib/pages/errors';
 import { renderMarkdown } from '@/lib/pages/markdown';
@@ -58,6 +59,13 @@ const createSchema = fieldsSchema.extend({
 const updateSchema = fieldsSchema.extend({
   pageId: z.uuid(),
   baseContentHash: z.string().length(64),
+  /**
+   * Set when the form is saved from inside a live session: the browser's
+   * connection to it, and the state of the shared document the body was
+   * serialised from. The save then goes through the session and its claim.
+   */
+  collabClient: z.uuid().optional(),
+  collabStateVector: z.string().min(1).max(100_000).optional(),
   /**
    * The lease the open editor is holding. Absent when the form was submitted
    * without the browser having taken one — with scripting off, for instance —
@@ -180,6 +188,8 @@ export async function updatePageAction(
     pageId: formData.get('pageId'),
     baseContentHash: formData.get('baseContentHash'),
     claimId: formString(formData, 'claimId'),
+    collabClient: formString(formData, 'collabClient'),
+    collabStateVector: formString(formData, 'collabStateVector'),
     title: formData.get('title'),
     segment: formString(formData, 'segment'),
     parentId: formString(formData, 'parentId'),
@@ -190,6 +200,34 @@ export async function updatePageAction(
 
   if (!parsed.success) {
     return { error: 'validation' };
+  }
+
+  if (parsed.data.collabClient && parsed.data.collabStateVector) {
+    // The page is being edited by several people at once. The session holds the
+    // claim for all of them, so the save is the session's, by this person —
+    // and the lease handling below, which is about one editor, does not apply.
+    let savedSpaceId: string;
+    try {
+      const result = await saveRoom({
+        workspaceId: session.workspace.id,
+        pageId: parsed.data.pageId,
+        clientId: parsed.data.collabClient,
+        user: { id: session.userId, name: session.name },
+        body: parsed.data.body,
+        stateVector: parsed.data.collabStateVector,
+        title: parsed.data.title,
+        summary: parsed.data.summary ?? null,
+        kind: parsed.data.kind,
+        parentId: parsed.data.parentId ?? null,
+        path: parsed.data.segment,
+      });
+      savedSpaceId = result.page.spaceId;
+    } catch (error) {
+      return toFormState(error);
+    }
+    const savedSpace = await getSpaceById(session.workspace.id, savedSpaceId);
+    revalidateWiki();
+    redirect(savedSpace ? spacePageHref(savedSpace.key, parsed.data.pageId) : '/');
   }
 
   const actor = { type: 'user' as const, id: session.userId, label: session.name };

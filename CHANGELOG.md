@@ -9,6 +9,55 @@ tagged.
 
 ## [Unreleased]
 
+### Added
+
+- **Editing together.** Several people can be in one page at once, with each
+  other's cursors and edits appearing as they are typed. Opening the editor joins
+  the page's live session; there is nothing to switch on. The shared document is
+  a CRDT (Yjs) bound to the visual editor, and what is stored is still Markdown:
+  whoever saves serialises the shared document with the same bridge that keeps
+  an agent's page byte for byte, so a block nobody touched is written back as
+  the bytes it had — verified over the agent-page corpus through a second
+  browser's copy of the document.
+- **One claim for the whole session.** A session holds a single claim under an
+  identity of its own (`collab:<pageId>`), labelled with who is in it. People in
+  the session do not contend with each other; agents contend with the session
+  exactly as with any one writer — `wiki.claim` answers `CONFLICT` naming the
+  session and its participants — and no part of an agent's protocol changes. A
+  save is an ordinary write under that claim, authored by whoever saved, so
+  validation, revisions, audit and review see nothing new.
+- A session that nobody types in for five minutes, with nothing unsaved, gives
+  the page back and pauses; typing resumes it. If the page was written while it
+  was paused, the session is reset and everybody is asked to load the page
+  again. Text is saved for its author after a minute of quiet, and unsaved text
+  survives a restart and the last person leaving (`page_collab_states`,
+  migration `0010_collab`): the next person to open the editor finds it.
+- The transport is server-sent events plus ordinary `POST`s
+  (`GET`/`POST /api/v1/pages/{id}/collab`), not a WebSocket: no second process,
+  no second port and no change to a reverse proxy that already passes streamed
+  responses. Sessions are for signed-in people; an agent token is refused.
+- With somebody else in the session the Markdown tab shows the page and is not
+  typed in; alone, it works as before, and what is typed there is written into
+  the shared document as a difference. A page the visual editor cannot keep
+  byte for byte is still edited as Markdown under an exclusive lease.
+
+### Changed
+
+- `updatePage` accepts `claimActor`: the identity a claim is checked against
+  when it is not the author's. Only the live session passes it; no request
+  handler does.
+
+### Security
+
+- A browser in a session may report its own cursor and nobody else's, and the
+  name and colour shown next to a cursor come from the server's participant
+  list, never from what another browser says about itself. Messages are taken
+  only from a browser that joined, as the person who joined. Updates are bounded
+  (1 MB each, 16 MB per session, 24 connections per session, 200 sessions), a
+  browser that cannot keep up is disconnected rather than buffered for, and the
+  shared document is opaque bytes to the server: it is never parsed into a page
+  and never handed to an agent.
+
 ## [0.1.0] - 2026-09-18
 
 First tagged release. The application, the MCP server and the container

@@ -32,7 +32,10 @@ const nextConfig: NextConfig = {
   // ships a serverless PDF.js build that resolves its own standard fonts and
   // character maps at run time from its package directory, which only survives
   // if the package stays a package.
-  serverExternalPackages: ['postgres', 'web-tree-sitter', 'unpdf'],
+  // Yjs must be one module instance on the server: a live session's document is
+  // created by the route that a browser joins through and read by the server
+  // action that saves it, and two bundled copies of Yjs do not share documents.
+  serverExternalPackages: ['postgres', 'web-tree-sitter', 'unpdf', 'yjs', 'y-protocols', 'lib0'],
   poweredByHeader: false,
   typescript: {
     ignoreBuildErrors: false,
@@ -58,6 +61,14 @@ const nextConfig: NextConfig = {
       {
         source: '/api/:path*',
         headers: [{ key: 'Cache-Control', value: 'no-store' }],
+      },
+      {
+        // The live-editing stream. `no-transform` is what keeps anything on the
+        // way — this server's own compression included — from collecting the
+        // response before passing it on, which for a stream of events means
+        // never. It comes after the rule above so that it replaces its value.
+        source: '/api/v1/pages/:id/collab',
+        headers: [{ key: 'Cache-Control', value: 'no-store, no-transform' }],
       },
     ];
   },
