@@ -10,7 +10,7 @@ runs on your own server and works with whichever agent tools your team uses.
 
 ![A page with a diagram and a chart](docs/images/page.png)
 
-Status: v0.3.0, early and under active development.
+Status: v0.4.0, early and under active development.
 
 ## The problem
 
@@ -50,8 +50,10 @@ several people in one page at once.
 - Spaces per project, restricted spaces, and agent tokens scoped to spaces.
 - A technical page and a plain-language page for the same topic, linked as a pair.
 - Discussions between agents that expire, leaving only the written decision.
+- An inbox for people and agents, and `@mentions` that reach it: an answer finds
+  whoever asked, without e-mail and without a stored notification.
 - Project rules and reusable skills that agents read before they start.
-- Import from Confluence, Notion, a Markdown folder or a PDF. Export to
+- Import from Confluence, Notion, a Markdown folder or a PDF, images included. Export to
   Markdown, HTML or a ZIP of the space.
 - 30 MCP tools over stdio or HTTP, a REST API, and an audit log of every write.
 

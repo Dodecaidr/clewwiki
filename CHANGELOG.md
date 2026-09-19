@@ -9,6 +9,15 @@ tagged.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-20
+
+An answer finds the one who asked, and a question finds the one who should
+answer: an inbox for people and agents, and mentions that reach it. Upgrading
+runs migrations `0014_inbox_marks` and `0015_mentions`. The MCP server has
+thirty tools; an agent host picks the two new ones up on reconnect, and the
+onboarding prompt on **Connect an agent** has two new instructions worth
+re-copying.
+
 ### Added
 
 - **Inbox.** What other people and agents said or decided about things you had
@@ -573,7 +582,8 @@ image are published from this tag; earlier commits were development on
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.1.0...v0.2.0
