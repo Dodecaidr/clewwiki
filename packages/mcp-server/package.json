@@ -3,6 +3,15 @@
   "version": "0.2.0",
   "description": "MCP server for clewwiki: the wiki tools an AI coding agent calls, wrapping the clewwiki REST API.",
   "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/Dodecaidr/clewwiki#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dodecaidr/clewwiki.git",
+    "directory": "packages/mcp-server"
+  },
+  "bugs": {
+    "url": "https://github.com/Dodecaidr/clewwiki/issues"
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

@@ -804,9 +804,11 @@ complete.
       publishes the container image to GHCR, publishes
       `@clewwiki/mcp-server` to npm, and creates the GitHub Release, all on
       a `v*.*.*` tag push.
-- [ ] Owner adds the `NPM_TOKEN` secret to the repository (Settings →
-      Secrets and variables → Actions), so the `npm` job in the release
-      workflow can publish instead of skipping with a notice.
+- [x] The `npm` job publishes through npm Trusted Publishing: the owner
+      registered this repository's `release.yml` as the package's trusted
+      publisher on npmjs.com, so there is no npm secret in the repository. The
+      first version had to be published with a token, because a publisher can
+      only be attached to a package that exists.
 - [ ] Owner sets the `ghcr.io/dodecaidr/clewwiki` package to public after
       the first successful push from the release workflow — a newly
       created GHCR package defaults to private, and `docker compose pull`
