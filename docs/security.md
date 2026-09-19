@@ -335,8 +335,10 @@ partly in place, the gap is named rather than implied away.
   re-encoded, so metadata inside a file (a photograph's location, for one)
   stays in it, and pixel dimensions are not bounded separately from bytes.
 - **Images carried by an import.** A Notion export and a Markdown archive bring
-  the pictures their documents show, and those go through the same door as an
-  upload: the type is read from the bytes, never from the extension the archive
+  the pictures their documents show, a Confluence import downloads the ones
+  attached to the pages it reads (at most 1 000 per import, under the redirect
+  rules described with the import transport below), and all of them go through
+  the same door as an upload: the type is read from the bytes, never from the extension the archive
   gave them; `IMAGE_MAX_UPLOAD_MB` and `IMAGE_STORE_MAX_MB` apply; SVG is not
   taken; and `IMAGE_MAX_UPLOAD_MB=0` switches this off with the rest. They are
   judged when the import is *staged*, so an image that will not be carried is a
@@ -427,8 +429,18 @@ partly in place, the gap is named rather than implied away.
   reserved address, in IPv4, IPv6 or IPv4-mapped form, and every address a name
   resolves to must pass (`assertPublicHost`); a `next` link is followed only as
   a path on the origin that was given, and one naming any other origin ends the
-  import; redirects are not followed; and a response is read up to 64 MB and no
-  further. **The check is not raceable.** Checking an address and then
+  import; an API request follows no redirect; and a response is read up to 64 MB
+  and no further. **One kind of request does follow redirects: an image
+  download.** Confluence Cloud serves every attachment by redirecting to its
+  media host, so there is no fetching a picture without it. Those requests are
+  held to their own rules: at most three hops; every hop `https`; every host
+  other than the origin checked to be public before it is dialled, and checked
+  again inside the socket's lookup; an image read up to `IMAGE_MAX_UPLOAD_MB`
+  and no further; and **the `Authorization` header is sent to the origin that was
+  typed and to no other host** — a server that redirects the import somewhere
+  gets a request there, never a credential. A download that breaks any of these
+  costs the import that picture, which stays a link to Confluence with a
+  warning; it never costs the pages. **The check is not raceable.** Checking an address and then
   connecting to its name would be two resolutions, and a name server that says
   "public" to the first and `127.0.0.1` to the second — DNS rebinding — would
   pass one and land the other. The import's transport therefore gives the socket
@@ -500,11 +512,11 @@ partly in place, the gap is named rather than implied away.
 - SSO/OIDC — a scope decision, not a security gap; credential-based login
   already satisfies the self-hosted-without-a-cloud-provider requirement.
 - Attachments other than images. Pages take raster images — uploaded, or
-  carried in by a Notion or Markdown import — under the controls described
+  carried in by an import — under the controls described
   above; any other file type is a wider surface (content sniffing, active
-  documents served from this origin) and stays closed. A Confluence import
-  downloads nothing: an image there keeps pointing at the site it came from,
-  and is reported as a warning. Images inside a PDF are not extracted.
+  documents served from this origin) and stays closed. A Confluence attachment
+  that is not a raster image keeps pointing at the site it came from, and is
+  reported as a warning. Images inside a PDF are not extracted.
 - Optical character recognition for scanned PDFs — a PDF with no extractable
   text is refused rather than passed to an external service.
 

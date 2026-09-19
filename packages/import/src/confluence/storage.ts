@@ -34,6 +34,8 @@ import {
   link,
   tableBlock,
 } from '../markdown-out';
+import { extensionOf } from '../doctree';
+import { IMPORTABLE_IMAGE_EXTENSIONS, imagePlaceholderFor } from '../images';
 import { placeholderFor } from '../links';
 import { warn } from '../types';
 import type { ImportWarning } from '../types';
@@ -50,6 +52,12 @@ export interface StorageContext {
   pageId?: string;
   /** Page title to id, for resolving `ri:page` links inside the same space. */
   pageIdByTitle?: ReadonlyMap<string, string>;
+  /**
+   * Write an image attached to this page as a placeholder (`../images`) keyed
+   * by its download address, for the adapter to fetch. Off, an image keeps
+   * pointing at Confluence and is warned about.
+   */
+  carryImages?: boolean;
 }
 
 export interface StorageResult {
@@ -57,6 +65,8 @@ export interface StorageResult {
   warnings: ImportWarning[];
   /** Attachment file names the page referenced. */
   attachments: string[];
+  /** Images written as placeholders: file name and the key the placeholder carries. */
+  images: Array<{ filename: string; key: string }>;
 }
 
 /** Panel macros and the alert each becomes. */
@@ -106,12 +116,15 @@ export function convertStorageToMarkdown(
     markdown: finishBody(joinBlocks(blocks)),
     warnings: state.warnings,
     attachments: [...state.attachments],
+    images: [...state.images].map(([key, filename]) => ({ filename, key })),
   };
 }
 
 class ConversionState {
   readonly warnings: ImportWarning[] = [];
   readonly attachments = new Set<string>();
+  /** Placeholder key to file name. */
+  readonly images = new Map<string, string>();
   private readonly reported = new Set<string>();
 
   constructor(private readonly context: StorageContext) {}
@@ -332,9 +345,24 @@ class ConversionState {
     const filename = attachment.attrs['ri:filename'] ?? '';
     if (filename !== '') this.attachments.add(filename);
 
-    // Uploads are out of scope, so the image keeps pointing at Confluence.
-    // That is a dependency on the old system, and the warning says so.
     const absolute = this.attachmentUrl(filename);
+
+    // An image of this very page, in a format the image store takes, is left
+    // for the adapter to fetch. One attached to another page names a container
+    // this converter cannot address, and stays where it is.
+    if (
+      this.context.carryImages === true &&
+      absolute !== null &&
+      findElement(attachment, 'ri:page') === null &&
+      IMPORTABLE_IMAGE_EXTENSIONS.has(extensionOf(filename))
+    ) {
+      const key = this.attachmentKey(filename);
+      this.images.set(key, filename);
+      return image(alt || filename, imagePlaceholderFor(key));
+    }
+
+    // Otherwise the image keeps pointing at Confluence. That is a dependency
+    // on the old system, and the warning says so.
     this.note('external-attachment', filename || 'attachment');
     return absolute === null ? `_${escapeInline(alt || filename || 'image')}_` : image(alt || filename, absolute);
   }
@@ -343,6 +371,15 @@ class ConversionState {
     const { baseUrl, pageId } = this.context;
     if (!baseUrl || !pageId || filename === '') return null;
     return `${baseUrl.replace(/\/+$/, '')}/download/attachments/${encodeURIComponent(pageId)}/${encodeURIComponent(filename)}`;
+  }
+
+  /**
+   * The same address as `attachmentUrl`, unescaped: a key is decoded text, and
+   * `archivePathHref` escapes it when it has to stand in a page.
+   */
+  private attachmentKey(filename: string): string {
+    const { baseUrl = '', pageId = '' } = this.context;
+    return `${baseUrl.replace(/\/+$/, '')}/download/attachments/${pageId}/${filename}`;
   }
 
   private inlineChildren(node: XmlElement): string {

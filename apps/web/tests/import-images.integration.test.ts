@@ -423,6 +423,51 @@ describe.skipIf(!probe.reachable)('images carried by an import', () => {
     expect(await staged(importId)).toEqual([]);
   });
 
+  it('falls back to the address a fetched image came from', async () => {
+    const { createImport, applyImport } = await import('@/lib/imports/service');
+    const { imagePlaceholderFor } = await import('@clewwiki/import');
+    const [space] = await db
+      .select({ id: schema.spaces.id })
+      .from(schema.spaces)
+      .where(drizzle.and(drizzle.eq(schema.spaces.workspaceId, workspaceId), drizzle.eq(schema.spaces.key, spaceKey)));
+
+    const good = 'https://example.atlassian.net/wiki/download/attachments/7/ok.png';
+    const bad = 'https://example.atlassian.net/wiki/download/attachments/7/not an image.png';
+    const record = await createImport({
+      workspaceId,
+      spaceId: space?.id ?? '',
+      spaceKey,
+      actor: { type: 'user', id: admin.userId },
+      source: 'confluence',
+      parse: () => ({
+        source: 'confluence',
+        nodes: [
+          {
+            sourceId: '7',
+            parentSourceId: null,
+            title: 'From Confluence',
+            kind: 'human',
+            markdown: `![ok](${imagePlaceholderFor(good)})\n\n![bad](${imagePlaceholderFor(bad)})`,
+            warnings: [],
+            ordering: 0,
+          },
+        ],
+        assets: [
+          { key: good, data: png(11) },
+          { key: bad, data: new TextEncoder().encode('<html>') },
+        ],
+        warnings: [],
+        params: {},
+      }),
+    });
+    expect(record.stats).toMatchObject({ images: 1, images_skipped: 1 });
+
+    const applied = await applyImport({ workspaceId, importId: record.id, actor: { type: 'user', id: admin.userId } });
+    const body = await bodyOf(String(applied.created[0]?.pageId));
+    expect(body).toMatch(/!\[ok\]\(\/api\/v1\/images\/[0-9a-f-]{36}\)/);
+    expect(body).toContain('![bad](https://example.atlassian.net/wiki/download/attachments/7/not%20an%20image.png)');
+  });
+
   it('carries nothing, and says so, when uploads are switched off', async () => {
     process.env.IMAGE_MAX_UPLOAD_MB = '0';
     try {
