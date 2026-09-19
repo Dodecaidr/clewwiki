@@ -407,6 +407,16 @@
     "refusedNotFound": "The page, the space or the parent is no longer there. Go back and try again.",
     "refusedGeneric": "The page could not be moved. Try again."
   },
+  "pageImages": {
+    "heading": "Images",
+    "intro": "The images uploaded into this page. Removing one is for good: older versions of the page keep their text and lose the picture.",
+    "caption": "{type}, {kilobytes} KB, uploaded {date}",
+    "unused": "Not shown in the current text",
+    "remove": "Remove",
+    "removeConfirm": "Remove this image for good? Every version of the page that shows it will lose the picture.",
+    "errorNotFound": "The image is no longer there.",
+    "errorGeneric": "The image could not be removed. Try again."
+  },
   "content": {
     "calloutNote": "Note",
     "calloutTip": "Tip",

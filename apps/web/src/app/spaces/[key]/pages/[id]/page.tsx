@@ -4,6 +4,7 @@ import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { AnchorPanel } from './anchor-panel';
+import { ImagePanel } from './image-panel';
 import type { AnchorPanelItem, AnchorPanelLabels } from './anchor-panel';
 import { DeletePageButton } from './delete-button';
 import { Breadcrumbs } from '@/components/breadcrumbs';
@@ -11,6 +12,8 @@ import { PageBody } from '@/components/page-body';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { getFallbackShare, listAnchorsForPage } from '@/lib/anchors/service';
+import { imageHref, referencedImageIds } from '@/lib/images/detect';
+import { listImagesForPage } from '@/lib/images/service';
 import type { AnchorRecord } from '@/lib/anchors/service';
 import { getActiveClaimsForPage, getActiveNotesForPage } from '@/lib/claims/service';
 import { listOpenDiscussionsForPage } from '@/lib/discussions/service';
@@ -146,6 +149,7 @@ export default async function PageView({ params }: Props) {
     ancestors,
     openDiscussions,
     review,
+    pageImages,
   ] = await Promise.all([
       listPageComments(session.workspace.id, page.id, 'all'),
       page.linkedPageId
@@ -162,6 +166,7 @@ export default async function PageView({ params }: Props) {
       getAncestors(session.workspace.id, page),
       listOpenDiscussionsForPage(session.workspace.id, page.id),
       getPageReviewState(session.workspace.id, page.id),
+      listImagesForPage(session.workspace.id, page.id),
     ]);
 
   // The body is rendered once the comments are known, so that a paragraph with
@@ -182,6 +187,8 @@ export default async function PageView({ params }: Props) {
   });
 
   const ta = await getTranslations('anchors');
+  const ti = await getTranslations('pageImages');
+  const imagesInText = new Set(referencedImageIds(page.body));
   const tdis = await getTranslations('discussions');
   const trev = await getTranslations('reviews');
   const repository = readRepositorySettings(space.settings);
@@ -468,6 +475,28 @@ export default async function PageView({ params }: Props) {
             ? ta('fallbackShareLabel', { percent: Math.round(fallbackShare.share * 100) })
             : null
         }
+      />
+
+      <ImagePanel
+        images={pageImages.map((image) => ({
+          imageId: image.id,
+          url: imageHref(image.id),
+          caption: ti('caption', {
+            type: image.contentType.replace('image/', '').toUpperCase(),
+            kilobytes: Math.max(1, Math.round(image.byteSize / 1024)),
+            date: formatDateTime(format, image.createdAt) ?? '—',
+          }),
+          inUse: imagesInText.has(image.id),
+        }))}
+        labels={{
+          heading: ti('heading'),
+          intro: ti('intro'),
+          unused: ti('unused'),
+          remove: ti('remove'),
+          removeConfirm: ti('removeConfirm'),
+          errorNotFound: ti('errorNotFound'),
+          errorGeneric: ti('errorGeneric'),
+        }}
       />
 
       <Card>

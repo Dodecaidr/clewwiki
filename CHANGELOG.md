@@ -25,6 +25,9 @@ tagged.
   lists a page's images, `GET /api/v1/images/{id}` serves one and `DELETE`
   removes it for good (`pages:delete`). Images are stored in the database —
   migration `0012_images` — so they are in the same backup as the pages.
+- A page lists the images uploaded into it under **Images**, marks the ones its
+  current text no longer shows, and removes one for good, so taking down a
+  screenshot that should not have been uploaded needs no API client.
 - An image is as visible as its page: hidden with a restricted space, moving
   with the page to another space, gone when the page is deleted. One uploaded
   while writing a new page (`POST /api/v1/spaces/{key}/images`) is visible to its
