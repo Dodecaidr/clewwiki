@@ -102,6 +102,10 @@ tagged.
 
 ### Changed
 
+- The README is a front page again: what clewwiki is, screenshots, a quick start
+  and an index. Its reference sections moved, unchanged, to `docs/deploy.md`
+  (deployment, reverse proxy, configuration, backups, upgrades),
+  `docs/guide.md` (using the wiki) and `docs/api.md` (the REST endpoints).
 - `updatePage` accepts `claimActor`: the identity a claim is checked against
   when it is not the author's. Only the live session passes it; no request
   handler does.
