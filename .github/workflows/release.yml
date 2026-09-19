@@ -140,31 +140,34 @@ jobs:
       - name: Test @clewwiki/mcp-server
         run: pnpm --filter @clewwiki/mcp-server test
 
-      - name: Check for NPM_TOKEN
-        id: npm_token
+      # Published through npm Trusted Publishing: the registry accepts the
+      # package from this workflow file in this repository, proven by the OIDC
+      # token the job is granted (`id-token: write` above). There is no npm
+      # secret to leak, rotate or forget. It needs an npm CLI that speaks the
+      # protocol, which the one bundled with Node 22 does not.
+      - name: Install an npm CLI that supports trusted publishing
+        run: npm install --global npm@11.19.1
+
+      # pnpm packs: it is what applies `publishConfig` to the manifest. npm
+      # uploads: it is what authenticates by OIDC and attaches provenance.
+      - name: Pack @clewwiki/mcp-server
+        working-directory: packages/mcp-server
         run: |
-          if [ -n "${NPM_TOKEN}" ]; then
-            echo "present=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "present=false" >> "${GITHUB_OUTPUT}"
-          fi
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          set -eu
+          pnpm pack
+          ls -l clewwiki-mcp-server-*.tgz
 
       - name: Publish to npm
-        if: steps.npm_token.outputs.present == 'true' && env.IS_DRY_RUN != 'true'
-        run: pnpm --filter @clewwiki/mcp-server publish --access public --provenance --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        if: env.IS_DRY_RUN != 'true'
+        working-directory: packages/mcp-server
+        run: npm publish ./clewwiki-mcp-server-*.tgz --access public --provenance
 
       - name: Publish skipped
-        if: steps.npm_token.outputs.present != 'true' || env.IS_DRY_RUN == 'true'
+        if: env.IS_DRY_RUN == 'true'
+        working-directory: packages/mcp-server
         run: |
-          if [ "${IS_DRY_RUN}" = "true" ]; then
-            echo "::notice::dry run — skipping npm publish"
-          else
-            echo "::notice::NPM_TOKEN is not set — skipping npm publish. Add the secret to enable it (see docs/roadmap.md, Phase 7)."
-          fi
+          echo "::notice::dry run — checking the tarball, skipping npm publish"
+          npm publish ./clewwiki-mcp-server-*.tgz --access public --dry-run
 
   github-release:
     name: Create the GitHub Release
@@ -210,6 +213,12 @@ jobs:
           case "${GITHUB_REF_NAME}" in
             *-*) prerelease_flag="--prerelease" ;;
           esac
+          # Re-running this job, or a job it depends on, must not fail because
+          # the first run already made the release.
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            echo "::notice::release ${GITHUB_REF_NAME} already exists — leaving it as it is"
+            exit 0
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-file "${{ steps.notes.outputs.notes_file }}" \
