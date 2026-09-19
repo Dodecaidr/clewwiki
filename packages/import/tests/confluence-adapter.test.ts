@@ -187,6 +187,7 @@ describe('confluence import', () => {
       space_key: 'API',
       space_name: 'API platform',
       page_count: 1,
+      image_count: 0,
     });
   });
 

@@ -1,11 +1,12 @@
 /**
  * The slice of the Confluence Cloud REST API v2 an import needs.
  *
- * Three calls: find the space by its key, list its pages with their `storage`
- * representation, and follow the cursor until there are none left. Everything
- * else about a Confluence site — permissions, labels, comments, attachments as
- * files — is deliberately out of reach, because an import that could read more
- * would need a credential that can do more.
+ * Four calls: find the space by its key, list its pages with their `storage`
+ * representation, follow the cursor until there are none left, and download an
+ * image a page shows. Everything else about a Confluence site — permissions,
+ * labels, comments, attachments that are not pictures — is deliberately out of
+ * reach, because an import that could read more would need a credential that
+ * can do more.
  *
  * Credentials live in the argument list and nowhere else. They are turned into
  * one `Authorization` header inside `request`, they are never logged, never put
@@ -24,7 +25,11 @@
  *   link-local or otherwise non-public address (`assertPublicHost`);
  * - a `next` link is followed only as a path on the origin that was typed — an
  *   absolute link to anywhere else ends the import;
- * - redirects are not followed at all;
+ * - an API request follows no redirect at all;
+ * - an image download follows a few, because Confluence Cloud serves every
+ *   attachment by redirecting to its media host — but each hop must be `https`
+ *   to a public address, and the credential goes only to the origin that was
+ *   typed: a hop to any other host is made without it (`downloadAttachment`);
  * - a response is read up to a fixed size and no further.
  *
  * A check followed by a request would be two lookups, and a name server that
@@ -84,7 +89,12 @@ export interface ConfluenceClientOptions {
   lookup?: (hostname: string) => Promise<string[]>;
   /** Largest response body read, in bytes. */
   maxResponseBytes?: number;
+  /** Largest image downloaded, in bytes. */
+  maxImageBytes?: number;
 }
+
+/** A downloaded image, or the reason there is none — never an exception. */
+export type AttachmentDownload = { data: Uint8Array } | { failed: string };
 
 const DEFAULT_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 60_000;
@@ -95,6 +105,13 @@ const MAX_RETRY_DELAY_MS = 60_000;
  * the size of its answer, and an answer is held in memory while it is parsed.
  */
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+const DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * The origin's own redirect, then the media host's, then one to spare. A chain
+ * longer than that is not how an attachment is served.
+ */
+const MAX_DOWNLOAD_HOPS = 3;
 
 async function systemLookup(hostname: string): Promise<string[]> {
   const found = await dnsLookup(hostname, { all: true, verbatim: true });
@@ -143,6 +160,8 @@ export class ConfluenceClient {
   private readonly pageSize: number;
   private readonly lookup: ((hostname: string) => Promise<string[]>) | undefined;
   private readonly maxResponseBytes: number;
+  private readonly maxImageBytes: number;
+  private readonly imageFetch: typeof fetch;
   private hostChecked = false;
 
   constructor(credentials: ConfluenceCredentials, options: ConfluenceClientOptions = {}) {
@@ -156,6 +175,11 @@ export class ConfluenceClient {
     this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
     this.fetchImpl =
       options.fetchImpl ?? createGuardedFetch({ maxResponseBytes: this.maxResponseBytes });
+    this.maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
+    // Its own transport, so that the cap on an image is enforced on the socket
+    // and not after 64 MB of somebody's "screenshot" has been buffered.
+    this.imageFetch =
+      options.fetchImpl ?? createGuardedFetch({ maxResponseBytes: this.maxImageBytes });
   }
 
   /** What may be written down about this connection: an origin, never a secret. */
@@ -174,10 +198,14 @@ export class ConfluenceClient {
 
   /** Reads a body up to the cap and no further, whatever `Content-Length` claimed. */
   private async readBody(response: Response): Promise<string> {
+    return Buffer.from(await this.readBytes(response, this.maxResponseBytes)).toString('utf8');
+  }
+
+  private async readBytes(response: Response, cap: number): Promise<Uint8Array> {
     const tooLarge = new ImportError('unavailable', 'Confluence answered with more than this import will read');
     const declared = Number(response.headers.get('content-length') ?? '');
-    if (Number.isFinite(declared) && declared > this.maxResponseBytes) throw tooLarge;
-    if (!response.body) return response.text();
+    if (Number.isFinite(declared) && declared > cap) throw tooLarge;
+    if (!response.body) return new Uint8Array(await response.arrayBuffer());
 
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -186,13 +214,81 @@ export class ConfluenceClient {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > this.maxResponseBytes) {
+      if (total > cap) {
         await reader.cancel().catch(() => undefined);
         throw tooLarge;
       }
       chunks.push(value);
     }
-    return Buffer.concat(chunks).toString('utf8');
+    return new Uint8Array(Buffer.concat(chunks));
+  }
+
+  /**
+   * One image attached to a page, or why it could not be had.
+   *
+   * It never throws for the image's own sake: a picture that is missing,
+   * forbidden, too large or served from somewhere this client will not go is a
+   * picture the import does without, not a reason to lose the pages.
+   *
+   * Confluence Cloud answers a download with a redirect to its media host,
+   * carrying a short-lived signed address. So redirects are followed here, and
+   * only here, under three rules: every hop is `https`; every host but the
+   * origin is checked to be public before it is dialled (and again by the
+   * transport, inside the socket's own lookup); and the `Authorization` header
+   * is sent to the origin that was typed and to nothing else. A server that
+   * redirects this client somewhere gets a request there, but never a
+   * credential.
+   */
+  async downloadAttachment(pageId: string, filename: string): Promise<AttachmentDownload> {
+    try {
+      if (!this.hostChecked) {
+        await assertPublicHost(new URL(this.origin).hostname, this.lookup);
+        this.hostChecked = true;
+      }
+      let target = new URL(
+        this.url(`/download/attachments/${encodeURIComponent(pageId)}/${encodeURIComponent(filename)}`),
+      );
+
+      for (let hop = 0, attempt = 0; hop <= MAX_DOWNLOAD_HOPS; ) {
+        const sameOrigin = target.origin === this.origin;
+        if (!sameOrigin) await assertPublicHost(target.hostname, this.lookup);
+
+        const response = await this.imageFetch(target, {
+          headers: sameOrigin ? { Authorization: this.authorization } : {},
+          redirect: 'manual',
+        });
+
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get('location');
+          if (location === null || location === '') return { failed: 'a redirect that leads nowhere' };
+          let next: URL;
+          try {
+            next = new URL(location, target);
+          } catch {
+            return { failed: 'a redirect that leads nowhere' };
+          }
+          if (next.protocol !== 'https:') return { failed: 'a redirect away from https' };
+          target = next;
+          hop += 1;
+          continue;
+        }
+        if (response.type === 'opaqueredirect') return { failed: 'a redirect that could not be read' };
+
+        if ((response.status === 429 || response.status === 503) && attempt < this.maxRetries) {
+          await this.sleep(retryAfterMs(response.headers.get('retry-after'), this.retryDelayMs, attempt));
+          attempt += 1;
+          continue;
+        }
+        if (!response.ok) return { failed: `Confluence answered ${response.status}` };
+
+        return { data: await this.readBytes(response, this.maxImageBytes) };
+      }
+      return { failed: 'too many redirects' };
+    } catch (error) {
+      // An `ImportError` message is written to be shown. Anything else could
+      // carry an address or a path, and is not.
+      return { failed: error instanceof ImportError ? error.message : 'the download failed' };
+    }
   }
 
   private async request(path: string): Promise<unknown> {

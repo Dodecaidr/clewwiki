@@ -15,8 +15,16 @@ tagged.
   JPEG, GIF and WebP files that a document shows are judged when the import is
   staged — type from the bytes, `IMAGE_MAX_UPLOAD_MB`, room in the workspace's
   store — and become the page's own images when it is applied. What is not
-  carried is a warning on the pages that show it. Confluence and PDF imports are
-  unchanged. Migration `0013_import_images`.
+  carried is a warning on the pages that show it. Migration
+  `0013_import_images`.
+- A Confluence import downloads the PNG, JPEG, GIF and WebP images attached to
+  the pages it reads, and they go the same way. Confluence Cloud serves
+  attachments through a redirect to its media host, so image downloads — and
+  nothing else — follow up to three redirects: `https` only, public hosts only,
+  and the e-mail and API token are sent to the site that was typed and to no
+  other host. An image that cannot be fetched stays a link to Confluence, with
+  the reason in a warning. Tested against a simulated site, not yet against a
+  live one.
 
 ### Changed
 
@@ -25,6 +33,8 @@ tagged.
 
 ### Fixed
 
+- The link a Confluence import leaves for an attachment it did not carry was
+  missing `/wiki` and did not open on a Cloud site.
 - A link to an imported page whose file name holds parentheses (`Plan (1).md`)
   is rewritten instead of being cut at the first `)`.
 

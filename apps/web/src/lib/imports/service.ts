@@ -14,6 +14,7 @@ import { acquireClaim, getActiveClaimsForPage, releaseClaim } from '../claims/se
 import { getDatabase } from '../db';
 import { getImportMaxExpandedMb, getImportMaxUploadMb } from '../env';
 import { PageServiceError, isPageServiceError } from '../pages/errors';
+import { imageLimits } from '../images/service';
 import { createPage, updatePage } from '../pages/service';
 import { spacePageHref } from '../spaces/urls';
 import {
@@ -118,6 +119,9 @@ export function importLimits(): ImportLimits {
     ...DEFAULT_IMPORT_LIMITS,
     uploadBytes: getImportMaxUploadMb() * 1024 * 1024,
     expandedBytes: getImportMaxExpandedMb() * 1024 * 1024,
+    // An adapter that fetches its images fetches none larger than the store
+    // would take, and none at all when uploads are switched off.
+    imageBytes: imageLimits().uploadBytes,
   };
 }
 

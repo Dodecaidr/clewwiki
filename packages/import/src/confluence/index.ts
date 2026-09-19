@@ -12,6 +12,8 @@
  * so is more honest than shipping a version check that pretends to cover them.
  */
 
+import { archivePathHref, imagePlaceholderFor, referencedImageKeys, rewriteImages } from '../images';
+import type { ImportAsset } from '../images';
 import { ImportError } from '../limits';
 import type { ImportLimits } from '../limits';
 import { truncateToBytes, utf8Length } from '../limits';
@@ -33,7 +35,10 @@ export interface ConfluenceImportInput {
 }
 
 export async function importFromConfluence(input: ConfluenceImportInput): Promise<ImportParseResult> {
-  const client = new ConfluenceClient(input.credentials, input.client);
+  const client = new ConfluenceClient(input.credentials, {
+    maxImageBytes: input.limits.imageBytes,
+    ...input.client,
+  });
   const space = await client.findSpaceId(input.spaceKey);
   // One over the cap, so an export that is exactly at the limit can be told
   // apart from one that was cut short.
@@ -56,7 +61,7 @@ export async function importFromConfluence(input: ConfluenceImportInput): Promis
   for (const page of pages) pageIdByTitle.set(page.title, page.id);
   const known = new Set(pages.map((page) => page.id));
 
-  const nodes = pages.map((page, index) =>
+  const converted = pages.map((page, index) =>
     toNode(page, index, {
       baseUrl: client.describe().base_url,
       pageIdByTitle,
@@ -65,9 +70,53 @@ export async function importFromConfluence(input: ConfluenceImportInput): Promis
     }),
   );
 
+  // Images are fetched after every page has been read, one at a time: the
+  // pages are what the import is for, and a site that is slow or stingy with
+  // pictures should cost pictures.
+  const assets: ImportAsset[] = [];
+  let budget = input.limits.expandedBytes;
+  const nodes: ImportNode[] = [];
+  for (const { node, images, pageId } of converted) {
+    const lost = new Map<string, string>();
+    for (const { key, filename } of images) {
+      if (assets.length >= input.limits.imageDownloads) {
+        lost.set(key, `more than ${input.limits.imageDownloads} images in one import`);
+        continue;
+      }
+      const download = await client.downloadAttachment(pageId, filename);
+      if ('failed' in download) {
+        lost.set(key, download.failed);
+      } else if (download.data.byteLength > budget) {
+        lost.set(key, 'the images of this import are larger together than it may hold');
+      } else {
+        budget -= download.data.byteLength;
+        assets.push({ key, data: download.data });
+      }
+    }
+    // What could not be fetched goes back to being what it always was: an
+    // image that points at Confluence, with a warning that says so.
+    nodes.push(
+      lost.size === 0
+        ? node
+        : {
+            ...node,
+            markdown: rewriteImages(node.markdown, (key) =>
+              lost.has(key) ? archivePathHref(key) : imagePlaceholderFor(key),
+            ),
+            warnings: [
+              ...node.warnings,
+              ...[...lost].map(([key, reason]) =>
+                warn('external-attachment', `${key.slice(key.lastIndexOf('/') + 1)}: ${reason}`),
+              ),
+            ],
+          },
+    );
+  }
+
   return {
     source: 'confluence',
     nodes,
+    assets,
     warnings,
     // Everything recorded about the run. No e-mail, no token: the two things a
     // reader of the imports table must never be able to recover.
@@ -76,6 +125,7 @@ export async function importFromConfluence(input: ConfluenceImportInput): Promis
       space_key: input.spaceKey,
       space_name: space.name,
       page_count: pages.length,
+      image_count: assets.length,
     },
   };
 }
@@ -87,11 +137,19 @@ interface NodeContext {
   limits: ImportLimits;
 }
 
-function toNode(page: ConfluencePage, index: number, context: NodeContext): ImportNode {
+interface ConvertedPage {
+  node: ImportNode;
+  pageId: string;
+  images: Array<{ filename: string; key: string }>;
+}
+
+function toNode(page: ConfluencePage, index: number, context: NodeContext): ConvertedPage {
   const converted = convertStorageToMarkdown(page.storage, {
-    baseUrl: context.baseUrl,
+    // Attachments are served under `/wiki`, like everything else on a Cloud site.
+    baseUrl: `${context.baseUrl}/wiki`,
     pageId: page.id,
     pageIdByTitle: context.pageIdByTitle,
+    carryImages: context.limits.imageBytes > 0,
   });
 
   const warnings = [...converted.warnings];
@@ -102,7 +160,7 @@ function toNode(page: ConfluencePage, index: number, context: NodeContext): Impo
   }
   if (markdown.trim() === '') warnings.push(warn('empty'));
 
-  return {
+  const node: ImportNode = {
     sourceId: page.id,
     parentSourceId:
       page.parentId !== null && context.known.has(page.parentId) ? page.parentId : null,
@@ -115,4 +173,7 @@ function toNode(page: ConfluencePage, index: number, context: NodeContext): Impo
     warnings,
     ordering: page.position ?? index,
   };
+  // A body cut to the limit may have lost some of its images with the cut.
+  const shown = new Set(referencedImageKeys(markdown));
+  return { node, pageId: page.id, images: converted.images.filter((image) => shown.has(image.key)) };
 }

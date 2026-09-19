@@ -29,7 +29,11 @@ export const IMAGE_SCHEME = 'clewwiki-import-image:';
 
 /** One image an import brings with it. */
 export interface ImportAsset {
-  /** Its path inside the archive, as stored. What placeholders refer to. */
+  /**
+   * What placeholders refer to, and what an image that is not carried falls
+   * back to: its path inside the archive, or — from Confluence — the address
+   * it can still be opened at.
+   */
   key: string;
   data: Uint8Array;
 }
@@ -70,9 +74,14 @@ export function rewriteImages(markdown: string, resolve: (key: string) => string
 }
 
 /**
- * The address an image falls back to when it was not carried across: the path
- * the archive had it under, escaped so it is still one Markdown destination.
+ * The address an image falls back to when it was not carried across: its key,
+ * escaped so it is still one Markdown destination and still names the file
+ * rather than a fragment or a query of it.
  */
 export function archivePathHref(key: string): string {
-  return encodeURI(key).replace(/\(/g, '%28').replace(/\)/g, '%29');
+  return encodeURI(key)
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29')
+    .replace(/#/g, '%23')
+    .replace(/\?/g, '%3F');
 }

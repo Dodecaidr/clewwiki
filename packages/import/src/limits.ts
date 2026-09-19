@@ -18,6 +18,14 @@ export interface ImportLimits {
   expandedBytes: number;
   /** Most entries a ZIP may hold, compressed junk included. */
   zipEntries: number;
+  /**
+   * Largest image an adapter that has to *fetch* its images will download, in
+   * bytes. Zero means none are fetched. An archive's images are already in
+   * hand, so this does not apply to them; whoever stores them applies its own.
+   */
+  imageBytes: number;
+  /** Most images one import will download. */
+  imageDownloads: number;
 }
 
 export const DEFAULT_IMPORT_LIMITS: ImportLimits = {
@@ -33,6 +41,8 @@ export const DEFAULT_IMPORT_LIMITS: ImportLimits = {
   // (`IMPORT_MAX_EXPANDED_MB`).
   expandedBytes: 256 * 1024 * 1024,
   zipEntries: 20_000,
+  imageBytes: 10 * 1024 * 1024,
+  imageDownloads: 1_000,
 };
 
 /**
