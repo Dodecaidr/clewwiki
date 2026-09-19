@@ -470,7 +470,7 @@ partly in place, the gap is named rather than implied away.
   commit SHA.
 - **Anomaly detection.** Not implemented as code. The audit log carries the
   raw signal (bursts of `auth.rejected`, `auth.rate_limited`,
-  `auth.login_failed`), and the README tells the operator what to look for;
+  `auth.login_failed`), and `docs/deploy.md` tells the operator what to look for;
   nothing alerts on its own.
 
 ## Explicitly out of scope for v1

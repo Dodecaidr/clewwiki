@@ -41,9 +41,9 @@ do not pre-create empty ones:
 
 ## How to run
 
-`docker compose up -d` runs the application and its database; the README
-covers first-run setup, agent tokens, and reverse-proxy configuration in
-full. For working on the code itself:
+`docker compose up -d` runs the application and its database;
+`docs/deploy.md` covers first-run setup, agent tokens, and reverse-proxy
+configuration in full. For working on the code itself:
 
 ```sh
 pnpm install

@@ -66,12 +66,12 @@ applicable, as a fix is prepared and released.
 **Out of scope:**
 
 - Deployments that do not follow the [security
-  checklist](README.md#security-checklist) documented in the README (for
+  checklist](docs/deploy.md#security-checklist) documented in the README (for
   example: no TLS in front of the instance, a published database port, a
   weak or default `BETTER_AUTH_SECRET`).
 - Reverse-proxy misconfiguration on the operator's own infrastructure —
   clewwiki does not bundle or manage a reverse proxy; see
-  [Reverse proxy](README.md#reverse-proxy) for the documented, supported
+  [Reverse proxy](docs/deploy.md#reverse-proxy) for the documented, supported
   configurations.
 - Denial of service caused by an **authenticated administrator** of a given
   instance against their own instance. An administrator is a trusted

@@ -3,7 +3,7 @@
 # This file brings up the application and its database and nothing else. TLS is
 # the operator's responsibility: put Caddy, Traefik or nginx in front of the
 # published port before exposing this to a network you do not control. The
-# README has a complete worked example for each of the three.
+# docs/deploy.md has a complete worked example for each of the three.
 #
 # Every value comes from `.env` next to this file (copy `.env.example`). The
 # ones marked `:?` have no default on purpose: compose refuses to start and
@@ -36,7 +36,7 @@ services:
     # Published from the first tagged release: ghcr.io/dodecaidr/clewwiki.
     # Pin CLEWWIKI_VERSION to a specific tag in production rather than
     # tracking `latest`. To build from source instead, layer
-    # docker-compose.build.yml on top of this file — see README, "Deploy".
+    # docker-compose.build.yml on top of this file — see docs/deploy.md.
     image: ghcr.io/dodecaidr/clewwiki:${CLEWWIKI_VERSION:-latest}
     pull_policy: missing
     restart: unless-stopped
@@ -71,7 +71,7 @@ services:
       # prints a generated one to its log: docker compose logs web | grep "setup token"
       CLEWWIKI_SETUP_TOKEN: ${CLEWWIKI_SETUP_TOKEN:-}
       # The header your reverse proxy sets to the client's address; login rate
-      # limits key on it. The README shows the line each proxy needs.
+      # limits key on it. docs/deploy.md shows the line each proxy needs.
       TRUSTED_CLIENT_IP_HEADER: ${TRUSTED_CLIENT_IP_HEADER:-x-real-ip}
       REPOS_DIR: /data/repos
       ALLOW_FILE_REPOSITORIES: ${ALLOW_FILE_REPOSITORIES:-false}
@@ -90,7 +90,7 @@ services:
       # A reverse proxy on the same host (Caddy, nginx) reaches it there, and
       # nothing else can. To expose it to a proxy elsewhere:
       #   - proxy in another container: attach both to a shared Docker network
-      #     and drop this mapping (README, "Traefik");
+      #     and drop this mapping (docs/deploy.md, "Traefik");
       #   - proxy on another machine: set WEB_BIND_ADDRESS in .env to this
       #     host's private-network address, never to 0.0.0.0 on a public one.
       # The application speaks plain HTTP. Never publish it to the internet
