@@ -9,6 +9,25 @@ tagged.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-19
+
+No change to the application. This release is about how the MCP server package
+reaches npm.
+
+### Changed
+
+- `@clewwiki/mcp-server` is published through npm Trusted Publishing: the
+  registry accepts it from this repository's release workflow, proven by the
+  workflow's OIDC token, and the repository holds no npm secret. The package is
+  packed with pnpm and uploaded with npm, so it carries a provenance attestation.
+- Re-running a release job leaves an existing GitHub Release as it is instead of
+  failing on it.
+
+### Fixed
+
+- The npm package names its repository, homepage and issue tracker. `0.2.0` was
+  published without them, and without a provenance attestation.
+
 ## [0.2.0] - 2026-09-19
 
 Working together: several people in one page at once, spaces that only their
@@ -496,6 +515,7 @@ image are published from this tag; earlier commits were development on
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Dodecaidr/clewwiki/releases/tag/v0.1.0
