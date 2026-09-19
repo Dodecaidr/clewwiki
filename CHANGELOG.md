@@ -9,6 +9,25 @@ tagged.
 
 ## [Unreleased]
 
+### Added
+
+- A Notion export and a Markdown archive bring their images with them. PNG,
+  JPEG, GIF and WebP files that a document shows are judged when the import is
+  staged — type from the bytes, `IMAGE_MAX_UPLOAD_MB`, room in the workspace's
+  store — and become the page's own images when it is applied. What is not
+  carried is a warning on the pages that show it. Confluence and PDF imports are
+  unchanged. Migration `0013_import_images`.
+
+### Changed
+
+- An archive import expands only documents and raster images. Videos, PDFs and
+  other files in an export no longer count against `IMPORT_MAX_EXPANDED_MB`.
+
+### Fixed
+
+- A link to an imported page whose file name holds parentheses (`Plan (1).md`)
+  is rewritten instead of being cut at the first `)`.
+
 ## [0.2.1] - 2026-09-19
 
 No change to the application. This release is about how the MCP server package

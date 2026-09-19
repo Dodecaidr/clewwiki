@@ -60,6 +60,8 @@ function toAppliedResource(item: AppliedItem): Record<string, unknown> {
     title: item.title,
     target_path: item.targetPath,
     page_id: item.pageId,
+    ...(item.images ? { images: item.images } : {}),
+    ...(item.imagesFailed ? { images_failed: item.imagesFailed } : {}),
     ...(item.skipped ? { skipped: item.skipped } : {}),
     ...(item.detail ? { detail: item.detail } : {}),
   };

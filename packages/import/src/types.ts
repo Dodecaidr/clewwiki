@@ -14,6 +14,8 @@
  * a query, and never read as an instruction.
  */
 
+import type { ImportAsset } from './images';
+
 /** The four sources an import can come from. */
 export const IMPORT_SOURCES = ['confluence', 'notion', 'markdown', 'pdf'] as const;
 export type ImportSource = (typeof IMPORT_SOURCES)[number];
@@ -38,8 +40,10 @@ export const IMPORT_WARNING_CODES = [
   'unsupported-macro',
   /** An image or attachment that stays where it is, because there is no upload. */
   'external-attachment',
-  /** A relative image path that will not resolve after the import. */
+  /** A relative image path with nothing importable behind it; it will not load. */
   'unresolved-image',
+  /** An image that was in the archive and was not taken: too large, not an image, no room. */
+  'image-skipped',
   /** A link that pointed at something outside the imported set. */
   'unresolved-link',
   /** A Notion toggle, turned into a details block. */
@@ -109,6 +113,12 @@ export interface ImportAttachment {
 export interface ImportParseResult {
   source: ImportSource;
   nodes: ImportNode[];
+  /**
+   * The images the nodes refer to through `clewwiki-import-image:` placeholders
+   * — see `./images`. Only images a document shows are here; the rest of an
+   * archive's pictures are not read into the import at all.
+   */
+  assets?: ImportAsset[];
   /** Warnings about the import as a whole rather than about one page. */
   warnings: ImportWarning[];
   /** Recorded on the import row. Never carries a credential. */

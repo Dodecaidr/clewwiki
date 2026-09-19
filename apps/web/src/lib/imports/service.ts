@@ -16,6 +16,15 @@ import { getImportMaxExpandedMb, getImportMaxUploadMb } from '../env';
 import { PageServiceError, isPageServiceError } from '../pages/errors';
 import { createPage, updatePage } from '../pages/service';
 import { spacePageHref } from '../spaces/urls';
+import {
+  carryImages,
+  dropStagedImages,
+  judgeImportImages,
+  previewImages,
+  refusedImageWarnings,
+  stageImportImages,
+} from './images';
+import type { CarriedImages } from './images';
 
 /**
  * The import service.
@@ -242,7 +251,16 @@ export async function createImport(input: CreateImportInput): Promise<ImportReco
     // Silently numbering it `-2` would hide the decision and produce a second
     // copy of a page nobody asked for.
     const existing = await livePathsOf(input.workspaceId, input.spaceId);
-    const placed = placeNodes(parsed.nodes);
+
+    // Judged before anything is staged, so that an image which will not be
+    // carried is a warning on the pages that show it.
+    const images = await judgeImportImages(input.workspaceId, parsed.assets ?? []);
+    const placed = placeNodes(
+      parsed.nodes.map((node) => ({
+        ...node,
+        warnings: [...node.warnings, ...refusedImageWarnings(node, images.refused)],
+      })),
+    );
 
     if (placed.nodes.length > 0) {
       await db.insert(importItems).values(
@@ -260,8 +278,12 @@ export async function createImport(input: CreateImportInput): Promise<ImportReco
       );
     }
 
+    await stageImportImages(created.id, images.accepted);
+
     const stats = {
       parsed: placed.nodes.length,
+      images: images.accepted.length,
+      images_skipped: images.refused.size,
       warnings: placed.nodes.reduce((total, node) => total + node.warnings.length, 0),
       conflicts: placed.nodes.filter((node) => existing.has(node.targetPath)).length,
       source_warnings: parsed.warnings.length,
@@ -290,6 +312,7 @@ export async function createImport(input: CreateImportInput): Promise<ImportReco
     return toRecord(updated ?? created);
   } catch (error) {
     const message = describeFailure(error);
+    await dropStagedImages(created.id).catch(() => undefined);
     await db
       .update(imports)
       .set({ status: 'failed', error: message, updatedAt: new Date() })
@@ -342,9 +365,11 @@ export async function previewImport(workspaceId: string, importId: string): Prom
     const conflictPageId = existing.get(item.targetPath) ?? null;
     return {
       ...item,
-      preview: rewriteLinks(item.markdown, (sourceId) =>
-        kept.has(sourceId) ? (pathsBySource.get(sourceId) ?? null) : null,
-      ).markdown,
+      preview: previewImages(
+        rewriteLinks(item.markdown, (sourceId) =>
+          kept.has(sourceId) ? (pathsBySource.get(sourceId) ?? null) : null,
+        ).markdown,
+      ),
       conflictPageId,
       claimedBy: conflictPageId === null ? null : (claimed.get(conflictPageId) ?? null),
     };
@@ -453,6 +478,9 @@ export interface AppliedItem {
   title: string;
   targetPath: string;
   pageId: string | null;
+  /** Images that came with the page, and images that were staged and could not be stored. */
+  images?: number;
+  imagesFailed?: number;
   /** Why nothing was written, when nothing was. */
   skipped?: 'decision' | 'conflict' | 'claimed' | 'failed';
   detail?: string;
@@ -472,6 +500,9 @@ export interface ApplyImportResult {
  * the pages this run creates: the ids are drawn first and handed to the page
  * service, which is why `createPage` takes an optional id — a batch that links
  * its own pages has to know where they will be before it writes any of them.
+ *
+ * A page's images are stored just before the page is written — see
+ * `./images` — and the staged copies are dropped once the run is over.
  *
  * Each item is its own transaction, inside `createPage`. One page that cannot
  * be written does not roll back the pages that already were: the result says
@@ -553,14 +584,24 @@ export async function applyImport(input: ApplyImportInput): Promise<ApplyImportR
     }
 
     try {
-      const pageId =
+      const carry = (pageId: string | null): Promise<CarriedImages> =>
+        carryImages({
+          workspaceId: input.workspaceId,
+          spaceId: record.spaceId,
+          importId: record.id,
+          pageId,
+          actor: input.actor,
+          markdown: body,
+        });
+
+      const written =
         item.decision === 'overwrite' && conflict !== undefined
           ? await overwritePage({
               workspaceId: input.workspaceId,
               pageId: conflict,
               actor: input.actor,
               title: item.title,
-              body,
+              carry,
             })
           : await createImportedPage({
               id: entry.pageId,
@@ -568,10 +609,11 @@ export async function applyImport(input: ApplyImportInput): Promise<ApplyImportR
               spaceId: record.spaceId,
               actor: input.actor,
               title: item.title,
-              body,
+              carry,
               path: item.targetPath,
               parentId,
             });
+      const pageId = written.pageId;
 
       await db.update(importItems).set({ createdPageId: pageId }).where(eq(importItems.id, item.id));
       pathToPageId.set(item.targetPath, pageId);
@@ -588,10 +630,17 @@ export async function applyImport(input: ApplyImportInput): Promise<ApplyImportR
           source: record.source,
           path: item.targetPath,
           decision: item.decision,
+          images: written.images.carried,
+          images_failed: written.images.failed,
         },
       });
 
-      created.push({ ...base, pageId });
+      created.push({
+        ...base,
+        pageId,
+        ...(written.images.carried > 0 ? { images: written.images.carried } : {}),
+        ...(written.images.failed > 0 ? { imagesFailed: written.images.failed } : {}),
+      });
     } catch (error) {
       const claimReason = claimRefusal(error);
       skipped.push({
@@ -602,10 +651,14 @@ export async function applyImport(input: ApplyImportInput): Promise<ApplyImportR
     }
   }
 
+  await dropStagedImages(record.id);
+
   const stats = {
     ...record.stats,
     created: created.length,
     skipped: skipped.length,
+    images_carried: created.reduce((total, item) => total + (item.images ?? 0), 0),
+    images_failed: created.reduce((total, item) => total + (item.imagesFailed ?? 0), 0),
     applied_at: new Date().toISOString(),
   };
   const [updated] = await db
@@ -632,25 +685,33 @@ interface CreateImportedPageInput {
   spaceId: string;
   actor: ImportActor;
   title: string;
-  body: string;
+  /** Stores the page's images and returns the body pointing at them. */
+  carry: (pageId: string | null) => Promise<CarriedImages>;
   path: string;
   parentId: string | null;
 }
 
-async function createImportedPage(input: CreateImportedPageInput): Promise<string> {
+interface WrittenPage {
+  pageId: string;
+  images: CarriedImages;
+}
+
+async function createImportedPage(input: CreateImportedPageInput): Promise<WrittenPage> {
+  // Stored unattached; `createPage` claims the ones this body names.
+  const images = await input.carry(null);
   const page = await createPage({
     id: input.id,
     workspaceId: input.workspaceId,
     spaceId: input.spaceId,
     actor: { type: 'user', id: input.actor.id },
     title: input.title,
-    body: input.body,
+    body: images.markdown,
     // Imported documentation was written by people for people.
     kind: 'human',
     path: input.path,
     parentId: input.parentId,
   });
-  return page.id;
+  return { pageId: page.id, images };
 }
 
 /**
@@ -659,15 +720,16 @@ async function createImportedPage(input: CreateImportedPageInput): Promise<strin
  * It goes through the ordinary claim protocol rather than around it: the import
  * takes a lease, writes under it, and gives it back. A page somebody else is
  * holding refuses the lease, and the item is reported as skipped — an import
- * does not get to take an edit away from the person making it.
+ * does not get to take an edit away from the person making it. The images are
+ * stored only once the lease is held, so a refused page gains none.
  */
 async function overwritePage(input: {
   workspaceId: string;
   pageId: string;
   actor: ImportActor;
   title: string;
-  body: string;
-}): Promise<string> {
+  carry: (pageId: string | null) => Promise<CarriedImages>;
+}): Promise<WrittenPage> {
   let claim;
   try {
     claim = await acquireClaim({
@@ -690,16 +752,17 @@ async function overwritePage(input: {
   }
 
   try {
+    const images = await input.carry(input.pageId);
     await updatePage({
       workspaceId: input.workspaceId,
       pageId: input.pageId,
       actor: { type: 'user', id: input.actor.id },
       title: input.title,
-      body: input.body,
+      body: images.markdown,
       claimId: claim.claim.id,
       baseContentHash: claim.claim.baseContentHash,
     });
-    return input.pageId;
+    return { pageId: input.pageId, images };
   } finally {
     await releaseClaim({
       workspaceId: input.workspaceId,
@@ -731,6 +794,9 @@ export async function cancelImport(
     .set({ status: 'cancelled', updatedAt: new Date() })
     .where(eq(imports.id, record.id))
     .returning(importColumns);
+  // The staged Markdown stays until the record is purged; the pictures, which
+  // are most of what an import weighs, go now.
+  await dropStagedImages(record.id);
 
   await recordAudit({
     workspaceId,

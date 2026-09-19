@@ -7,14 +7,18 @@
  * front matter `title` wins over the file name, because that is the title the
  * document was published under.
  *
- * Nothing but text is carried across. Images referenced by a relative path stay
- * relative and get a warning: there is no attachment store to put the file in,
- * and a broken image a reviewer was told about is better than one they were not.
+ * Text is carried across, and the images the documents show: a PNG, JPEG, GIF
+ * or WebP that a document refers to by a relative path comes along as an asset
+ * (`../images`). An image that is not in the archive, or is some other format,
+ * stays as it was written and gets a warning — a broken image a reviewer was
+ * told about is better than one they were not.
  */
 
 import { ImportError } from '../limits';
 import type { ImportLimits } from '../limits';
 import { truncateToBytes, utf8Length } from '../limits';
+import { createImageCollector } from '../image-collector';
+import { IMPORTABLE_IMAGE_EXTENSIONS } from '../images';
 import { finishBody } from '../markdown-out';
 import { warn } from '../types';
 import type { ImportParseResult, ImportWarning } from '../types';
@@ -38,7 +42,19 @@ export interface MarkdownImportInput {
 }
 
 export function importFromMarkdownZip(input: MarkdownImportInput): ImportParseResult {
-  const entries = readZip(input.zip, { limits: input.limits });
+  // Documents and the pictures they might show are the only entries expanded:
+  // whatever else the archive holds is counted and never read.
+  let unread = 0;
+  const entries = readZip(input.zip, {
+    limits: input.limits,
+    accept: (name) => {
+      const extension = extensionOf(name);
+      return MARKDOWN_EXTENSIONS.has(extension) || IMPORTABLE_IMAGE_EXTENSIONS.has(extension);
+    },
+    onRejected: (name) => {
+      if (!isIgnored(name)) unread += 1;
+    },
+  });
   const documents = entries.filter(
     (entry) => MARKDOWN_EXTENSIONS.has(extensionOf(entry.name)) && !isIgnored(entry.name),
   );
@@ -56,19 +72,22 @@ export function importFromMarkdownZip(input: MarkdownImportInput): ImportParseRe
   const paths = documents.map((entry) => entry.name.slice(prefix.length));
   const known = new Set(paths.map((path) => keyForDocument(path)));
 
-  const warnings: ImportWarning[] = [];
-  const skipped = entries.length - documents.length;
-  if (skipped > 0) warnings.push(warn('unresolved-image', `${skipped} non-Markdown files`));
+  const images = createImageCollector(entries.filter((entry) => !isIgnored(entry.name)));
 
   const pages: DocumentPage[] = documents.map((entry, index) => {
     const path = paths[index] ?? entry.name;
     const raw = entryText(entry);
     const front = splitFrontMatter(raw);
     const lead = front.title === null ? takeLeadingHeading(front.body) : { title: null, body: front.body };
-    const rewritten = rewriteRelativeLinks(lead.body, path, (target) => {
-      const key = keyForDocument(target);
-      return known.has(key) ? key : null;
-    });
+    const rewritten = rewriteRelativeLinks(
+      lead.body,
+      path,
+      (target) => {
+        const key = keyForDocument(target);
+        return known.has(key) ? key : null;
+      },
+      images.resolverFor(entry.name),
+    );
 
     const pageWarnings = [...rewritten.warnings];
     if (extensionOf(path) === 'mdx' && /<[A-Z][\w.]*[\s/>]/.test(rewritten.markdown)) {
@@ -97,11 +116,21 @@ export function importFromMarkdownZip(input: MarkdownImportInput): ImportParseRe
 
   const tree = buildDocumentTree(pages, { sectionTitle: titleFromName });
 
+  const warnings: ImportWarning[] = [];
+  const skipped =
+    unread + entries.filter((entry) => !isIgnored(entry.name)).length - documents.length - images.used;
+  if (skipped > 0) warnings.push(warn('unresolved-image', `${skipped} files that are neither Markdown nor an image a page shows`));
+
   return {
     source: 'markdown',
     nodes: tree.nodes,
+    assets: images.assets(),
     warnings,
-    params: { file_count: documents.length, root: prefix.replace(/\/$/, '') },
+    params: {
+      file_count: documents.length,
+      image_count: images.used,
+      root: prefix.replace(/\/$/, ''),
+    },
   };
 }
 

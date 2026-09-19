@@ -73,6 +73,8 @@ export interface ReadZipOptions {
   limits: Pick<ImportLimits, 'expandedBytes' | 'zipEntries'>;
   /** Only entries this returns true for are decompressed. */
   accept?: (name: string) => boolean;
+  /** Told the name of every file `accept` turned down, so a caller can count them. */
+  onRejected?: (name: string) => void;
 }
 
 /**
@@ -126,7 +128,10 @@ export function readZip(bytes: Uint8Array, options: ReadZipOptions): ZipFile[] {
 
     if (name.endsWith('/')) continue;
     if (!isSafeEntryName(name)) continue;
-    if (options.accept && !options.accept(name)) continue;
+    if (options.accept && !options.accept(name)) {
+      options.onRejected?.(name);
+      continue;
+    }
 
     expanded += uncompressedSize;
     if (expanded > options.limits.expandedBytes) {

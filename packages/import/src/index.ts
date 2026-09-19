@@ -13,6 +13,8 @@
  */
 
 export * from './doctree';
+export * from './image-collector';
+export * from './images';
 export * from './limits';
 export * from './links';
 export * from './markdown-out';

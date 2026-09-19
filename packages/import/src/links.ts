@@ -19,6 +19,7 @@
  * 404s is worse than a sentence that reads.
  */
 
+import { encodeDestination } from './images';
 import { escapeInline } from './markdown-out';
 import { warn } from './types';
 import type { ImportWarning } from './types';
@@ -27,8 +28,8 @@ export const LINK_SCHEME = 'clewwiki-import:';
 
 /** The placeholder a converter writes for a link to another imported page. */
 export function placeholderFor(sourceId: string, fragment?: string): string {
-  const anchor = fragment ? `#${encodeURIComponent(fragment)}` : '';
-  return `${LINK_SCHEME}${encodeURIComponent(sourceId)}${anchor}`;
+  const anchor = fragment ? `#${encodeDestination(fragment)}` : '';
+  return `${LINK_SCHEME}${encodeDestination(sourceId)}${anchor}`;
 }
 
 /** True when a body still has at least one unresolved placeholder. */
@@ -38,8 +39,9 @@ export function hasPlaceholders(markdown: string): boolean {
 
 /**
  * Matches the destination of an inline link or image. The destination of a
- * placeholder never contains a space or a bracket, because `placeholderFor`
- * percent-encodes the source id, so the pattern can stay this simple.
+ * placeholder never contains a space, a bracket or a parenthesis, because
+ * `placeholderFor` percent-encodes the source id, so the pattern can stay this
+ * simple.
  */
 const PLACEHOLDER = /(!?)\[([^\]]*)\]\(clewwiki-import:([^)\s#]*)(#[^)\s]*)?\)/g;
 

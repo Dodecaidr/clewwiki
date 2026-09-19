@@ -19,6 +19,7 @@
  * pages survives whatever the reviewer does to the target paths afterwards.
  */
 
+import { imagePlaceholderFor } from './images';
 import { placeholderFor } from './links';
 import { escapeInline } from './markdown-out';
 import { warn } from './types';
@@ -161,10 +162,11 @@ export function buildDocumentTree(pages: DocumentPage[], options: BuildTreeOptio
 /**
  * Rewrites the relative links of one document.
  *
- * A link to another document of the same import becomes a placeholder; a link
- * to an image or any other file becomes a warning, because there is no upload
- * and a relative path will not resolve once the page is in the wiki; an
- * absolute link is left exactly as it was.
+ * A link to another document of the same import becomes a placeholder, and so
+ * does an image the caller can find in the archive. An image it cannot — not
+ * there, or not a format the image store takes — becomes a warning, because a
+ * relative path will not resolve once the page is in the wiki. An absolute link
+ * is left exactly as it was.
  */
 export function rewriteRelativeLinks(
   markdown: string,
@@ -176,6 +178,14 @@ export function rewriteRelativeLinks(
    * first and a plain Markdown path does not.
    */
   resolveTarget: (resolvedPath: string) => string | null,
+  /**
+   * Turns an image's path, as the document wrote it (decoded, still relative),
+   * into the key of the asset that carries it, or null. It is given the path
+   * unresolved because the caller knows where the document really sat in the
+   * archive, which `fromPath` — already stripped of a wrapping folder and of
+   * Notion's suffixes — no longer says.
+   */
+  resolveImage?: (relativePath: string) => string | null,
 ): { markdown: string; warnings: ImportWarning[] } {
   const warnings: ImportWarning[] = [];
   const seen = new Set<string>();
@@ -188,7 +198,9 @@ export function rewriteRelativeLinks(
 
   // Inline links and images. Reference-style links are rare in these exports
   // and are left alone rather than half-rewritten.
-  const pattern = /(!?)\[([^\]]*)\]\(\s*<?([^)>\s]+)>?(\s+"[^"]*")?\s*\)/g;
+  // A destination may hold one level of balanced parentheses, as CommonMark
+  // allows and as `Untitled (1).png` needs.
+  const pattern = /(!?)\[([^\]]*)\]\(\s*<?((?:[^()<>\s]|\([^()\s]*\))+)>?(\s+"[^"]*")?\s*\)/g;
 
   const rewritten = markdown.replace(
     pattern,
@@ -197,12 +209,18 @@ export function rewriteRelativeLinks(
         return match;
       }
       const [rawPath = '', fragment] = splitFragment(target);
-      const resolved = resolvePath(directoryOf(fromPath), decodeSafely(rawPath));
+      const relative = decodeSafely(rawPath);
+      const resolved = resolvePath(directoryOf(fromPath), relative);
+
+      if (bang === '!' && relative !== '') {
+        const asset = resolveImage?.(relative) ?? null;
+        if (asset !== null) return `![${text}](${imagePlaceholderFor(asset)}${title ?? ''})`;
+      }
       if (resolved === null) return match;
 
       if (bang === '!') {
-        // An image path inside the archive cannot follow the page: there is no
-        // attachment store to put the file in.
+        // Nothing importable is behind this path, so it stays as it was written
+        // and the reviewer is told it will not load.
         note('unresolved-image', resolved);
         return `![${text}](${target}${title ?? ''})`;
       }
