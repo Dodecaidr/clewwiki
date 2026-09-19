@@ -598,11 +598,11 @@ wiki whole and the container keeps its read-only filesystem; bounded per image,
 per workspace and per actor. An image belongs to a page and is exactly as
 visible as the page, which is what makes restricted spaces and moves between
 spaces need no special case. The HTML export carries the page's own images
-inline, since it has to open from disk. Not built: an MCP tool (agents have
-Mermaid and chart blocks, and REST), a gallery for managing a page's images in
-the interface — `DELETE /api/v1/images/{id}` exists for the screenshot that
-should not have been uploaded — re-encoding to strip metadata, and images in
-imports.
+inline, since it has to open from disk. A page lists its images under
+**Images**, marks the ones its current text no longer shows, and removes one
+for good — the screenshot that should not have been uploaded is a person's
+problem, not an API client's. Not built: an MCP tool (agents have Mermaid and
+chart blocks, and REST), re-encoding to strip metadata, and images in imports.
 
 **Deliberately not yet: roles inside a space** (viewer, editor, admin). Membership
 is visibility only. Read-only membership has to be enforced on every write path,
