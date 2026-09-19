@@ -10,7 +10,7 @@ runs on your own server and works with whichever agent tools your team uses.
 
 ![A page with a diagram and a chart](docs/images/page.png)
 
-Status: v0.2.0, early and under active development.
+Status: v0.2.1, early and under active development.
 
 ## The problem
 
