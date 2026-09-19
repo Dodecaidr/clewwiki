@@ -71,6 +71,13 @@
       "when": 1789738953026,
       "tag": "0009_comments",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789770584240,
+      "tag": "0010_collab",
+      "breakpoints": true
     }
   ]
 }

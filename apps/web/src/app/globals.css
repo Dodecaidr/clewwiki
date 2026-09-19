@@ -536,3 +536,32 @@
   outline-offset: 4px;
   border-radius: 2px;
 }
+
+/*
+ * Other people's cursors in a live editing session. The caret is a zero-width
+ * inline box with a coloured border, so it takes no room in the line; its label
+ * sits above it and never catches a click.
+ */
+.collab-caret {
+  position: relative;
+  margin-inline: -1px;
+  border-inline-start: 2px solid;
+  pointer-events: none;
+  word-break: normal;
+}
+
+.collab-caret-label {
+  position: absolute;
+  inset-block-end: 100%;
+  inset-inline-start: -2px;
+  padding: 0 0.375rem;
+  border-radius: 0.25rem 0.25rem 0.25rem 0;
+  color: #fff;
+  font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  font-size: 0.6875rem;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  user-select: none;
+}

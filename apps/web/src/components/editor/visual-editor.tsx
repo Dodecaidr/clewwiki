@@ -3,15 +3,19 @@
 import type { CalloutKind } from '@clewwiki/content/callouts';
 import { Extension } from '@tiptap/core';
 import type { Editor, JSONContent, Range } from '@tiptap/core';
+import Collaboration from '@tiptap/extension-collaboration';
 import { EditorContent, ReactNodeViewRenderer, useEditor } from '@tiptap/react';
 import { useTranslations } from 'next-intl';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
 import { filterBlockItems } from './block-items';
 import type { BlockItem, BlockItemActions } from './block-items';
 import { ImageDialog, LinkDialog, MermaidDialog, SourceDialog } from './block-dialogs';
 import { ChartDialog } from './chart-dialog';
+import { createCursorExtension } from './collab/cursors';
+import { COLLAB_FIELD } from './collab/initial-state';
+import type { SessionProvider } from './collab/provider';
 import { insertChart, insertMermaid, setLink } from './commands';
 import { bindDocument, parseMarkdown, serializeDocument } from './markdown-bridge';
 import type { ParsedMarkdown } from './markdown-bridge';
@@ -47,6 +51,12 @@ export interface VisualEditorProps {
   onReady: (details: { rawBlocks: number }) => void;
   ariaLabel: string;
   describedBy?: string;
+  /**
+   * A live session to edit in. The document then comes from the session and not
+   * from `markdown`, and `parsed` — the saved page bound to itself — is what
+   * unchanged blocks are written back from. It changes whenever anybody saves.
+   */
+  session?: { provider: SessionProvider; parsed: ParsedMarkdown; editable: boolean };
 }
 
 type DialogState =
@@ -117,7 +127,15 @@ class EditorController {
 
   openLink = (): void => this.openLinkDialog();
 
-  created(parsed: ParsedMarkdown, markdown: string, editor: Editor): void {
+  created(parsed: ParsedMarkdown, markdown: string, editor: Editor, shared: boolean): void {
+    if (shared) {
+      // The shared document may already differ from the saved page — that is
+      // what other people's edits are — so there is nothing to compare it with.
+      // Whether this page can be kept byte for byte was settled from the page
+      // itself before the session was offered at all.
+      this.handlers.onReady({ rawBlocks: parsed.rawBlocks });
+      return;
+    }
     const current = editor.getJSON();
     const bound = bindDocument(parsed, current);
     if (!bound || serializeDocument(current, parsed) !== markdown) {
@@ -127,10 +145,10 @@ class EditorController {
     this.handlers.onReady({ rawBlocks: parsed.rawBlocks });
   }
 
-  updated(parsed: ParsedMarkdown, editor: Editor): void {
+  updated(parsed: { current: ParsedMarkdown }, editor: Editor): void {
     clearTimeout(this.changeTimer);
     this.changeTimer = setTimeout(() => {
-      this.handlers.onChange(serializeDocument(editor.getJSON(), parsed));
+      this.handlers.onChange(serializeDocument(editor.getJSON(), parsed.current));
     }, 250);
   }
 
@@ -138,9 +156,13 @@ class EditorController {
     clearTimeout(this.changeTimer);
   }
 
-  createExtensions(calloutLabels: Partial<Record<CalloutKind, string>>) {
+  createExtensions(calloutLabels: Partial<Record<CalloutKind, string>>, provider?: SessionProvider) {
     return [
+      ...(provider
+        ? [Collaboration.configure({ document: provider.doc, field: COLLAB_FIELD }), createCursorExtension(provider)]
+        : []),
       ...createEditorExtensions({
+        history: provider === undefined,
         mermaidBlock: ReactNodeViewRenderer(MermaidBlockView),
         chartBlock: ReactNodeViewRenderer(ChartBlockView),
         rawBlock: ReactNodeViewRenderer(RawBlockView),
@@ -182,26 +204,39 @@ export default function VisualEditor({
   onReady,
   ariaLabel,
   describedBy,
+  session,
 }: VisualEditorProps) {
   const t = useTranslations('editor');
   const tc = useTranslations('content');
-  const [parsed] = useState<ParsedMarkdown>(() => parseMarkdown(markdown));
+  const [ownParsed] = useState<ParsedMarkdown>(() => session?.parsed ?? parseMarkdown(markdown));
+  // In a session the base moves under the editor each time somebody saves.
+  const parsedRef = useRef(ownParsed);
+  useEffect(() => {
+    parsedRef.current = session?.parsed ?? ownParsed;
+  }, [session?.parsed, ownParsed]);
+  const [provider] = useState(() => session?.provider);
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
   const [slash, setSlash] = useState<SlashMenuState>(CLOSED_SLASH_MENU);
   const [controller] = useState(() => new EditorController());
   const [extensions] = useState(() =>
-    controller.createExtensions({
-      NOTE: tc('calloutNote'),
-      TIP: tc('calloutTip'),
-      IMPORTANT: tc('calloutImportant'),
-      WARNING: tc('calloutWarning'),
-      CAUTION: tc('calloutCaution'),
-    }),
+    controller.createExtensions(
+      {
+        NOTE: tc('calloutNote'),
+        TIP: tc('calloutTip'),
+        IMPORTANT: tc('calloutImportant'),
+        WARNING: tc('calloutWarning'),
+        CAUTION: tc('calloutCaution'),
+      },
+      provider,
+    ),
   );
 
   const editor = useEditor({
     extensions,
-    content: parsed.doc,
+    // A shared document is filled by the session, never from here: setting
+    // content as well would type the page into it a second time.
+    ...(provider ? {} : { content: ownParsed.doc }),
+    editable: session?.editable ?? true,
     immediatelyRender: false,
     shouldRerenderOnTransaction: false,
     editorProps: {
@@ -220,8 +255,9 @@ export default function VisualEditor({
         return controller.pasteMarkdown(text);
       },
     },
-    onCreate: ({ editor: created }) => controller.created(parsed, markdown, created),
-    onUpdate: ({ editor: updated }) => controller.updated(parsed, updated),
+    onCreate: ({ editor: created }) =>
+      controller.created(parsedRef.current, markdown, created, provider !== undefined),
+    onUpdate: ({ editor: updated }) => controller.updated(parsedRef, updated),
   });
 
   useEffect(() => {
@@ -258,12 +294,20 @@ export default function VisualEditor({
 
   useEffect(() => {
     controller.attach(editor);
-    handleRef.current = editor ? { getMarkdown: () => serializeDocument(editor.getJSON(), parsed) } : null;
+    handleRef.current = editor
+      ? { getMarkdown: () => serializeDocument(editor.getJSON(), parsedRef.current) }
+      : null;
     return () => {
       controller.dispose();
       handleRef.current = null;
     };
-  }, [controller, editor, handleRef, parsed]);
+  }, [controller, editor, handleRef]);
+
+  // A paused session is read-only: what is typed into it could not be sent.
+  const editable = session?.editable ?? true;
+  useEffect(() => {
+    if (editor && editor.isEditable !== editable) editor.setEditable(editable);
+  }, [editor, editable]);
 
   const ui = useMemo<EditorUi>(
     () => ({

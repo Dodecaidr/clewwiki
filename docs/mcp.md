@@ -427,6 +427,14 @@ ran out. The REST endpoint distinguishes the two with its status code —
 `201` for a lease granted, `200` for one extended — and the tool result is
 the same shape either way.
 
+**When people are editing the page.** People edit a page together in a live
+session, and the session holds one claim for all of them. To an agent that is
+indistinguishable from any other holder: `wiki.claim` answers `CONFLICT`, and
+`details.held_by` reads `Live session: Dana, Lee`. Do what a conflict always
+calls for — pick other work, or wait and try again. A session nobody types in
+gives the page back by itself within minutes. An agent cannot join a session,
+and there is no tool that reaches into one.
+
 ### wiki.renew_claim
 
 Heartbeat that extends an active claim.

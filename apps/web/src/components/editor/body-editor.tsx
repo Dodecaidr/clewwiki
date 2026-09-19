@@ -3,8 +3,19 @@
 import type { BlockIssue } from '@clewwiki/content/blocks';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
-import { useDeferredValue, useEffect, useId, useRef, useState, useTransition } from 'react';
+import {
+  useDeferredValue,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from 'react';
 
+import type { MarkdownStore } from './collab/use-session';
+import type { SessionProvider } from './collab/provider';
+import type { ParsedMarkdown } from './markdown-bridge';
 import type { VisualEditorHandle } from './visual-editor';
 import { PageBody } from '@/components/page-body';
 import { Button } from '@/components/ui/button';
@@ -33,6 +44,24 @@ function EditorLoading() {
 
 export type EditorMode = 'visual' | 'markdown';
 
+/**
+ * A live session to edit the body in. The shared document is then the truth:
+ * the visual tab edits it directly, and text typed in the Markdown tab is
+ * written into it before anything else reads it.
+ */
+export interface BodySession {
+  provider: SessionProvider;
+  parsed: ParsedMarkdown;
+  /** False while the session is paused: what is typed could not be sent. */
+  editable: boolean;
+  /** True when nobody else is in the session. */
+  alone: boolean;
+  applyMarkdown: (markdown: string) => void;
+  markdown: MarkdownStore;
+}
+
+const NO_STORE: MarkdownStore = { subscribe: () => () => undefined, getSnapshot: () => '' };
+
 export interface BodyEditorHandle {
   /** Brings the hidden field up to date with the visual editor right now. */
   flush: () => string;
@@ -45,6 +74,7 @@ export function BodyEditor({
   onBodyChange,
   handleRef,
   renderPreview,
+  session,
 }: {
   name: string;
   initialBody: string;
@@ -53,6 +83,7 @@ export function BodyEditor({
   onBodyChange: (body: string) => void;
   handleRef: React.RefObject<BodyEditorHandle | null>;
   renderPreview: (markdown: string) => Promise<string>;
+  session?: BodySession;
 }) {
   const t = useTranslations('editor');
   const hintId = useId();
@@ -69,7 +100,28 @@ export function BodyEditor({
   const visualRef = useRef<VisualEditorHandle | null>(null);
   const hiddenRef = useRef<HTMLInputElement>(null);
 
-  const deferredBody = useDeferredValue(body);
+  // With somebody else in the session the Markdown tab shows the shared
+  // document and cannot be typed in: a text area has no way to merge what two
+  // people type, and the visual tab does.
+  const sharedMarkdown = useSyncExternalStore(
+    (session?.markdown ?? NO_STORE).subscribe,
+    (session?.markdown ?? NO_STORE).getSnapshot,
+    () => '',
+  );
+  const markdownLocked = session !== undefined && (!session.alone || !session.editable);
+  const bodyRef = useRef(body);
+  useEffect(() => {
+    bodyRef.current = body;
+  }, [body]);
+  // Somebody joined while this person was typing Markdown: what they typed goes
+  // into the shared document first, and only then does the tab lock.
+  useEffect(() => {
+    if (session && markdownLocked && mode === 'markdown') session.applyMarkdown(bodyRef.current);
+    // Only the moment of locking matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markdownLocked]);
+  const shownBody = markdownLocked && mode === 'markdown' ? sharedMarkdown : body;
+  const deferredBody = useDeferredValue(shownBody);
   const [liveIssues, setLiveIssues] = useState<BlockIssue[]>([]);
   // After an edit the server's list is out of date; the live check replaces it.
   const issues = deferredBody === initialBody && serverIssues.length > 0 ? serverIssues : liveIssues;
@@ -97,7 +149,16 @@ export function BodyEditor({
   useEffect(() => {
     handleRef.current = {
       flush: () => {
-        const current = mode === 'visual' && visualRef.current ? visualRef.current.getMarkdown() : body;
+        // In a session, Markdown typed by hand becomes part of the shared
+        // document before it is saved, or the next person in would be shown the
+        // text from before it.
+        if (session && mode === 'markdown' && !markdownLocked) session.applyMarkdown(body);
+        const current =
+          mode === 'visual' && visualRef.current
+            ? visualRef.current.getMarkdown()
+            : markdownLocked
+              ? sharedMarkdown
+              : body;
         if (hiddenRef.current) hiddenRef.current.value = JSON.stringify(current);
         if (current !== body) update(current);
         return current;
@@ -118,6 +179,7 @@ export function BodyEditor({
       update(visualRef.current.getMarkdown());
     }
     if (next === 'visual') {
+      if (session && !markdownLocked) session.applyMarkdown(body);
       setNotice(null);
       setVisualKey((key) => key + 1);
     }
@@ -163,6 +225,7 @@ export function BodyEditor({
       <input type="hidden" name={`${name}Encoding`} value="json" />
 
       {notice === 'unsafe' ? <Alert>{t('modeUnsafe')}</Alert> : null}
+      {mode === 'markdown' && markdownLocked ? <Alert>{t('markdownLocked')}</Alert> : null}
       {mode === 'visual' && rawBlocks > 0 ? <Alert>{t('rawBlocksNotice', { count: rawBlocks })}</Alert> : null}
 
       {mode === 'visual' ? (
@@ -177,6 +240,11 @@ export function BodyEditor({
               setNotice('unsafe');
               setMode('markdown');
             }}
+            session={
+              session
+                ? { provider: session.provider, parsed: session.parsed, editable: session.editable }
+                : undefined
+            }
             ariaLabel={t('body')}
             describedBy={`${hintId}${issues.length > 0 ? ` ${issuesId}` : ''}`}
           />
@@ -187,7 +255,8 @@ export function BodyEditor({
           aria-label={t('body')}
           aria-describedby={`${hintId}${issues.length > 0 ? ` ${issuesId}` : ''}`}
           aria-invalid={issues.length > 0}
-          value={body}
+          value={shownBody}
+          readOnly={markdownLocked}
           onChange={(event) => update(event.target.value)}
           spellCheck={false}
           className={cn(

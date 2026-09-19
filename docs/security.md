@@ -131,6 +131,26 @@ partly in place, the gap is named rather than implied away.
   a person's words to agents and is returned to them as data. Both decisions are
   audited (`page.review_accepted`, `page.review_reverted`) with the version
   range, never the content.
+- **Live editing sessions are for people, and a browser speaks only for itself.**
+  `GET` and `POST /api/v1/pages/{id}/collab` refuse any bearer token with
+  `forbidden`; a session is joined with a session cookie by somebody who can see
+  the page's space, and cookie-authenticated `POST`s pass the same origin check
+  as every other mutation. A message is taken only from a connection that
+  joined, and only as the person who joined it: another person presenting that
+  connection's id is answered `404`, the same as a connection that does not
+  exist. A browser may report its own cursor and no other — the awareness update
+  is decoded and refused with `forbidden` if it names any client id but the
+  sender's — and the name and colour beside a cursor are read from the server's
+  participant list, never from what a browser says about itself; they reach the
+  DOM as text and as a colour checked against `#rrggbb`. The shared document is
+  opaque bytes to the server: relayed, merged and stored, never parsed into a
+  page, never returned to an agent. What becomes a page is Markdown sent through
+  the ordinary write path, with its validation. Everything is bounded: 1 MB per
+  update, 16 MB of updates per session, 24 connections per session, 200
+  sessions per process, and a connection that falls too far behind is closed
+  rather than buffered for. A session's claim is an ordinary claim: an
+  administrator can force-release it, it expires by TTL, and a session that is
+  idle gives it back by itself.
 - **Comments: who may do what.** Reading needs `pages:read` and writing
   `pages:write`, space-restricted, with no new scope. A person may resolve any
   thread; an agent token only a thread an agent opened, and is otherwise refused

@@ -991,6 +991,48 @@ text somebody typed, never rendered as Markdown and never folded into a page,
 and the tools that return them say plainly that they are data to read rather
 than instructions to follow.
 
+### Editing together
+
+Opening a page's editor joins that page's **live session**. If somebody else is
+already editing, you see their cursor, labelled with their name, and their edits
+as they type; if nobody is, you are simply editing. There is nothing to turn on
+and nobody is ever told the page is locked by a colleague.
+
+What is stored is still Markdown, and still the page's own bytes. The shared
+document is a CRDT bound to the visual editor; when somebody saves, their
+browser writes it out with the same bridge that opens an agent's page and saves
+it unchanged, so a table or a list nobody touched comes back exactly as it was,
+whoever was in the session and whenever they joined.
+
+**Agents see one writer.** The session holds a single claim for everybody in
+it, under an identity of its own and labelled with their names. An agent that
+tries to claim the page gets the `CONFLICT` it has always got — now naming the
+session — and an agent never joins one. So the rule the product is built on
+holds: at any moment a page is being written by people *or* by an agent, never
+both, and nobody's write is lost to the other's.
+
+- **Saving** is an ordinary write by whoever pressed the button: a revision
+  under their name, validated, audited and reviewable like any other. Text is
+  also saved for its author after a minute of quiet, and unsaved text survives a
+  restart or the last person closing the tab — the next person in finds it.
+- **A forgotten tab cannot hold a page.** A session nobody has typed in for five
+  minutes, with nothing unsaved, gives the page back and pauses; typing takes it
+  back. If an agent wrote the page in the meantime, the session is reset and
+  asks everybody to load the page again, rather than merging edits to a text
+  that no longer exists.
+- **The Markdown tab** is yours while you are alone in the session. With
+  somebody else in it, it shows the page and is not typed in — two people cannot
+  type into one text box — and the Visual tab is where you work together.
+- A page the visual editor cannot keep byte for byte is edited as Markdown by
+  one person at a time, under an exclusive lease, as before.
+
+It needs nothing from your deployment. The session runs over server-sent events
+and ordinary requests (`/api/v1/pages/{id}/collab`), not a WebSocket: no second
+process, no second port, and no proxy configuration beyond passing streamed
+responses unbuffered, which the examples above already do. Sessions live in the
+application process, so they assume one application process per instance —
+which is what `docker compose up` runs.
+
 ### Reviewing what agents changed
 
 An agent does not ask before it writes, so the review comes afterwards. Every
@@ -1495,6 +1537,8 @@ noise.
 | `DELETE /api/v1/pages/{id}` | session or token | `pages:write` + `pages:delete` | Soft-delete a page and everything below it. `409 conflict` while another actor holds a live claim in the subtree, unless the caller is an administrator. |
 | `POST /api/v1/pages/{id}/restore` | admin session | — | Restore a soft-deleted page and the subtree deleted with it. `409 conflict` when a live page has taken one of its paths or its parent is gone or moved. |
 | `GET /api/v1/pages/{id}/tree` | session or token | `pages:read` | The subtree rooted at a page, nested. |
+| `GET /api/v1/pages/{id}/collab` | session | — | Join the page's live editing session and stream it as server-sent events: `hello` (the document so far, who is present, whether the session holds the page), `update`, `awareness`, `participants`, `saved`, `status`, `reset`. Takes `client` (a UUID for this connection) and `y` (the Yjs client id). `403 forbidden` for any agent token; `409 conflict` when the session or the instance is full. |
+| `POST /api/v1/pages/{id}/collab` | session | — | What a browser in the session sends, as JSON with a `kind`: `update`, `seed`, `awareness`, `resume` or `save` (`body`, `state_vector`, optional `title` and `summary`). Only from a connection that joined, as the person who joined — `404` otherwise. `409 conflict` while somebody else holds the page; `403` for a cursor that is not the sender's own. |
 | `GET /api/v1/pages/{id}/versions` | session or token | `pages:read` | Revision history: version, author, content hash, timestamp. |
 | `GET /api/v1/pages/{id}/versions/{version}` | session or token | `pages:read` | One version of a page with its body. `404 not_found` for a version the page never had. |
 | `GET /api/v1/pages/{id}/diff` | session or token | `pages:read` | The difference between two versions as hunks of numbered lines, with changed words marked inside rewritten lines. Takes `from` (0 means "before the page existed"), `to` (defaults to the current version) and `context` (0–50, default 3). `coarse: true` when the versions are too far apart for a minimal diff. |

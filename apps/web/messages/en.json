@@ -339,7 +339,19 @@
     "rawBlockTitle": "Edit Markdown source",
     "rawBlockHint": "This block has no visual form, so it is edited as Markdown and saved exactly as written.",
     "rawBlockSave": "Save",
-    "rawInlineTitle": "Markdown source, kept as written. Edit it in the Markdown tab."
+    "rawInlineTitle": "Markdown source, kept as written. Edit it in the Markdown tab.",
+    "sessionJoining": "Joining the editing session…",
+    "sessionLiveAlone": "You are editing this page. Anybody who opens it now edits it with you.",
+    "sessionLiveWith": "Editing together with",
+    "sessionSavedBy": "Saved by {name}",
+    "sessionUnsavedSince": "Changed since {name} saved",
+    "sessionPausedIdle": "Nobody has typed for a while, so the page was given back for agents to use. Nothing is lost.",
+    "sessionPausedHeld": "{name} is holding this page, so this session is paused.",
+    "sessionResume": "Continue editing",
+    "sessionOffline": "The connection to the editing session was lost. It reconnects by itself; what you type meanwhile is kept and sent when it is back.",
+    "sessionReset": "This page was changed while the session was paused, so this editor is showing a version that no longer exists.",
+    "sessionReload": "Load the page again",
+    "markdownLocked": "Somebody else is editing this page with you, so Markdown is shown here and not edited: two people cannot type into one text box. Use the Visual tab."
   },
   "content": {
     "calloutNote": "Note",
@@ -632,6 +644,15 @@
       "p4": "What the server does not do is write the decision for you. The four blocks of the resolve form are your words; nothing reads the thread and summarises it. A decision page invented by a machine out of a conversation it did not take part in is exactly the kind of plausible, wrong record the next agent will believe.",
       "p5": "Agents reach all of this over MCP: <code>wiki.list_discussions</code> before starting cross-cutting work, <code>wiki.get_discussion</code> to read a thread, <code>wiki.open_discussion</code> instead of guessing, <code>wiki.post_discussion_message</code> to answer, and <code>wiki.resolve_discussion</code> to write the decision. People do the same from <strong>Discussions</strong> in the sidebar of every space, which carries a badge with the number of open threads, and from the <strong>Discuss this page</strong> button on a page.",
       "p6": "There are no live updates, deliberately. A discussion moves at the speed of the work it is about, and a page that polled for messages would spend an instance’s budget to save a reload. Message bodies are shown as the text somebody typed, never rendered as Markdown and never folded into a page: they are other people’s and other agents’ words, and they are data to read, not instructions to follow."
+    },
+    "editing-together": {
+      "title": "Editing together",
+      "p1": "Open a page’s editor while somebody else has it open and you are editing it together: you see their cursor, with their name on it, and their words as they type them. Nobody is told the page is locked by a colleague, and there is nothing to switch on.",
+      "p2": "<strong>What is stored is still the page’s own Markdown.</strong> The shared document exists only while people are editing. When somebody saves, it is written out by the same code that opens an agent’s page and saves it without changing a byte — so a table or a list nobody touched comes back exactly as it was.",
+      "p3": "<strong>To an agent, a session is one writer.</strong> The session holds a single claim for everybody in it, labelled with their names. An agent that tries to claim the page is told it is taken, and by whom, exactly as it would be if one person held it. People and an agent never write a page at the same moment, so neither loses work to the other.",
+      "p4": "<strong>Saving</strong> makes a version under the name of whoever pressed the button. Text is also saved for you after a minute of quiet, and what nobody saved is kept: if the last person closes the tab, or the server restarts, the next person to open the editor finds the text as it was left.",
+      "p5": "<strong>A forgotten tab does not hold a page.</strong> After five minutes without typing, with nothing unsaved, the session gives the page back so that agents can use it, and says so; start typing and it takes the page back. If the page was changed in the meantime, the editor asks you to load it again.",
+      "p6": "While somebody else is in the session the <strong>Markdown</strong> tab shows the page and cannot be typed in — two people cannot type into one text box — so work together on the <strong>Visual</strong> tab. Alone, the Markdown tab works as it always has."
     },
     "reviews": {
       "title": "Reviewing what agents changed",

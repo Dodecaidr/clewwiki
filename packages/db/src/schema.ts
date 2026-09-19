@@ -93,6 +93,19 @@ export const discussionStatus = pgEnum('discussion_status', ['open', 'resolved']
  */
 export const reviewDecision = pgEnum('review_decision', ['accepted', 'reverted']);
 
+/** PostgreSQL `bytea`, as the bytes it is. */
+const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+  toDriver(value) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  },
+  fromDriver(value) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  },
+});
+
 /**
  * PostgreSQL `tsvector`. Drizzle has no built-in mapping for it, and the
  * column is never read back into TypeScript — it exists for the index and for
@@ -1049,6 +1062,46 @@ export const pageComments = pgTable(
   ],
 );
 
+/**
+ * The unsaved state of a live editing session, one row per page.
+ *
+ * People editing a page together share a CRDT document that lives in the
+ * application's memory. This row is what survives when that memory does not —
+ * a restart, a deploy — and what is left when the last person closes the tab
+ * without saving: the next person to open the editor finds the text as it was
+ * left rather than as it was last saved.
+ *
+ * `base_content_hash` is the version of the page the session was editing. The
+ * state is only ever resumed against that exact version: if the page has been
+ * written since — an agent took it once the session's claim lapsed — the row
+ * describes edits to a text that no longer exists, and it is discarded rather
+ * than merged. A row is deleted when the session saves with nobody left in it,
+ * and goes with its page.
+ *
+ * The state is an encoded Yjs update: opaque bytes produced by browsers. It is
+ * never parsed into a page by the server, never handed to an agent, and bounded
+ * in size before it is stored.
+ */
+export const pageCollabStates = pgTable(
+  'page_collab_states',
+  {
+    pageId: uuid('page_id')
+      .primaryKey()
+      .references((): AnyPgColumn => pages.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    baseVersion: integer('base_version').notNull(),
+    baseContentHash: text('base_content_hash').notNull(),
+    state: bytea('state').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('page_collab_states_workspace_idx').on(table.workspaceId),
+    check('page_collab_states_size', sql`octet_length(${table.state}) <= 33554432`),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type Space = typeof spaces.$inferSelect;
 export type NewSpace = typeof spaces.$inferInsert;
@@ -1088,3 +1141,4 @@ export type NewPageReviewRow = typeof pageReviews.$inferInsert;
 export type ReviewDecisionValue = (typeof reviewDecision.enumValues)[number];
 export type PageCommentRow = typeof pageComments.$inferSelect;
 export type NewPageCommentRow = typeof pageComments.$inferInsert;
+export type PageCollabStateRow = typeof pageCollabStates.$inferSelect;

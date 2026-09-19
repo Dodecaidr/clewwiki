@@ -324,6 +324,7 @@ lives in the implementation, not here):
 - `page_revisions`
 - `page_reviews`
 - `page_comments`
+- `page_collab_states`
 - `claims`
 - `claim_notes`
 - `anchors`
@@ -510,6 +511,74 @@ that puts four blocks under four headings, and it is unit-tested as such.
 The retention knobs live in `spaces.settings` for the reason every other knob
 does: read with the row, queried on their own by nothing, and a new one must not
 be a migration.
+
+### Live editing sessions, and why a room holds one claim
+
+People wanted to be in a page together. The product is built on the opposite
+idea — one writer at a time, enforced by a claim — and it is built on it for the
+sake of agents, which cannot merge and must never lose a write. The design keeps
+both: **a room is one writer.**
+
+**One claim, held by the room.** A room is a page's shared document, the
+browsers connected to it, and a single claim under the identity
+`collab:<pageId>`, labelled with the names of the people present. Inside the
+room a CRDT merges edits, so people do not contend with each other; outside it
+the room is a claim holder like any other, so `wiki.claim` answers `CONFLICT`
+naming it and the agent protocol is unchanged to the byte. The holder is not a
+person, so nothing changes hands when whoever opened the session leaves.
+`updatePage` takes a `claimActor` for this one caller: the claim is checked
+against the room, and the revision is authored by the person who saved.
+
+**The server does not understand the document.** It relays Yjs updates and keeps
+the merged state, as opaque bytes. It has no editor schema and no Markdown
+bridge, and it never turns the document into a page. The browser that saves
+does that, and sends Markdown through the ordinary write path together with the
+state vector of the document it serialised — so that an edit which arrived a
+moment later is not reported as saved. Validation, revisions, audit and review
+see a write like any other.
+
+**Byte-for-byte survives the CRDT, and that was measured first.** The Markdown
+bridge keeps a table of source slices beside the document, keyed by the content
+of each block rather than by node identity. Any browser can therefore rebuild
+the table from the saved page alone (`bindBase`) and write the shared document
+back against it: a block that still equals a block of the saved page is written
+as that page's bytes, whoever is looking and whenever they joined. The corpus of
+agent pages round-trips unchanged through a second browser's copy of the
+document, and an edit by one browser re-serialises, on the other, exactly the
+line it touched. The stock TipTap Markdown serializer keeps 1 page of 13.
+
+**The document is built once.** A room starts empty. The server asks exactly one
+browser to build the document from the page (`hello.seed`) and hands the job on
+if that browser leaves; everybody else waits. Two browsers building the same
+page would produce the page twice, which is the one thing a CRDT cannot undo. A
+browser that reconnects to an empty room after a restart offers the document it
+already has instead of building a second one.
+
+**Server-sent events, not a WebSocket.** Events arrive on an ordinary streamed
+response and edits leave as ordinary `POST`s. A self-hosted instance therefore
+needs no second process, no second port and nothing new from its reverse proxy;
+`Cache-Control: no-transform` and `X-Accel-Buffering: no` keep the response
+from being collected on the way, this server's own compression included. It was
+checked against the production build before anything was built on it. Updates
+are sent one request at a time and merged while one is in flight, so a refusal
+stops the queue with the edits still in it.
+
+**A forgotten tab cannot hold a page.** A room renews its claim only while
+somebody has typed in the last five minutes or something is unsaved. Otherwise
+it releases the claim and is `paused`; typing takes the claim back. A claim
+taken afresh starts from the page as it then is, and if that is not the version
+the room was editing, the room is reset — a CRDT of a text that no longer exists
+has nothing to be merged into.
+
+**Unsaved text outlives the process.** The merged state is written to
+`page_collab_states`, debounced, with the content hash of the version it was
+typed over, and is resumed only against that exact version. With the last person
+gone and text unsaved, the claim is left to lapse by its TTL rather than
+released, so whoever comes back within it finds the page still theirs.
+
+Rooms live in the application process, as the rate limiters do. That is correct
+for one process per instance; several would need the updates carried between
+them, which PostgreSQL `LISTEN`/`NOTIFY` can do and which nothing needs yet.
 
 ### Review after agents, and why pending is derived
 

@@ -62,8 +62,14 @@ export default async function EditPage({ params }: Props) {
   // The form takes its own lease when it mounts and would find this out a
   // moment later anyway; deciding here means the author is told before typing
   // rather than after.
+  // A live editing session holds the page under an identity of its own, and it
+  // is exactly the claim this person is about to edit under: opening the editor
+  // joins the session instead of being turned away by it.
+  const sessionHolder = `collab:${page.id}`;
   const heldByOther = activeClaims.find(
-    (claim) => claim.holderType !== 'user' || claim.holderId !== session.userId,
+    (claim) =>
+      claim.holderId !== sessionHolder &&
+      (claim.holderType !== 'user' || claim.holderId !== session.userId),
   );
 
   if (heldByOther) {
