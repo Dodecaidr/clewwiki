@@ -7,6 +7,7 @@ import {
   discussionMessages,
   discussions,
   inboxMarks,
+  mentions,
   pageComments,
   pageReviews,
   pages,
@@ -23,6 +24,7 @@ import { getDatabase } from '../db';
  * is written when a message is posted or a page is reviewed; the inbox is a
  * query over the tables those things already live in:
  *
+ * - a message or a comment that addresses you by name (`@[Name]`), wherever it is;
  * - a message in a discussion you opened or spoke in;
  * - a discussion you took part in being resolved;
  * - a reply in a comment thread you started or replied in;
@@ -37,7 +39,12 @@ import { getDatabase } from '../db';
  * is held to — is applied when the inbox is read, not when the event happened.
  * A page that was deleted takes its comments and reviews out with it.
  *
- * The one thing stored is how far each actor has read (`inbox_marks`): a single
+ * A mention is the one item that is stored rather than derived, because who a
+ * name meant can only be decided when it is written. It is still held to the
+ * same rules: the row dies with the message or comment it was written in, and
+ * the reader's visibility is applied here, when it is read.
+ *
+ * The other thing stored is how far each actor has read (`inbox_marks`): a single
  * timestamp, because "mark everything up to here as read" is the operation both
  * a person clicking a button and an agent finishing a turn actually perform.
  */
@@ -45,6 +52,7 @@ import { getDatabase } from '../db';
 export type InboxActor = { type: 'user' | 'agent'; id: string };
 
 export const INBOX_KINDS = [
+  'mention',
   'discussion.message',
   'discussion.resolved',
   'comment.reply',
@@ -147,14 +155,20 @@ export async function getInbox(query: InboxQuery): Promise<Inbox> {
   const scope: Scope = { ...query, since, limit, now };
 
   const found = await Promise.all([
+    messageMentionItems(scope),
+    commentMentionItems(scope),
     discussionMessageItems(scope),
     discussionResolvedItems(scope),
     commentItems(scope),
     reviewItems(scope),
   ]);
 
+  // Being addressed in a thread you are already in is one event, not two, and
+  // "you were mentioned" is the more useful way to say it.
+  const mentioned = new Set(found.flat().filter((item) => item.kind === 'mention').map((item) => item.id));
   const items = found
     .flat()
+    .filter((item) => item.kind === 'mention' || !mentioned.has(item.id))
     .sort((a, b) => b.at.getTime() - a.at.getTime() || a.id.localeCompare(b.id))
     .slice(0, limit)
     .map((item) => ({ ...item, unread: item.at.getTime() > seenAt.getTime() }));
@@ -169,7 +183,7 @@ export async function countUnread(query: Omit<InboxQuery, 'limit' | 'unreadOnly'
 }
 
 /* ------------------------------------------------------------------ */
-/* The four readings                                                   */
+/* The readings                                                        */
 /* ------------------------------------------------------------------ */
 
 interface Scope extends InboxQuery {
@@ -204,6 +218,99 @@ function tookPartInDiscussion(scope: Scope, before: SQL): SQL {
         and mine.created_at < ${before}
     )
   )`;
+}
+
+async function messageMentionItems(scope: Scope): Promise<Draft[]> {
+  const { actor } = scope;
+  const rows = await getDatabase()
+    .select({
+      id: discussionMessages.id,
+      at: discussionMessages.createdAt,
+      authorType: discussionMessages.authorType,
+      authorLabel: discussionMessages.authorLabel,
+      body: discussionMessages.body,
+      discussionId: discussions.id,
+      title: discussions.title,
+      spaceId: spaces.id,
+      spaceKey: spaces.key,
+    })
+    .from(mentions)
+    .innerJoin(discussionMessages, eq(discussionMessages.id, mentions.messageId))
+    .innerJoin(discussions, eq(discussions.id, discussionMessages.discussionId))
+    .innerJoin(spaces, eq(spaces.id, discussions.spaceId))
+    .where(
+      and(
+        eq(mentions.workspaceId, scope.workspaceId),
+        eq(mentions.actorType, actor.type),
+        eq(mentions.actorId, actor.id),
+        gt(mentions.createdAt, scope.since),
+        gt(discussions.expiresAt, scope.now),
+        inSpaces(discussions.spaceId, scope),
+      ),
+    )
+    .orderBy(desc(mentions.createdAt))
+    .limit(scope.limit);
+
+  return rows.map((row) => ({
+    kind: 'mention',
+    id: row.id,
+    at: row.at,
+    space: { id: row.spaceId, key: row.spaceKey },
+    by: { type: row.authorType, label: row.authorLabel },
+    title: row.title,
+    excerpt: excerptOf(row.body),
+    discussionId: row.discussionId,
+    pageId: null,
+    threadId: null,
+    decision: null,
+  }));
+}
+
+async function commentMentionItems(scope: Scope): Promise<Draft[]> {
+  const { actor } = scope;
+  const rows = await getDatabase()
+    .select({
+      id: pageComments.id,
+      at: pageComments.createdAt,
+      parentId: pageComments.parentId,
+      authorType: pageComments.authorType,
+      authorLabel: pageComments.authorLabel,
+      body: pageComments.body,
+      pageId: pages.id,
+      title: pages.title,
+      spaceId: spaces.id,
+      spaceKey: spaces.key,
+    })
+    .from(mentions)
+    .innerJoin(pageComments, eq(pageComments.id, mentions.commentId))
+    .innerJoin(pages, eq(pages.id, pageComments.pageId))
+    .innerJoin(spaces, eq(spaces.id, pages.spaceId))
+    .where(
+      and(
+        eq(mentions.workspaceId, scope.workspaceId),
+        eq(mentions.actorType, actor.type),
+        eq(mentions.actorId, actor.id),
+        gt(mentions.createdAt, scope.since),
+        isNull(pages.deletedAt),
+        inSpaces(spaces.id, scope),
+      ),
+    )
+    .orderBy(desc(mentions.createdAt))
+    .limit(scope.limit);
+
+  return rows.map((row) => ({
+    kind: 'mention',
+    id: row.id,
+    at: row.at,
+    space: { id: row.spaceId, key: row.spaceKey },
+    by: { type: row.authorType, label: row.authorLabel },
+    title: row.title,
+    excerpt: excerptOf(row.body),
+    discussionId: null,
+    pageId: row.pageId,
+    threadId: row.parentId ?? row.id,
+    decision: null,
+  }));
 }
 
 async function discussionMessageItems(scope: Scope): Promise<Draft[]> {

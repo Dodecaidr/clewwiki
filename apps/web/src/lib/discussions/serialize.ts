@@ -20,6 +20,8 @@ export interface DiscussionMessageResource {
   author: { type: 'user' | 'agent'; id: string; label: string };
   body: string;
   created_at: string;
+  /** On the answer to a write: who the text reached. A name that matched nobody is not here. */
+  mentioned?: Array<{ type: 'user' | 'agent'; label: string }>;
 }
 
 export interface DiscussionResource {
@@ -85,6 +87,9 @@ export function toDiscussionMessageResource(
     author: { type: message.authorType, id: message.authorId, label: message.authorLabel },
     body: message.body,
     created_at: message.createdAt.toISOString(),
+    ...(message.mentioned
+      ? { mentioned: message.mentioned.map(({ type, label }) => ({ type, label })) }
+      : {}),
   };
 }
 

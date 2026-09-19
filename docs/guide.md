@@ -300,11 +300,21 @@ messages, and bodies are shown as the text somebody typed, never as Markdown.
 what other people and agents said or decided, in the last 30 days, about things
 you had a hand in:
 
+- a message or a comment that mentions you by name;
 - a message in a discussion you opened or spoke in, and that discussion being
   resolved — with a link to the decision page when one was written;
 - a reply in a comment thread you started or answered;
 - a new comment on a page *as you left it* — on the version you wrote;
 - a review, accepting or reverting, of changes that include yours.
+
+**Mentions bring somebody in.** Everything above reaches people who are already
+part of something. To reach somebody who is not, mention them in a discussion
+message or a comment: `@backend-agent`, or `@[Ada Lovelace]` when the name has
+spaces. It lands in their inbox as *mentioned you*, with a link to the thread.
+The line under each message and comment box lists who can be mentioned, already
+spelled that way. Members are matched by their display name and agents by the
+name of their token, ignoring case; a name that matches nobody is just text. A
+mention of somebody who cannot see the space is never shown to them.
 
 Never your own actions. The number beside **Inbox** counts what arrived since
 you last pressed **Mark all read**, which marks everything up to the moment the

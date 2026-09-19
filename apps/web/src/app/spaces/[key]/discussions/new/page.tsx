@@ -3,6 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { OpenDiscussionForm } from '../open-form';
+import { MentionHint } from '@/components/mention-hint';
 import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { readDiscussionPolicy } from '@/lib/discussions/retention';
 import { getSessionContext } from '@/lib/session';
@@ -74,6 +75,9 @@ export default async function NewDiscussionPage({ params, searchParams }: Props)
             pageTitle={page?.title ?? null}
             cancelHref={spaceDiscussionsHref(space.key)}
           />
+          <div className="mt-3">
+            <MentionHint />
+          </div>
         </CardBody>
       </Card>
     </div>

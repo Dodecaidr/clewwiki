@@ -4,6 +4,7 @@ import { getFormatter, getLocale, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { ComposeMessage, DeleteDiscussionButton, ResolveForm } from './thread-forms';
+import { MentionHint } from '@/components/mention-hint';
 import { Breadcrumbs } from '@/components/breadcrumbs';
 import { isLocale } from '@/i18n/locale';
 import type { Locale } from '@/i18n/locale';
@@ -196,7 +197,10 @@ export default async function DiscussionThreadPage({ params }: Props) {
               <CardTitle>{t('replyHeading')}</CardTitle>
             </CardHeader>
             <CardBody>
-              <ComposeMessage discussionId={thread.discussion.id} />
+              <div className="grid gap-3">
+                <ComposeMessage discussionId={thread.discussion.id} />
+                <MentionHint />
+              </div>
             </CardBody>
           </Card>
 

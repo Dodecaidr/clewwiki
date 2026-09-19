@@ -801,6 +801,17 @@ what a person clicking **Mark all read** and an agent finishing a turn both
 mean. It goes back 30 days; an actor with no mark is treated as having read
 everything older than 14.
 
+**Mentions — built.** The inbox reached people already in a thread; a mention
+reaches somebody who is not. `@name` or `@[Name With Spaces]` in a discussion
+message or a comment is resolved, when it is posted, against the workspace's
+members and live tokens, stored (`mentions`, migration `0015_mentions`) and
+shown in the inbox as its own kind. It is the one inbox item that is stored
+rather than derived — who a name meant cannot be recomputed later — and it keeps
+the inbox's rules anyway: the row dies with its message or comment, and the
+reader's visibility is applied when it is read. The write answers with who was
+reached, so an agent can tell that a name missed. No new tool: the three tools
+that post text describe the syntax.
+
 **Deliberately not built**: e-mail, webhooks, or any push. A self-hosted
 instance has no mail server it can be assumed to reach, and an outbound channel
 is a surface of its own; an agent has no address to push to at all. **Next, if

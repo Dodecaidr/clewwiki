@@ -13,6 +13,8 @@ export interface CommentResource {
   author: { type: 'user' | 'agent'; id: string; label: string };
   body: string;
   created_at: string;
+  /** On the answer to a write: who the text reached. A name that matched nobody is not here. */
+  mentioned?: Array<{ type: 'user' | 'agent'; label: string }>;
 }
 
 export function toCommentResource(comment: CommentRecord): CommentResource {
@@ -21,6 +23,9 @@ export function toCommentResource(comment: CommentRecord): CommentResource {
     author: { type: comment.authorType, id: comment.authorId, label: comment.authorLabel },
     body: comment.body,
     created_at: comment.createdAt.toISOString(),
+    ...(comment.mentioned
+      ? { mentioned: comment.mentioned.map(({ type, label }) => ({ type, label })) }
+      : {}),
   };
 }
 

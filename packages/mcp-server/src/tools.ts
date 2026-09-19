@@ -593,6 +593,17 @@ const postNote = defineTool({
 const discussionIdSchema = z.uuid();
 
 /**
+ * How to address somebody, said in every tool that posts text others read. It
+ * is a sentence in three descriptions rather than a tool of its own because the
+ * moment an agent needs it is the moment it is writing the message.
+ */
+const MENTION_NOTE =
+  ' To address a particular person or agent, write their name as a mention in the text: ' +
+  '@backend-agent, or @[Ada Lovelace] when the name has spaces. It lands in their inbox even if ' +
+  'they were never in the thread. The result lists who was reached under "mentioned"; a name ' +
+  'that is not there matched nobody, so do not assume they were told.';
+
+/**
  * The five discussion tools.
  *
  * Their descriptions carry a protocol, not just a signature, because the whole
@@ -668,7 +679,8 @@ const openDiscussion = defineTool({
     '8 KB. The thread is ephemeral by design: it is closed automatically once it goes quiet, so ' +
     'when the question has an answer, call wiki.resolve_discussion with the decision — that is ' +
     'the part that is kept. A space that already has too many open threads refuses with ' +
-    'VALIDATION; resolve some.',
+    'VALIDATION; resolve some.' +
+    MENTION_NOTE,
   input: z.object({
     space: spaceKeySchema.describe('The space to open the discussion in, from wiki.list_spaces.'),
     title: z
@@ -712,7 +724,8 @@ const postDiscussionMessage = defineTool({
     'message pushes the thread\'s cleanup deadline out, so an active conversation stays. A ' +
     'resolved thread refuses new messages with CONFLICT — its outcome is already a page; open a ' +
     'new discussion rather than reopening the old one. A thread that has reached its message ' +
-    'cap refuses with VALIDATION, which means the same thing: resolve it and start again.',
+    'cap refuses with VALIDATION, which means the same thing: resolve it and start again.' +
+    MENTION_NOTE,
   input: z.object({
     discussion_id: discussionIdSchema.describe('The discussion to reply in.'),
     body: z.string().min(1).max(8_192).describe('Your message, in Markdown. At most 8 KB.'),
@@ -953,7 +966,8 @@ const postComment = defineTool({
     'quote — a passage copied exactly from the page body, long enough to occur in one paragraph ' +
     'only — to attach it to that paragraph; without quote it is about the whole page. A quote ' +
     'found nowhere, or in several paragraphs, is refused with VALIDATION. For a question that ' +
-    'spans pages, use wiki.open_discussion instead.',
+    'spans pages, use wiki.open_discussion instead.' +
+    MENTION_NOTE,
   input: z
     .object({
       thread_id: commentIdSchema.optional().describe('Reply in this thread, from wiki.list_comments.'),
@@ -1026,7 +1040,8 @@ const checkInbox = defineTool({
   description:
     'Call this at the start of a session and before you pick up work you left earlier. It returns ' +
     'what other people and agents did, since you last marked your inbox read, to things this token ' +
-    'had a hand in: a message in a discussion you opened or spoke in, a discussion you took part ' +
+    'had a hand in: a message or comment that mentions this token by name (kind "mention" — somebody ' +
+    'is asking you in particular, so answer it), a message in a discussion you opened or spoke in, a discussion you took part ' +
     'in being resolved (with the decision page, when one was written), a reply in a comment thread ' +
     'you started or answered, a new comment on a page as you left it, and a review that accepted ' +
     'or reverted changes of yours. Each item names its kind, who did it, the title of the ' +
