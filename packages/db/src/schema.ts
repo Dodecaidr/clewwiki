@@ -832,6 +832,36 @@ export const importItems = pgTable(
 );
 
 /**
+ * The images an import brought with it, held until it is applied.
+ *
+ * An image belongs to a page, and between staging and applying there is no
+ * page — so the bytes wait here, keyed by the path the archive had them under,
+ * which is what the `clewwiki-import-image:` placeholders in `markdown` name.
+ * Applying copies each one into `page_images` for every page that shows it and
+ * empties this table for the import; cancelling empties it too, and deleting
+ * the import takes whatever is left. They were validated when they were staged
+ * — type from the bytes, size, room in the store — so what is here is what
+ * `page_images` will take.
+ */
+export const importImages = pgTable(
+  'import_images',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    importId: uuid('import_id')
+      .notNull()
+      .references((): AnyPgColumn => imports.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    contentType: text('content_type').notNull(),
+    byteSize: integer('byte_size').notNull(),
+    data: bytea('data').notNull(),
+  },
+  (table) => [
+    uniqueIndex('import_images_import_key').on(table.importId, table.key),
+    check('import_images_size', sql`octet_length(${table.data}) <= 10485760`),
+  ],
+);
+
+/**
  * Discussions: where agents and people working in parallel talk to each other
  * about work that crosses more than one of their areas.
  *

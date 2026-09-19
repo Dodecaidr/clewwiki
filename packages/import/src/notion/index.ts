@@ -20,6 +20,8 @@
 import { ImportError } from '../limits';
 import type { ImportLimits } from '../limits';
 import { truncateToBytes, utf8Length } from '../limits';
+import { createImageCollector } from '../image-collector';
+import { IMPORTABLE_IMAGE_EXTENSIONS } from '../images';
 import { calloutBlock, finishBody, joinBlocks, tableBlock } from '../markdown-out';
 import { warn } from '../types';
 import type { ImportParseResult, ImportWarning } from '../types';
@@ -72,7 +74,15 @@ export interface NotionImportInput {
 }
 
 export function importFromNotionZip(input: NotionImportInput): ImportParseResult {
-  const entries = readZip(input.zip, { limits: input.limits });
+  // Pages, databases and the pictures they might show: nothing else an export
+  // holds — videos, PDFs, attached files — is expanded at all.
+  const entries = readZip(input.zip, {
+    limits: input.limits,
+    accept: (name) => {
+      const extension = extensionOf(name);
+      return extension === 'md' || extension === 'csv' || IMPORTABLE_IMAGE_EXTENSIONS.has(extension);
+    },
+  });
   const usable = entries.filter((entry) => {
     const extension = extensionOf(entry.name);
     return (extension === 'md' || extension === 'csv') && !entry.name.includes('__MACOSX/');
@@ -100,6 +110,7 @@ export function importFromNotionZip(input: NotionImportInput): ImportParseResult
   // becomes the folder's own page and the rows land below it.
   const known = new Set(files.map(({ path }) => keyForDocument(path)));
   const warnings: ImportWarning[] = [];
+  const images = createImageCollector(entries.filter((entry) => !entry.name.includes('__MACOSX/')));
 
   const pages: DocumentPage[] = files.map(({ entry, path }, index) => {
     const pageWarnings: ImportWarning[] = [];
@@ -112,10 +123,17 @@ export function importFromNotionZip(input: NotionImportInput): ImportParseResult
 
     const lead = isCsv ? { title: null, body: converted } : takeLeadingHeading(converted);
     // A link still carries the export's hash suffixes; the keys no longer do.
-    const rewritten = rewriteRelativeLinks(lead.body, path, (target) => {
-      const key = keyForDocument(stripNotionPath(target));
-      return known.has(key) ? key : null;
-    });
+    // An image is looked up where the export really put it, suffixes and all:
+    // two folders that strip to the same name still hold different pictures.
+    const rewritten = rewriteRelativeLinks(
+      lead.body,
+      path,
+      (target) => {
+        const key = keyForDocument(stripNotionPath(target));
+        return known.has(key) ? key : null;
+      },
+      images.resolverFor(entry.name),
+    );
     pageWarnings.push(...rewritten.warnings);
 
     let markdown = finishBody(rewritten.markdown);
@@ -141,11 +159,13 @@ export function importFromNotionZip(input: NotionImportInput): ImportParseResult
   return {
     source: 'notion',
     nodes: tree.nodes,
+    assets: images.assets(),
     warnings,
     params: {
       file_count: files.length,
       page_count: markdownFiles.length,
       database_count: files.length - markdownFiles.length,
+      image_count: images.used,
     },
   };
 }

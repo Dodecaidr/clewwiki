@@ -26,10 +26,11 @@ export const DEFAULT_IMPORT_LIMITS: ImportLimits = {
   pageBytes: 10 * 1024 * 1024,
   // What is expanded is held in memory until the import is staged, so this is
   // sized by what a small container can spare rather than by what an archive
-  // might hold. Only Markdown and CSV entries are expanded at all — images and
-  // attachments are never read — and a quarter of a gigabyte of those is more
-  // documentation than any space has. An instance with memory to spare raises
-  // it (`IMPORT_MAX_EXPANDED_MB`).
+  // might hold. Only Markdown, CSV and the image formats the store takes are
+  // expanded at all — videos, PDFs and other attachments are never read — and
+  // a quarter of a gigabyte of those is more documentation than most spaces
+  // have. An instance with memory to spare raises it
+  // (`IMPORT_MAX_EXPANDED_MB`).
   expandedBytes: 256 * 1024 * 1024,
   zipEntries: 20_000,
 };

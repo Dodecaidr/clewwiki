@@ -334,6 +334,18 @@ partly in place, the gap is named rather than implied away.
   until that same actor's new page claims it. Known limits: images are not
   re-encoded, so metadata inside a file (a photograph's location, for one)
   stays in it, and pixel dimensions are not bounded separately from bytes.
+- **Images carried by an import.** A Notion export and a Markdown archive bring
+  the pictures their documents show, and those go through the same door as an
+  upload: the type is read from the bytes, never from the extension the archive
+  gave them; `IMAGE_MAX_UPLOAD_MB` and `IMAGE_STORE_MAX_MB` apply; SVG is not
+  taken; and `IMAGE_MAX_UPLOAD_MB=0` switches this off with the rest. They are
+  judged when the import is *staged*, so an image that will not be carried is a
+  warning the reviewer reads before applying. What passes waits in the database
+  (`import_images`) — never on a filesystem — and is removed when the import is
+  applied, cancelled or deleted. Applying stores one copy per page that shows
+  the image, each audited as `image.uploaded`, so an imported image is visible
+  to exactly whoever can see its page. Only images a document refers to are
+  staged; the rest of an archive's pictures are not kept.
 - **Images from other sites.** Pages can also reference images by address.
   The Content-Security-Policy allows images from the instance itself
   only, so a page cannot make every reader's browser contact a third-party
@@ -429,8 +441,9 @@ partly in place, the gap is named rather than implied away.
 - **What one import can cost is bounded, and the bound is the operator's.** An
   import holds its upload and everything a ZIP expands to in memory until it is
   staged. Both are capped — `IMPORT_MAX_UPLOAD_MB` (200) and
-  `IMPORT_MAX_EXPANDED_MB` (256) — only Markdown and CSV entries are expanded at
-  all, and importing is for signed-in people. On a host with less memory than
+  `IMPORT_MAX_EXPANDED_MB` (256) — only Markdown, CSV and raster image entries
+  (PNG, JPEG, GIF, WebP) are expanded at all, and importing is for signed-in
+  people. On a host with less memory than
   the two together, lower them: a process that runs out is killed, not refused.
 - **Imported markup cannot exhaust the reader.** The storage-format reader is
   iterative, recognises no DOCTYPE and therefore no entity definitions, bounds
@@ -486,11 +499,12 @@ partly in place, the gap is named rather than implied away.
   cover this threat model.
 - SSO/OIDC — a scope decision, not a security gap; credential-based login
   already satisfies the self-hosted-without-a-cloud-provider requirement.
-- Attachments other than images, and images carried in by an import. Pages
-  take raster image uploads, under the controls described above; any other
-  file type is a wider surface (content sniffing, active documents served from
-  this origin) and stays closed. No import uploads files: an imported image
-  keeps pointing at the system it came from, or is reported as a warning.
+- Attachments other than images. Pages take raster images — uploaded, or
+  carried in by a Notion or Markdown import — under the controls described
+  above; any other file type is a wider surface (content sniffing, active
+  documents served from this origin) and stays closed. A Confluence import
+  downloads nothing: an image there keeps pointing at the site it came from,
+  and is reported as a warning. Images inside a PDF are not extracted.
 - Optical character recognition for scanned PDFs — a PDF with no extractable
   text is refused rather than passed to an external service.
 
