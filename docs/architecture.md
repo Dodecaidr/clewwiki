@@ -320,6 +320,7 @@ lives in the implementation, not here):
 - `users`
 - `agent_tokens`
 - `spaces`
+- `space_members`
 - `pages`
 - `page_revisions`
 - `page_reviews`
@@ -382,6 +383,49 @@ afterwards.
 Archiving is a timestamp, not a deletion: an archived space keeps its pages
 readable, leaves the space list and "all spaces" search, and refuses new pages
 and new skills.
+
+### Restricted spaces, and why a person's visibility is an allowlist
+
+A restricted space has to not exist for somebody who is not in it — on every
+endpoint, every page and every server action, present and future. The design
+question is where that is enforced so that it does not depend on remembering.
+
+**REST already had the place.** A token limited to some spaces carries an
+allowlist, `spaceIds`, and every handler checks the space of the resource it is
+about to touch against it (`requireSpace`, `resolveSpaceParam`, `visibleSpaces`),
+answering `404` on a miss. So a person's visibility is computed into that same
+shape when they are authenticated (`visibleSpaceIdsForUser`): `null` when nothing
+is hidden from them — the common case, one query — and the list of spaces they
+can see otherwise. No handler was changed; the identity was. Twenty-seven ways
+into a restricted space are tested to answer `404` to a non-member.
+
+**The interface did not, so it was given one.** Pages and server actions use the
+session, not that identity, and call services that scope by workspace and know
+nothing of who is asking. They now look things up through `lib/spaces/visibility`
+(`findSpaceByKey`, `findSpaceById`, `findPage`, `findSpaces`) and
+`lib/spaces/guards` (`canViewPage`, `canViewClaim`, `findDiscussion`, …) with the
+session as the viewer; a hidden space comes back `null`, which every caller
+already treats as "not found". Because that is a convention, it is tested as
+one: `tests/space-visibility-guard.test.ts` fails when interface code calls an
+unguarded lookup, when a listing that spans spaces is not scoped to the
+session's, and when an action that takes an id does not check it.
+
+**Metadata is a page too.** `generateMetadata` runs beside the page and its
+result is streamed to the browser even when the page goes on to answer "not
+found". A discussion's title reached a non-member that way until a sweep of the
+running application, as a non-member, against every URL of a restricted space
+found it. By-id loaders are guarded like lookups for that reason.
+
+**A stream is authorised once.** A live editing session's server-sent events
+were authorised when the stream opened. When who may see a space changes, its
+rooms are closed — unsaved text persisted first — and browsers reconnect and are
+authorised again.
+
+**Visibility, not roles.** Read-only membership would have to be enforced on
+every write path, one by one, and proving that none was missed is a different
+and larger problem than proving a lookup is guarded. Visibility covers the case
+people ask for first — a space the rest of the company should not see — and
+leaves roles as an addition rather than a rewrite.
 
 ### Rules of a space, and its skills
 

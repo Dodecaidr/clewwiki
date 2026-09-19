@@ -9,6 +9,7 @@ import { auth } from './auth';
 import { recordAudit } from './audit';
 import { getAuditSampler } from './audit-sampler';
 import { checkSessionMutation } from './csrf';
+import { visibleSpaceIdsForUser } from './spaces/visibility';
 import { getAgentRateLimitMax, getAgentRateLimitWindowSeconds, getAuthBaseUrl } from './env';
 import { TokenBucketRateLimiter } from './rate-limit';
 import { hasAllScopes } from './scopes';
@@ -24,10 +25,12 @@ export interface UserIdentity {
   workspaceId: string;
   workspace: Workspace;
   /**
-   * Always `null` for a person: accounts reach every space of their workspace,
-   * and their role, not a space list, is what governs what they may do.
+   * The spaces this person can see, or `null` for every space of the workspace
+   * — which it is unless a restricted space exists that they are not a member
+   * of. The same allowlist a space-limited token carries, so every handler that
+   * checks a resource's space against the caller already enforces it.
    */
-  spaceIds: null;
+  spaceIds: string[] | null;
 }
 
 export interface AgentIdentity {
@@ -135,7 +138,7 @@ async function authenticateSession(request: Request): Promise<AuthResult> {
       role: membership.role,
       workspaceId: workspace.id,
       workspace,
-      spaceIds: null,
+      spaceIds: await visibleSpaceIdsForUser(workspace.id, session.user.id, membership.role),
     },
   };
 }

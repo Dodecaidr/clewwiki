@@ -5,6 +5,7 @@ import type { MembershipRole, Workspace } from '@clewwiki/db';
 
 import { auth } from './auth';
 import { getMembershipForUser, getWorkspaceById } from './workspace';
+import { visibleSpaceIdsForUser } from './spaces/visibility';
 
 export interface SessionContext {
   userId: string;
@@ -12,6 +13,15 @@ export interface SessionContext {
   email: string;
   role: MembershipRole;
   workspace: Workspace;
+  /** The workspace's id again, so that a session is a `Viewer` as it stands. */
+  workspaceId: string;
+  /**
+   * The spaces this person can see, or `null` for all of them. Pages and server
+   * actions look spaces and pages up through `lib/spaces/visibility` with the
+   * session as the viewer, which is what makes a restricted space not exist for
+   * somebody who is not in it.
+   */
+  spaceIds: string[] | null;
 }
 
 /**
@@ -37,5 +47,7 @@ export async function getSessionContext(): Promise<SessionContext | null> {
     email: session.user.email,
     role: membership.role,
     workspace,
+    workspaceId: workspace.id,
+    spaceIds: await visibleSpaceIdsForUser(workspace.id, session.user.id, membership.role),
   };
 }

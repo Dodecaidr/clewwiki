@@ -560,8 +560,17 @@ other spaces. And archiving hides a space and stops new pages in it but does
 not freeze existing pages; a read-only archive is a later refinement if it is
 wanted.
 
-**Next: per-space permissions.** Membership per space (viewer, editor, admin),
-spaces an account cannot see, and the UI and REST checks that follow from it.
+**Restricted spaces — built.** A space can be restricted to its members; to
+everybody else it does not exist (`404` everywhere), and workspace
+administrators see all. `spaces.restricted` and `space_members` (migration
+`0011_space_members`), `GET`/`PUT /api/v1/spaces/{key}/members`, **Settings →
+Access**. REST enforces it through the allowlist handlers already checked for
+space-limited tokens; the interface through guarded lookups, with a test that
+fails when one is bypassed.
+
+**Deliberately not yet: roles inside a space** (viewer, editor, admin). Membership
+is visibility only. Read-only membership has to be enforced on every write path,
+and is the next step if it is wanted.
 
 ## Documentation import — **complete**
 

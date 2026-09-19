@@ -6,8 +6,8 @@ import { LanguageSwitcher } from '@/components/language-switcher';
 import { SearchBox } from '@/components/search-box';
 import { Button } from '@/components/ui/button';
 import { getSessionContext } from '@/lib/session';
-import { listSpaces } from '@/lib/spaces/service';
 import { spaceHref } from '@/lib/spaces/urls';
+import { findSpaces } from '@/lib/spaces/visibility';
 
 const linkClass = 'whitespace-nowrap text-muted-foreground hover:text-foreground';
 
@@ -15,7 +15,7 @@ export async function SiteHeader() {
   const t = await getTranslations('nav');
   const tc = await getTranslations('common');
   const session = await getSessionContext();
-  const spaces = session ? await listSpaces(session.workspace.id) : [];
+  const spaces = session ? await findSpaces(session) : [];
 
   return (
     <header className="border-b border-border">

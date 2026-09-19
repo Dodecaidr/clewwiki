@@ -14,7 +14,6 @@ import type { ClaimRecord } from '@/lib/claims/service';
 import { getPageTree } from '@/lib/pages/service';
 import type { PageTreeNode } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import {
   newSpacePageHref,
   spaceChangesHref,
@@ -27,6 +26,7 @@ import {
 } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 import { assertSameWorkspace } from '@/lib/workspace';
+import { findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,7 +75,7 @@ export default async function SpaceLayout({
   }
 
   const { key } = await params;
-  const space = await getSpaceByKey(session.workspace.id, key);
+  const space = await findSpaceByKey(session, key);
   if (!space) {
     notFound();
   }
@@ -131,6 +131,8 @@ export default async function SpaceLayout({
             <p className="font-mono text-xs text-muted-foreground">
               {space.key}
               {space.archivedAt ? ` · ${ts('archivedBadge')}` : ''}
+              {/* Said where the space is named, so nobody wonders why a colleague cannot find it. */}
+              {space.restricted ? ` · ${ts('restrictedBadge')}` : ''}
             </p>
           </div>
         </div>

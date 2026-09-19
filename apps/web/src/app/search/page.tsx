@@ -9,9 +9,9 @@ import { Input } from '@/components/ui/field';
 import { Button } from '@/components/ui/button';
 import { searchPages } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { listSpaces } from '@/lib/spaces/service';
 import { spacePageHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
+import { findSpaces } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +37,7 @@ export default async function SearchPage({
   const query = params.q?.trim() ?? '';
   const requested = params.space?.trim().toUpperCase() ?? '';
 
-  const spaces = await listSpaces(session.workspace.id, { includeArchived: true });
+  const spaces = await findSpaces(session, { includeArchived: true });
   const selected = spaces.find((space) => space.key === requested) ?? null;
   // "All spaces" is every space in use; an archived one is searched when it is
   // picked by name.

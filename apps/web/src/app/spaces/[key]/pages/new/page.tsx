@@ -6,9 +6,9 @@ import { PageForm } from '@/app/pages/page-form';
 import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { getPageTree } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { flattenTree } from '@/lib/spaces/tree';
 import { spaceHref, spacePageHref } from '@/lib/spaces/urls';
+import { findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +34,7 @@ export default async function NewSpacePage({
     redirect('/login');
   }
 
-  const space = await getSpaceByKey(session.workspace.id, (await params).key);
+  const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
   }

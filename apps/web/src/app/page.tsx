@@ -50,7 +50,10 @@ export default async function HomePage({
   const format = await getFormatter();
   const showArchived = (await searchParams).archived === '1';
   const isAdmin = session.role === 'admin';
-  const spaces = await listSpaceSummaries(session.workspace.id, { includeArchived: showArchived });
+  const spaces = await listSpaceSummaries(session.workspace.id, {
+    includeArchived: showArchived,
+    spaceIds: session.spaceIds,
+  });
 
   return (
     <div className="grid gap-8">

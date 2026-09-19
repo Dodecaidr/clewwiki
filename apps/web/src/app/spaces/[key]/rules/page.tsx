@@ -10,11 +10,10 @@ import { Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/compon
 import { getAuthBaseUrl } from '@/lib/env';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
-import { getPageById } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { spacePageEditHref, spacePageHref, spaceSettingsHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
+import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +37,7 @@ export default async function SpaceRulesPage({ params }: Props) {
   if (!session) {
     redirect('/login');
   }
-  const space = await getSpaceByKey(session.workspace.id, (await params).key);
+  const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
   }
@@ -48,7 +47,7 @@ export default async function SpaceRulesPage({ params }: Props) {
   const format = await getFormatter();
 
   const designated = space.rulesPageId
-    ? await getPageById(session.workspace.id, space.rulesPageId)
+    ? await findPage(session, space.rulesPageId)
     : null;
   const page = designated && designated.spaceId === space.id ? designated : null;
 

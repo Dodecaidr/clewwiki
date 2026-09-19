@@ -18,8 +18,10 @@ import {
   spaceNameSchema,
 } from '@/lib/spaces/keys';
 import { RULES_PAGE_SLUG, rulesTemplate } from '@/lib/spaces/rules';
-import { createSpace, getSpaceByKey, setSpaceArchived, updateSpace } from '@/lib/spaces/service';
+import { createSpace, setSpaceArchived, updateSpace } from '@/lib/spaces/service';
 import { spaceHref, spaceRulesHref, spaceSettingsHref } from '@/lib/spaces/urls';
+import { findSpaceByKey } from '@/lib/spaces/visibility';
+import { MAX_SPACE_MEMBERS, setSpaceMembers } from '@/lib/spaces/visibility';
 
 /**
  * The administrator's actions on spaces: create one, change it, link its
@@ -127,7 +129,7 @@ export async function updateSpaceAction(
     return { error: 'validation', message: issue?.message, field: String(issue?.path[0] ?? '') };
   }
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
 
   try {
@@ -160,7 +162,7 @@ export async function setSpaceArchivedAction(
     .safeParse({ spaceKey: formText(formData, 'spaceKey'), archived: formText(formData, 'archived') });
   if (!parsed.success) return { error: 'validation' };
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
 
   try {
@@ -209,7 +211,7 @@ export async function setRulesPageAction(
     });
   if (!parsed.success) return { error: 'validation' };
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
 
   try {
@@ -248,7 +250,7 @@ export async function createRulesPageAction(
     .safeParse({ spaceKey: formText(formData, 'spaceKey'), locale: formText(formData, 'locale') });
   if (!parsed.success) return { error: 'validation' };
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
   if (space.archivedAt !== null) return { error: 'conflict' };
 
@@ -311,7 +313,7 @@ export async function saveRepositoryAction(
   const session = await requireAdmin();
   if (!session) return { error: 'forbidden' };
 
-  const space = await getSpaceByKey(session.workspace.id, formText(formData, 'spaceKey'));
+  const space = await findSpaceByKey(session, formText(formData, 'spaceKey'));
   if (!space) return { error: 'not_found' };
 
   const parsed = repositorySettingsSchema.safeParse(readRepositoryForm(formData));
@@ -350,7 +352,7 @@ export async function testRepositoryAction(
   const session = await requireAdmin();
   if (!session) return { error: 'forbidden' };
 
-  const space = await getSpaceByKey(session.workspace.id, formText(formData, 'spaceKey'));
+  const space = await findSpaceByKey(session, formText(formData, 'spaceKey'));
   if (!space) return { error: 'not_found' };
 
   const parsed = repositorySettingsSchema.safeParse(readRepositoryForm(formData));
@@ -378,4 +380,66 @@ export async function testRepositoryAction(
   });
 
   return { probe };
+}
+
+const accessSchema = z.object({
+  spaceKey: z.string().trim().min(1).max(20),
+  restricted: z.boolean(),
+  userIds: z.array(z.string().min(1).max(200)).max(MAX_SPACE_MEMBERS),
+});
+
+/**
+ * Who can see a space. An administrator's act.
+ *
+ * The member list is saved before the restriction is switched on and the
+ * restriction is lifted before the list is changed, so there is no moment at
+ * which the space is closed to somebody who is about to be let in.
+ */
+export async function saveSpaceAccessAction(
+  _previous: SpaceFormState,
+  formData: FormData,
+): Promise<SpaceFormState> {
+  const session = await getSessionContext();
+  if (!session || session.role !== 'admin') return { error: 'forbidden' };
+
+  const parsed = accessSchema.safeParse({
+    spaceKey: formText(formData, 'spaceKey'),
+    restricted: formData.get('restricted') === 'on',
+    userIds: formData.getAll('member').filter((value): value is string => typeof value === 'string'),
+  });
+  if (!parsed.success) return { error: 'validation', message: parsed.error.issues[0]?.message };
+
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
+  if (!space) return { error: 'not_found' };
+
+  const actor = { type: 'user' as const, id: session.userId };
+  const setMembers = () =>
+    setSpaceMembers({
+      workspaceId: session.workspace.id,
+      spaceId: space.id,
+      actor,
+      userIds: parsed.data.userIds,
+    });
+  const setRestricted = () =>
+    updateSpace({
+      workspaceId: session.workspace.id,
+      spaceId: space.id,
+      actor,
+      restricted: parsed.data.restricted,
+    });
+
+  try {
+    if (parsed.data.restricted) {
+      await setMembers();
+      await setRestricted();
+    } else {
+      await setRestricted();
+      await setMembers();
+    }
+  } catch (error) {
+    return toFormState(error);
+  }
+
+  revalidatePath('/', 'layout');
+  return { saved: true };
 }

@@ -24,7 +24,16 @@ process.env.BETTER_AUTH_URL ??= 'http://localhost:3000';
 // The actions read the signed-in administrator from the request; here the
 // session is whatever this suite says it is.
 const session = vi.hoisted(() => ({ current: null as null | Record<string, unknown> }));
-vi.mock('@/lib/session', () => ({ getSessionContext: async () => session.current }));
+// A session as `getSessionContext` builds it: the workspace's id beside the
+// workspace, and no restricted space hidden from the person unless a test says so.
+vi.mock('@/lib/session', () => ({
+  getSessionContext: async () =>
+    session.current && {
+      workspaceId: (session.current.workspace as { id: string } | undefined)?.id,
+      spaceIds: null,
+      ...session.current,
+    },
+}));
 vi.mock('next/cache', () => ({ revalidatePath: () => undefined }));
 vi.mock('next/navigation', () => ({
   redirect: (url: string) => {

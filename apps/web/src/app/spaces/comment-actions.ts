@@ -14,6 +14,7 @@ import { consumeMessageBudget } from '@/lib/discussions/rate-limit';
 import { isPageServiceError } from '@/lib/pages/errors';
 import { getSessionContext } from '@/lib/session';
 import type { SessionContext } from '@/lib/session';
+import { canViewComment, canViewPage } from '@/lib/spaces/guards';
 
 /**
  * What a person does with comments from the interface.
@@ -71,6 +72,7 @@ export async function openCommentAction(
     version: formText(formData, 'version'),
   });
   if (!parsed.success) return { error: 'validation', message: parsed.error.issues[0]?.message };
+  if (!(await canViewPage(session, parsed.data.pageId))) return { error: 'not_found' };
   const limited = overBudget(session);
   if (limited) return limited;
 
@@ -103,6 +105,7 @@ export async function replyCommentAction(
     .object({ threadId: z.uuid(), body: z.string().trim().min(1).max(MAX_COMMENT_BYTES) })
     .safeParse({ threadId: formText(formData, 'threadId'), body: formText(formData, 'body') });
   if (!parsed.success) return { error: 'validation', message: parsed.error.issues[0]?.message };
+  if (!(await canViewComment(session, parsed.data.threadId))) return { error: 'not_found' };
   const limited = overBudget(session);
   if (limited) return limited;
 
@@ -134,6 +137,7 @@ export async function resolveCommentAction(
       resolved: formText(formData, 'resolved'),
     });
   if (!parsed.success) return { error: 'validation' };
+  if (!(await canViewComment(session, parsed.data.threadId))) return { error: 'not_found' };
 
   try {
     await setCommentResolved({
@@ -160,6 +164,7 @@ export async function deleteCommentAction(
     commentId: formText(formData, 'commentId'),
   });
   if (!parsed.success) return { error: 'validation' };
+  if (!(await canViewComment(session, parsed.data.commentId))) return { error: 'not_found' };
 
   try {
     await deleteComment({

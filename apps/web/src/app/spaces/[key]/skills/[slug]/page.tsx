@@ -15,9 +15,9 @@ import { getSessionContext } from '@/lib/session';
 import { buildSkillsInstallCommand, skillInstallPath } from '@/lib/skills/install';
 import { skillMarkdown } from '@/lib/skills/serialize';
 import { getSkillBySlug } from '@/lib/skills/service';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { spaceSkillEditHref, spaceSkillsHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
+import { findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +27,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const session = await getSessionContext();
   if (!session) return { title: 'clewwiki' };
   const { key, slug } = await params;
-  const space = await getSpaceByKey(session.workspace.id, key);
+  const space = await findSpaceByKey(session, key);
   if (!space) return { title: 'clewwiki' };
   const skill = await getSkillBySlug(session.workspace.id, space.id, slug);
   return { title: skill?.name ?? 'clewwiki' };
@@ -44,7 +44,7 @@ export default async function SkillPage({ params }: Props) {
     redirect('/login');
   }
   const { key, slug } = await params;
-  const space = await getSpaceByKey(session.workspace.id, key);
+  const space = await findSpaceByKey(session, key);
   if (!space) {
     notFound();
   }

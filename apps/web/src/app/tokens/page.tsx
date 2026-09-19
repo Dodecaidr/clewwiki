@@ -8,9 +8,9 @@ import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@
 import { listAgentTokens } from '@/lib/agent-tokens';
 import { classifyTokenLifecycle } from '@/lib/agent-token-crypto';
 import { getSessionContext } from '@/lib/session';
-import { listSpaces } from '@/lib/spaces/service';
 import { assertSameWorkspace } from '@/lib/workspace';
 import { formatDateTime } from '@/lib/utils';
+import { findSpaces } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +30,7 @@ export default async function TokensPage() {
   const isAdmin = session.role === 'admin';
   const [tokens, spaces] = await Promise.all([
     listAgentTokens(session.workspace.id),
-    listSpaces(session.workspace.id, { includeArchived: true }),
+    findSpaces(session, { includeArchived: true }),
   ]);
   const spaceKeyById = new Map(spaces.map((space) => [space.id, space.key]));
 

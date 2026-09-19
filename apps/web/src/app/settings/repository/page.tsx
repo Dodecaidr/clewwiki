@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation';
 
 import { getSessionContext } from '@/lib/session';
-import { listSpaces } from '@/lib/spaces/service';
 import { spaceSettingsHref } from '@/lib/spaces/urls';
+import { findSpaces } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 export default async function LegacyRepositorySettings(): Promise<never> {
   const session = await getSessionContext();
   if (!session) redirect('/login');
-  const spaces = await listSpaces(session.workspace.id);
+  const spaces = await findSpaces(session);
   const [only] = spaces;
   redirect(spaces.length === 1 && only ? spaceSettingsHref(only.key) : '/');
 }

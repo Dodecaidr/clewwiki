@@ -7,7 +7,7 @@ import { issueAgentToken, revokeAgentToken } from '@/lib/agent-tokens';
 import { recordAudit } from '@/lib/audit';
 import { AGENT_SCOPES, normalizeScopes } from '@/lib/scopes';
 import { getSessionContext } from '@/lib/session';
-import { listSpaces } from '@/lib/spaces/service';
+import { findSpaces } from '@/lib/spaces/visibility';
 
 export interface TokenFormState {
   error?: 'forbidden' | 'name' | 'scopes' | 'spaces' | 'generic';
@@ -62,7 +62,7 @@ export async function createAgentTokenAction(
   let spaceIds: string[] | null = null;
   let spaceKeys: string[] | null = null;
   if (parsed.data.spaceAccess === 'selected') {
-    const known = await listSpaces(session.workspace.id, { includeArchived: true });
+    const known = await findSpaces(session, { includeArchived: true });
     const chosen = known.filter((space) => parsed.data.spaceIds.includes(space.id));
     if (chosen.length === 0 || chosen.length !== new Set(parsed.data.spaceIds).size) {
       return { error: 'spaces' };

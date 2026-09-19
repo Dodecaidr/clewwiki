@@ -11,9 +11,9 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { getPresence } from '@/lib/claims/service';
 import { remainingSeconds } from '@/lib/claims/ttl';
 import { getSessionContext } from '@/lib/session';
-import { listSpaces } from '@/lib/spaces/service';
 import { spacePageHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
+import { findSpaces } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,11 +43,12 @@ export default async function PresencePage({
 
   const t = await getTranslations('presence');
   const format = await getFormatter();
-  const spaces = await listSpaces(session.workspace.id, { includeArchived: true });
+  const spaces = await findSpaces(session, { includeArchived: true });
   const requested = (await searchParams).space?.trim().toUpperCase() ?? '';
   const selected = spaces.find((space) => space.key === requested) ?? null;
   const presence = await getPresence(session.workspace.id, {
-    spaceIds: selected ? [selected.id] : null,
+    // "Every space" is every space this person can see, never the workspace.
+    spaceIds: selected ? [selected.id] : session.spaceIds,
   });
   const now = new Date();
 

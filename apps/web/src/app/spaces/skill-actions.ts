@@ -7,8 +7,8 @@ import { z } from 'zod';
 import { isPageServiceError } from '@/lib/pages/errors';
 import { getSessionContext } from '@/lib/session';
 import { createSkill, deleteSkill, updateSkill } from '@/lib/skills/service';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { spaceSkillHref, spaceSkillsHref } from '@/lib/spaces/urls';
+import { findSpaceByKey } from '@/lib/spaces/visibility';
 
 /**
  * The browser's side of the skills registry.
@@ -84,7 +84,7 @@ export async function createSkillAction(
     return { error: 'validation', message: issue?.message, field: String(issue?.path[0] ?? '') };
   }
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
   if (space.archivedAt !== null) return { error: 'conflict' };
 
@@ -134,7 +134,7 @@ export async function updateSkillAction(
     return { error: 'validation', message: issue?.message, field: String(issue?.path[0] ?? '') };
   }
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
 
   let slug: string;
@@ -173,7 +173,7 @@ export async function deleteSkillAction(
     .safeParse({ spaceKey: formText(formData, 'spaceKey'), slug: formText(formData, 'slug') });
   if (!parsed.success) return { error: 'validation' };
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
 
   try {
