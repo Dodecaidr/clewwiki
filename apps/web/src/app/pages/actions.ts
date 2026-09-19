@@ -12,10 +12,11 @@ import { blockIssuesFromDetails } from '@/lib/pages/content-blocks';
 import { isPageServiceError } from '@/lib/pages/errors';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
-import { createPage, deletePage, getPageById, linkPages, updatePage } from '@/lib/pages/service';
+import { createPage, deletePage, linkPages, updatePage } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceById, getSpaceByKey } from '@/lib/spaces/service';
 import { spaceHref, spacePageHref } from '@/lib/spaces/urls';
+import { findPage, findSpaceById, findSpaceByKey } from '@/lib/spaces/visibility';
+import { canViewPage } from '@/lib/spaces/guards';
 
 /**
  * The write actions behind the page forms.
@@ -150,7 +151,7 @@ export async function createPageAction(
     return { error: 'validation' };
   }
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
 
   let created: { id: string };
@@ -201,6 +202,8 @@ export async function updatePageAction(
   if (!parsed.success) {
     return { error: 'validation' };
   }
+  // A page in a space this person cannot see is, to them, a page that is not there.
+  if (!(await canViewPage(session, parsed.data.pageId))) return { error: 'not_found' };
 
   if (parsed.data.collabClient && parsed.data.collabStateVector) {
     // The page is being edited by several people at once. The session holds the
@@ -225,7 +228,7 @@ export async function updatePageAction(
     } catch (error) {
       return toFormState(error);
     }
-    const savedSpace = await getSpaceById(session.workspace.id, savedSpaceId);
+    const savedSpace = await findSpaceById(session, savedSpaceId);
     revalidateWiki();
     redirect(savedSpace ? spacePageHref(savedSpace.key, parsed.data.pageId) : '/');
   }
@@ -282,7 +285,7 @@ export async function updatePageAction(
   // out its TTL while nobody is editing.
   await releaseClaimQuietly(session.workspace.id, claimId, actor);
 
-  const space = await getSpaceById(session.workspace.id, spaceId);
+  const space = await findSpaceById(session, spaceId);
   revalidateWiki();
   redirect(space ? spacePageHref(space.key, parsed.data.pageId) : '/');
 }
@@ -316,9 +319,9 @@ export async function deletePageAction(
   const parsed = z.object({ pageId: z.uuid() }).safeParse({ pageId: formData.get('pageId') });
   if (!parsed.success) return { error: 'validation' };
 
-  const page = await getPageById(session.workspace.id, parsed.data.pageId);
+  const page = await findPage(session, parsed.data.pageId);
   if (!page) return { error: 'not_found' };
-  const space = await getSpaceById(session.workspace.id, page.spaceId);
+  const space = await findSpaceById(session, page.spaceId);
 
   try {
     await deletePage({
@@ -349,6 +352,10 @@ export async function linkPageAction(
       linkedPageId: formString(formData, 'linkedPageId'),
     });
   if (!parsed.success) return { error: 'validation' };
+  if (!(await canViewPage(session, parsed.data.pageId))) return { error: 'not_found' };
+  if (parsed.data.linkedPageId && !(await canViewPage(session, parsed.data.linkedPageId))) {
+    return { error: 'not_found' };
+  }
 
   try {
     await linkPages({

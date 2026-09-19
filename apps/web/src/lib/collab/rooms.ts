@@ -107,6 +107,8 @@ interface RoomClient {
   yClientId: number;
   colour: string;
   send: (event: RoomEvent) => void;
+  /** Ends this browser's stream from the server's side. */
+  close: () => void;
 }
 
 interface RoomBase {
@@ -124,6 +126,7 @@ interface RoomBase {
 interface Room {
   pageId: string;
   workspaceId: string;
+  spaceId: string;
   doc: Y.Doc;
   awareness: Awareness;
   clients: Map<string, RoomClient>;
@@ -325,6 +328,7 @@ function newRoom(page: PageRecord): Room {
   return {
     pageId: page.id,
     workspaceId: page.workspaceId,
+    spaceId: page.spaceId,
     doc,
     awareness,
     clients: new Map(),
@@ -424,6 +428,7 @@ export interface JoinInput {
   yClientId: number;
   user: RoomUser;
   send: (event: RoomEvent) => void;
+  close: () => void;
 }
 
 /** Connects a browser to the room of a page, opening the room if it is the first. */
@@ -442,6 +447,7 @@ export async function joinRoom(input: JoinInput): Promise<void> {
     yClientId: input.yClientId,
     colour: previous?.colour ?? COLOURS[room.colourCursor++ % COLOURS.length]!,
     send: input.send,
+    close: input.close,
   };
   room.clients.set(client.id, client);
 
@@ -763,6 +769,28 @@ export async function saveRoom(input: SaveInput): Promise<SaveResult> {
 export function roomParticipants(pageId: string): Participant[] {
   const room = rooms().get(pageId);
   return room ? participantsOf(room) : [];
+}
+
+/**
+ * Ends every live session in a space, keeping what was typed.
+ *
+ * Called when who may see the space changes. A stream that is already open was
+ * authorised when it was opened, and would go on delivering a restricted
+ * space's edits to somebody who has just been removed from it. Rather than work
+ * out who may stay, everybody is disconnected: a browser reconnects by itself
+ * and is authorised again — as a member, into the same document, or not at all.
+ */
+export async function closeRoomsInSpace(spaceId: string): Promise<number> {
+  const affected = [...rooms().values()].filter((room) => room.spaceId === spaceId);
+  for (const room of affected) {
+    await persist(room).catch((error: unknown) => console.error('[collab] persist failed', error));
+    const clients = [...room.clients.values()];
+    // The room is gone before the streams are, so that their closing finds
+    // nothing to leave and the claim is not released under whoever comes back.
+    destroyRoom(room);
+    for (const client of clients) client.close();
+  }
+  return affected.length;
 }
 
 /** Closes every room without saving anything. Tests use it; nothing in the application does. */

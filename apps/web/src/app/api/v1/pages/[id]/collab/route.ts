@@ -156,6 +156,7 @@ export async function GET(request: Request, context: RouteContext) {
       yClientId: query.data.y,
       user: { id: allowed.identity.userId, name: allowed.identity.name },
       send,
+      close: () => close(),
     });
   } catch (error) {
     return serviceErrorResponse(error);

@@ -131,6 +131,24 @@ partly in place, the gap is named rather than implied away.
   a person's words to agents and is returned to them as data. Both decisions are
   audited (`page.review_accepted`, `page.review_reverted`) with the version
   range, never the content.
+- **A restricted space does not exist for somebody who is not in it.** Not
+  listed, not searched, not shown on the presence board, and `404` — never `403`
+  — on every endpoint, page and server action that names it or anything in it,
+  so a refusal does not confirm there was something to refuse. Over REST this is
+  the allowlist check every handler already made for space-limited tokens, now
+  fed a person's visibility as well. In the interface it is guarded lookups, and
+  a test that fails the build when interface code bypasses them, when a
+  cross-space listing is not scoped to the session, or when an action takes an
+  id without checking it; `generateMetadata` is held to the same rule, because a
+  title is delivered even when the page answers "not found". **Workspace
+  administrators see every space**, deliberately: they can issue a token that
+  does. **A token with no space list reaches restricted spaces** — limit tokens
+  to spaces. The member list names people, so reading and changing it is for a
+  signed-in administrator and for no token. Only people of the workspace can be
+  listed, an unknown id is refused rather than dropped, and changes are audited
+  with who was added and removed. Changing access ends the space's live editing
+  sessions so that an already-open stream cannot outlive a removal. Membership
+  grants visibility and nothing else; there is no read-only role.
 - **Live editing sessions are for people, and a browser speaks only for itself.**
   `GET` and `POST /api/v1/pages/{id}/collab` refuse any bearer token with
   `forbidden`; a session is joined with a session cookie by somebody who can see

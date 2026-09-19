@@ -125,7 +125,21 @@
     "archive": "Archive space",
     "unarchive": "Restore space",
     "archiveConfirm": "Archive this space? Its pages stay readable, and you can restore it later.",
-    "sidebarResources": "Rules and skills"
+    "sidebarResources": "Rules and skills",
+    "accessHeading": "Access",
+    "accessIntro": "Who can see this space. A space is open to everybody in the workspace unless you restrict it.",
+    "accessRestrictedLabel": "Restrict this space to its members",
+    "accessRestrictedHint": "To everybody else the space does not exist: it is not listed, its pages are not found by search, and a link to one answers “not found”.",
+    "accessMembersLegend": "Members",
+    "accessMembersHint": "People who can see this space. In it they can do what their role in the workspace lets them do anywhere.",
+    "accessMembersHintOpen": "The list is kept, and takes effect when the space is restricted.",
+    "accessAdminAlways": "administrator — always",
+    "accessTokensNote": "Agent tokens are not people. A token with no space list reaches every space, this one included; limit a token to spaces on the Agent tokens page.",
+    "accessSave": "Save access",
+    "accessSaved": "Access saved.",
+    "accessAdminOnly": "Only a workspace administrator can change who sees a space.",
+    "accessError": "Access could not be saved. Try again.",
+    "restrictedBadge": "restricted"
   },
   "presence": {
     "title": "Presence",
@@ -618,7 +632,8 @@
       "admin": "<strong>Administrator</strong> — everything an editor can do, plus: create, change and archive spaces, link each space’s source repository, create and revoke agent tokens, force-release other people’s claims, delete pages someone else is holding, and read the audit log.",
       "editor": "<strong>Editor</strong> — read, create, edit and delete pages, work with anchors, see presence, search. Editors cannot issue tokens; ask an administrator for one.",
       "p2": "The first account, created during setup, is the administrator.",
-      "p3": "Roles apply to the whole workspace: an editor can edit pages in every space. Permissions per space are planned for a later version."
+      "p3": "Roles apply to the whole workspace: an editor can edit pages in every space. Permissions per space are planned for a later version.",
+      "pRestricted": "<strong>A space can be restricted to its members.</strong> An administrator switches it on under <strong>Settings → Access</strong> and ticks the people who may see the space. To everybody else it then does not exist: it is not in the list of spaces, search does not find its pages, and a link to one answers “not found”. Members can do there what their role lets them do anywhere; administrators see every space. Agent tokens are separate: a token with no space list reaches restricted spaces too, so give an agent a list on the Agent tokens page."
     },
     "more": {
       "title": "Search, export and the audit log",

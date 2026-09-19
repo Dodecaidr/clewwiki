@@ -14,9 +14,11 @@ import { readDiscussionPolicy } from '@/lib/discussions/retention';
 import { getPageTree } from '@/lib/pages/service';
 import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { flattenTree } from '@/lib/spaces/tree';
 import { spaceImportHref } from '@/lib/spaces/urls';
+import { findSpaceByKey } from '@/lib/spaces/visibility';
+import { SpaceAccessForm } from './access-form';
+import { listSpaceMembers, listWorkspacePeople } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +42,7 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
   if (!session) {
     redirect('/login');
   }
-  const space = await getSpaceByKey(session.workspace.id, (await params).key);
+  const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
   }
@@ -59,6 +61,12 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
       </div>
     );
   }
+
+  // Names and e-mail addresses: loaded only once it is known an administrator is asking.
+  const [people, members] = await Promise.all([
+    listWorkspacePeople(session.workspace.id),
+    listSpaceMembers(session.workspace.id, space.id),
+  ]);
 
   const repository = readRepositorySettings(space.settings);
   const policy = readDiscussionPolicy(space.settings);
@@ -136,6 +144,26 @@ export default async function SpaceSettingsPage({ params }: { params: Promise<{ 
               errorForbidden: tr('errorForbidden'),
               errorValidation: tr('errorValidation'),
             }}
+          />
+        </CardBody>
+      </Card>
+
+      <Card id="access" className="scroll-mt-6">
+        <CardHeader>
+          <CardTitle>{t('accessHeading')}</CardTitle>
+          <CardDescription>{t('accessIntro')}</CardDescription>
+        </CardHeader>
+        <CardBody>
+          <SpaceAccessForm
+            spaceKey={space.key}
+            restricted={space.restricted}
+            people={people.map((person) => ({
+              userId: person.userId,
+              name: person.name,
+              email: person.email,
+              isAdmin: person.workspaceRole === 'admin',
+            }))}
+            memberIds={members.map((member) => member.userId)}
           />
         </CardBody>
       </Card>

@@ -11,7 +11,6 @@ import {
   MAX_DISCUSSION_TITLE_LENGTH,
   MAX_MESSAGE_BYTES,
   deleteDiscussion,
-  getDiscussionById,
   openDiscussion,
   postDiscussionMessage,
   resolveDiscussion,
@@ -20,8 +19,10 @@ import { MAX_RETENTION_DAYS, MIN_RETENTION_DAYS } from '@/lib/discussions/retent
 import { isPageServiceError } from '@/lib/pages/errors';
 import { getSessionContext } from '@/lib/session';
 import type { SessionContext } from '@/lib/session';
-import { getSpaceById, getSpaceByKey, updateSpace } from '@/lib/spaces/service';
+import { updateSpace } from '@/lib/spaces/service';
 import { spaceDiscussionHref, spaceDiscussionsHref, spacePageHref } from '@/lib/spaces/urls';
+import { findSpaceById, findSpaceByKey } from '@/lib/spaces/visibility';
+import { canViewDiscussion, findDiscussion } from '@/lib/spaces/guards';
 
 /**
  * What a person does with a discussion from the interface.
@@ -78,7 +79,7 @@ export async function openDiscussionAction(
     return { error: 'validation', message: parsed.error.issues[0]?.message };
   }
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
 
   let discussionId: string;
@@ -119,6 +120,8 @@ export async function postDiscussionMessageAction(
   if (!parsed.success) {
     return { error: 'validation', message: parsed.error.issues[0]?.message };
   }
+
+  if (!(await canViewDiscussion(session, parsed.data.discussionId))) return { error: 'not_found' };
 
   // The same bucket the REST endpoint consumes from, so the interface cannot be
   // used as a way around the limit an agent is held to.
@@ -175,6 +178,8 @@ export async function resolveDiscussionAction(
     return { error: 'validation', message: parsed.error.issues[0]?.message };
   }
 
+  if (!(await canViewDiscussion(session, parsed.data.discussionId))) return { error: 'not_found' };
+
   let target: string;
   try {
     const result = await resolveDiscussion({
@@ -187,7 +192,7 @@ export async function resolveDiscussionAction(
       consequences: parsed.data.consequences,
       locale: parsed.data.locale,
     });
-    const space = await getSpaceById(session.workspace.id, result.discussion.spaceId);
+    const space = await findSpaceById(session, result.discussion.spaceId);
     if (!space) return { error: 'not_found' };
     target = spacePageHref(space.key, result.page.id);
   } catch (error) {
@@ -210,9 +215,9 @@ export async function deleteDiscussionAction(
   });
   if (!parsed.success) return { error: 'validation' };
 
-  const existing = await getDiscussionById(session.workspace.id, parsed.data.discussionId);
+  const existing = await findDiscussion(session, parsed.data.discussionId);
   if (!existing) return { error: 'not_found' };
-  const space = await getSpaceById(session.workspace.id, existing.spaceId);
+  const space = await findSpaceById(session, existing.spaceId);
   if (!space) return { error: 'not_found' };
 
   try {
@@ -265,7 +270,7 @@ export async function saveDiscussionSettingsAction(
     return { error: 'validation', message: parsed.error.issues[0]?.message };
   }
 
-  const space = await getSpaceByKey(session.workspace.id, parsed.data.spaceKey);
+  const space = await findSpaceByKey(session, parsed.data.spaceKey);
   if (!space) return { error: 'not_found' };
 
   try {

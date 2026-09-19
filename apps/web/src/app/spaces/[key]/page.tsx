@@ -8,9 +8,8 @@ import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
-import { getPageById, listPages } from '@/lib/pages/service';
+import { listPages } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import {
   newSpaceDiscussionHref,
   newSpacePageHref,
@@ -21,6 +20,7 @@ import {
   spaceSkillsHref,
 } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
+import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +29,7 @@ type Props = { params: Promise<{ key: string }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const session = await getSessionContext();
   if (!session) return { title: 'clewwiki' };
-  const space = await getSpaceByKey(session.workspace.id, (await params).key);
+  const space = await findSpaceByKey(session, (await params).key);
   return { title: space?.name ?? 'clewwiki' };
 }
 
@@ -42,7 +42,7 @@ export default async function SpaceOverview({ params }: Props) {
   if (!session) {
     redirect('/login');
   }
-  const space = await getSpaceByKey(session.workspace.id, (await params).key);
+  const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
   }
@@ -110,7 +110,7 @@ export default async function SpaceOverview({ params }: Props) {
   );
 
   // A home page that has since been deleted is treated as no home page.
-  const home = space.homePageId ? await getPageById(session.workspace.id, space.homePageId) : null;
+  const home = space.homePageId ? await findPage(session, space.homePageId) : null;
   const homePage = home && home.spaceId === space.id ? home : null;
 
   if (homePage) {

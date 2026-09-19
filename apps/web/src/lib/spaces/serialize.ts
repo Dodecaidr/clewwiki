@@ -18,6 +18,8 @@ export interface SpaceResource {
   /** The page holding the project's rules, or null. `GET …/rules` reads it. */
   rules_page_id: string | null;
   archived: boolean;
+  /** True when only members and workspace administrators can see the space. */
+  restricted: boolean;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -44,6 +46,7 @@ export function toSpaceResource(
     home_page_id: space.homePageId,
     rules_page_id: space.rulesPageId,
     archived: space.archivedAt !== null,
+    restricted: space.restricted,
     archived_at: space.archivedAt?.toISOString() ?? null,
     created_at: space.createdAt.toISOString(),
     updated_at: space.updatedAt.toISOString(),

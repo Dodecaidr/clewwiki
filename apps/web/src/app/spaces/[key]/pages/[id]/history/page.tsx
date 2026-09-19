@@ -5,13 +5,12 @@ import type { Metadata } from 'next';
 
 import { ReviewStatusBadge } from '@/components/review-status-badge';
 import { Card, CardBody } from '@/components/ui/card';
-import { getPageById } from '@/lib/pages/service';
 import { getPageReviewState, listPageHistory } from '@/lib/reviews/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { spacePageChangesHref, spacePageHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 import { assertSameWorkspace } from '@/lib/workspace';
+import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,9 +31,9 @@ export default async function PageHistoryPage({ params }: Props) {
   }
   const { key, id } = await params;
   if (!UUID.test(id)) notFound();
-  const space = await getSpaceByKey(session.workspace.id, key);
+  const space = await findSpaceByKey(session, key);
   if (!space) notFound();
-  const page = await getPageById(session.workspace.id, id);
+  const page = await findPage(session, id);
   if (!page || page.spaceId !== space.id) notFound();
   assertSameWorkspace(session.workspace.id, page.workspaceId);
 

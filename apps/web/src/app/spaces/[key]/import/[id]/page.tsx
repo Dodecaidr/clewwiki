@@ -8,10 +8,9 @@ import type { ReviewItem } from './review';
 import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { buttonVariants } from '@/components/ui/button';
 import { listImportItems, previewImport } from '@/lib/imports/service';
-import { getPageById } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { spaceImportHref, spaceImportRunHref, spacePageHref } from '@/lib/spaces/urls';
+import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +35,7 @@ export default async function ImportRunPage({ params }: Props) {
     redirect('/login');
   }
   const { key, id } = await params;
-  const space = await getSpaceByKey(session.workspace.id, key);
+  const space = await findSpaceByKey(session, key);
   if (!space) {
     notFound();
   }
@@ -105,7 +104,7 @@ export default async function ImportRunPage({ params }: Props) {
     const skipped = items.filter((item) => item.createdPageId === null);
     const titles = new Map<string, string>();
     for (const item of created) {
-      const page = item.createdPageId ? await getPageById(session.workspace.id, item.createdPageId) : null;
+      const page = item.createdPageId ? await findPage(session, item.createdPageId) : null;
       if (page) titles.set(item.id, page.title);
     }
 

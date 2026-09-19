@@ -7,9 +7,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { listDiscussions, wasClosedForInactivity } from '@/lib/discussions/service';
 import { readDiscussionPolicy } from '@/lib/discussions/retention';
-import { getPageById } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import {
   newSpaceDiscussionHref,
   spaceDiscussionHref,
@@ -17,6 +15,7 @@ import {
   spacePageHref,
 } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
+import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +38,7 @@ export default async function SpaceDiscussionsPage({ params, searchParams }: Pro
   if (!session) {
     redirect('/login');
   }
-  const space = await getSpaceByKey(session.workspace.id, (await params).key);
+  const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
   }
@@ -56,7 +55,7 @@ export default async function SpaceDiscussionsPage({ params, searchParams }: Pro
   const pageIds = [...new Set(entries.map((entry) => entry.pageId).filter((id): id is string => !!id))];
   const pageTitles = new Map<string, string>();
   for (const pageId of pageIds) {
-    const page = await getPageById(session.workspace.id, pageId);
+    const page = await findPage(session, pageId);
     if (page) pageTitles.set(pageId, page.title);
   }
 

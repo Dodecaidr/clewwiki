@@ -899,6 +899,40 @@ describe.skipIf(!probe.reachable)('live editing sessions', () => {
       expect(await activeClaims(id)).toHaveLength(0);
     });
 
+    it('is ended for everybody when who may see the space changes, and only members come back', async () => {
+      const created = await create(editor, 'CLA', 'Access changed', 'x');
+      const id = created.page_id as string;
+      const dana = browser(admin, id);
+      await dana.join();
+      await dana.type(0, 'x', 'seed');
+      const lee = browser(editor, id);
+      await lee.join();
+      await lee.type(1, ' unsaved');
+      await settle(() => dana.text === 'x unsaved');
+
+      const { setSpaceMembers } = await import('@/lib/spaces/visibility');
+      const { updateSpace } = await import('@/lib/spaces/service');
+      const actor = { type: 'user' as const, id: admin.userId };
+      await setSpaceMembers({ workspaceId, spaceId: rvaId, actor, userIds: [] });
+      await updateSpace({ workspaceId, spaceId: rvaId, actor, restricted: true });
+      try {
+        // The room is gone and with it both streams; nothing typed was lost.
+        expect(collabRooms.roomParticipants(id)).toEqual([]);
+
+        // The editor is not a member and cannot come back; the administrator can,
+        // and finds the text as it was left.
+        const leeAgain = browser(editor, id);
+        await leeAgain.join();
+        expect(leeAgain.status).toBe(404);
+        const danaAgain = browser(admin, id);
+        const hello = await danaAgain.join();
+        expect(hello?.data).toMatchObject({ seeded: true, unsaved: true });
+        expect(danaAgain.text).toBe('x unsaved');
+      } finally {
+        await updateSpace({ workspaceId, spaceId: rvaId, actor, restricted: false });
+      }
+    });
+
     it('takes messages only from a browser that joined, as the person who joined', async () => {
       const created = await create(editor, 'CLA', 'Not joined', 'x');
       const id = created.page_id as string;

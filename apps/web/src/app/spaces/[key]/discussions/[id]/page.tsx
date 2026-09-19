@@ -11,12 +11,12 @@ import { buttonVariants } from '@/components/ui/button';
 import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { decisionsParentTemplate } from '@/lib/discussions/decision-page';
 import { readDiscussionPolicy } from '@/lib/discussions/retention';
-import { getDiscussionThread, wasClosedForInactivity } from '@/lib/discussions/service';
-import { getPageById } from '@/lib/pages/service';
+import { wasClosedForInactivity } from '@/lib/discussions/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceById } from '@/lib/spaces/service';
 import { spaceDiscussionsHref, spaceHref, spacePageHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
+import { findPage, findSpaceById } from '@/lib/spaces/visibility';
+import { findDiscussionThread } from '@/lib/spaces/guards';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!session) return { title: 'clewwiki' };
   const { id } = await params;
   if (!UUID_PATTERN.test(id)) return { title: 'clewwiki' };
-  const thread = await getDiscussionThread(session.workspace.id, id);
+  const thread = await findDiscussionThread(session, id);
   return { title: thread?.discussion.title ?? 'clewwiki' };
 }
 
@@ -55,12 +55,12 @@ export default async function DiscussionThreadPage({ params }: Props) {
     notFound();
   }
 
-  const thread = await getDiscussionThread(session.workspace.id, id);
+  const thread = await findDiscussionThread(session, id);
   if (!thread) {
     notFound();
   }
 
-  const space = await getSpaceById(session.workspace.id, thread.discussion.spaceId);
+  const space = await findSpaceById(session, thread.discussion.spaceId);
   if (!space) {
     notFound();
   }
@@ -75,13 +75,13 @@ export default async function DiscussionThreadPage({ params }: Props) {
   const policy = readDiscussionPolicy(space.settings);
 
   const about = thread.discussion.pageId
-    ? await getPageById(session.workspace.id, thread.discussion.pageId)
+    ? await findPage(session, thread.discussion.pageId)
     : null;
   const decisionPage = thread.discussion.decisionPageId
-    ? await getPageById(session.workspace.id, thread.discussion.decisionPageId)
+    ? await findPage(session, thread.discussion.decisionPageId)
     : null;
   const decisionsParent = policy.decisionsPageId
-    ? await getPageById(session.workspace.id, policy.decisionsPageId)
+    ? await findPage(session, policy.decisionsPageId)
     : null;
 
   const isOpener =

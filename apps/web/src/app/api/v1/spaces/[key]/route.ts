@@ -26,6 +26,8 @@ const patchBodySchema = z
     home_page_id: z.uuid().nullable().optional(),
     rules_page_id: z.uuid().nullable().optional(),
     repository: repositorySettingsSchema.nullable().optional(),
+    // Visible to its members and to workspace administrators only.
+    restricted: z.boolean().optional(),
   })
   .strict();
 
@@ -57,7 +59,8 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 /**
- * Changes a space: name, description, icon, home page, rules page, repository.
+ * Changes a space: name, description, icon, home page, rules page, repository,
+ * and whether it is restricted to its members.
  * The key is
  * immutable — it is in every URL and every agent prompt that names the space —
  * and a body that tries to change it is refused rather than half-applied.
@@ -106,6 +109,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       homePageId: parsed.data.home_page_id,
       rulesPageId: parsed.data.rules_page_id,
       repository: parsed.data.repository,
+      restricted: parsed.data.restricted,
     });
     return apiJson(toSpaceResource(updated, { includeRepository: true }), auth.headers ?? {});
   } catch (error) {

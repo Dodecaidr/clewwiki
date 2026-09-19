@@ -16,7 +16,7 @@ import { getActiveClaimsForPage, getActiveNotesForPage } from '@/lib/claims/serv
 import { listOpenDiscussionsForPage } from '@/lib/discussions/service';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
-import { getAncestors, getPageById, listRevisions } from '@/lib/pages/service';
+import { getAncestors, listRevisions } from '@/lib/pages/service';
 import { getPageReviewState } from '@/lib/reviews/service';
 import { listPageComments } from '@/lib/comments/service';
 import { splitParagraphs } from '@clewwiki/content/paragraphs';
@@ -24,7 +24,6 @@ import { CommentableBody } from '@/components/commentable-body';
 import { CommentsPanel } from '@/components/comments-panel';
 import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceById } from '@/lib/spaces/service';
 import {
   newSpaceDiscussionHref,
   newSpacePageHref,
@@ -37,6 +36,7 @@ import {
 } from '@/lib/spaces/urls';
 import { assertSameWorkspace } from '@/lib/workspace';
 import { cn, formatDateTime } from '@/lib/utils';
+import { findPage, findSpaceById } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,14 +49,14 @@ async function loadPage(id: string) {
   if (!session) return null;
   if (!UUID_PATTERN.test(id)) return null;
 
-  const page = await getPageById(session.workspace.id, id);
+  const page = await findPage(session, id);
   if (!page) return null;
 
   // The query already scoped to the workspace; this re-asserts it on the row
   // about to be rendered, so a change to the query cannot quietly widen what
   // this screen shows.
   assertSameWorkspace(session.workspace.id, page.workspaceId);
-  const space = await getSpaceById(session.workspace.id, page.spaceId);
+  const space = await findSpaceById(session, page.spaceId);
   if (!space) return null;
   return { session, page, space };
 }
@@ -148,7 +148,7 @@ export default async function PageView({ params }: Props) {
   ] = await Promise.all([
       listPageComments(session.workspace.id, page.id, 'all'),
       page.linkedPageId
-        ? getPageById(session.workspace.id, page.linkedPageId)
+        ? findPage(session, page.linkedPageId)
         : Promise.resolve(null),
       listRevisions(session.workspace.id, page.id, 5),
       getActiveClaimsForPage(session.workspace.id, page.id),

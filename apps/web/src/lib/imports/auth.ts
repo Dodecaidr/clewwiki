@@ -6,6 +6,7 @@ import { auth } from '../auth';
 import { checkSessionMutation, checkUploadMutation } from '../csrf';
 import { getAuthBaseUrl } from '../env';
 import { apiError } from '../api-response';
+import { visibleSpaceIdsForUser } from '../spaces/visibility';
 import { getMembershipForUser, getWorkspaceById } from '../workspace';
 import type { ImportActor } from './service';
 import type { UserIdentity } from '../api-auth';
@@ -96,7 +97,7 @@ export async function authorizeImportRequest(
       role: membership.role,
       workspaceId: workspace.id,
       workspace,
-      spaceIds: null,
+      spaceIds: await visibleSpaceIdsForUser(workspace.id, session.user.id, membership.role),
     },
     actor: { type: 'user', id: session.user.id },
     workspaceId: workspace.id,

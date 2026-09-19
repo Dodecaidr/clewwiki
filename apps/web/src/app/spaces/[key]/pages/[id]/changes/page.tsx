@@ -10,7 +10,6 @@ import { isPageServiceError } from '@/lib/pages/errors';
 import { diffPageVersions, getPageReviewState } from '@/lib/reviews/service';
 import type { VersionDiff } from '@/lib/reviews/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import {
   spaceChangesHref,
   spacePageChangesHref,
@@ -19,6 +18,7 @@ import {
 } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 import { assertSameWorkspace } from '@/lib/workspace';
+import { findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,7 +54,7 @@ export default async function PageChangesPage({ params, searchParams }: Props) {
   }
   const { key, id } = await params;
   if (!UUID.test(id)) notFound();
-  const space = await getSpaceByKey(session.workspace.id, key);
+  const space = await findSpaceByKey(session, key);
   if (!space) notFound();
 
   let state;

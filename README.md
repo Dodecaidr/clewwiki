@@ -848,6 +848,32 @@ space stays readable but drops out of the space list and of searches across
 all spaces, and takes no new pages. Roles are workspace-wide in this version:
 an editor can edit in every space.
 
+### Restricted spaces
+
+A space is open to everybody in the workspace unless an administrator restricts
+it (**Settings → Access**). A restricted space is visible to its members and to
+workspace administrators; to everybody else it does not exist. It is not in the
+list of spaces, its pages are not found by search, nobody sees who is editing in
+it, and a link to one of its pages answers "not found" — the same answer a page
+in another workspace gets, so that a refusal never confirms there was something
+to refuse.
+
+- **Membership is visibility, not a role.** A member can do in the space what
+  their role in the workspace lets them do anywhere else. There is no read-only
+  membership yet.
+- **Administrators see every space.** They issue agent tokens, and a token with
+  no space list reaches every space; hiding a space from the people who can mint
+  a key to it would promise something the product does not do. It also means a
+  restricted space can never lose the last person able to manage it.
+- **Agent tokens are not people.** A token is limited to spaces when it is
+  created, on the Agent tokens page. A token with no space list reaches a
+  restricted space like any other; give an agent that should not a list.
+- **The member list is kept** when the restriction is lifted, and takes effect
+  again when it is put back. Listing people does not restrict the space, so a
+  list can be prepared first and nobody is locked out in between.
+- Changing who may see a space ends its live editing sessions: browsers
+  reconnect by themselves and are let back in, or not. Nothing typed is lost.
+
 ### Rules and skills
 
 Two things sit beside a space's pages rather than inside its tree, because they
@@ -1530,6 +1556,8 @@ noise.
 | `POST /api/v1/discussions/{id}/messages` | session or token | `pages:write` | Add a message, pushing the closing deadline out. `409 conflict` on a resolved thread, `400 validation` past 200 messages or 8 KB, `429 rate_limited` past the per-actor message budget. |
 | `POST /api/v1/discussions/{id}/resolve` | session or token | `pages:write` | Resolve with a decision: `decision` (required), `context`, `options`, `consequences`, `locale`. Creates or rewrites the decision page and answers with it. |
 | `DELETE /api/v1/discussions/{id}` | session or token | `pages:write` | Remove a discussion and its messages early. Administrator or the opener only. The decision page is kept. |
+| `GET /api/v1/spaces/{key}/members` | admin session | — | The people a restricted space is visible to, with names and e-mail addresses. Workspace administrators are not listed unless somebody added them: they see every space regardless. `403 forbidden` for an editor and for any agent token. |
+| `PUT /api/v1/spaces/{key}/members` | admin session | — | Replace the member list, whole: `{ "user_ids": [...] }`. Only people of this workspace; an id from anywhere else is `400 validation` naming it, rather than dropped. Does not restrict the space — `PATCH /api/v1/spaces/{key}` with `restricted: true` does. |
 | `GET /api/v1/pages` | session or token | `pages:read` | The page tree, without bodies. Takes `space`, `parent_id`, `path` (needs `space`), `kind`, `depth`; without `space`, the top of every space. |
 | `POST /api/v1/pages` | session or token | `pages:write` | Create a page. Requires `space`. An invalid ` ```chart ` or ` ```mermaid ` block in the body is `400 validation` with `block_index`, `line` and `errors`. |
 | `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |

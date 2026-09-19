@@ -8,6 +8,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -379,6 +380,13 @@ export const spaces = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
+    /**
+     * A restricted space is visible to its members and to workspace
+     * administrators, and to nobody else: to everyone else it does not exist,
+     * the way a space in another workspace does not. False for every space
+     * created before this column, so nothing changes until somebody asks.
+     */
+    restricted: boolean('restricted').notNull().default(false),
   },
   (table) => [
     uniqueIndex('spaces_workspace_key_key').on(table.workspaceId, table.key),
@@ -1102,6 +1110,37 @@ export const pageCollabStates = pgTable(
   ],
 );
 
+/**
+ * Who may see a restricted space.
+ *
+ * Membership is about visibility and nothing more: a member of a restricted
+ * space can do there what their workspace role lets them do anywhere else. The
+ * rows mean nothing while the space is not restricted, and are kept when the
+ * restriction is lifted, so switching it back on does not mean listing everyone
+ * again. Workspace administrators need no row: they see every space, because
+ * they can issue a token that does.
+ */
+export const spaceMembers = pgTable(
+  'space_members',
+  {
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    addedBy: text('added_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.spaceId, table.userId] }),
+    index('space_members_user_idx').on(table.userId, table.workspaceId),
+  ],
+);
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type Space = typeof spaces.$inferSelect;
 export type NewSpace = typeof spaces.$inferInsert;
@@ -1142,3 +1181,4 @@ export type ReviewDecisionValue = (typeof reviewDecision.enumValues)[number];
 export type PageCommentRow = typeof pageComments.$inferSelect;
 export type NewPageCommentRow = typeof pageComments.$inferInsert;
 export type PageCollabStateRow = typeof pageCollabStates.$inferSelect;
+export type SpaceMemberRow = typeof spaceMembers.$inferSelect;

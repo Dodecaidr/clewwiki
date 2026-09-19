@@ -17,9 +17,9 @@ import type { ConnectOptions } from '@/lib/connect/snippets';
 import { getAuthBaseUrl, isMcpHttpEnabled } from '@/lib/env';
 import { getSessionContext } from '@/lib/session';
 import { buildSkillsInstallCommand, buildSkillsListCommand } from '@/lib/skills/install';
-import { listSpaces } from '@/lib/spaces/service';
 import enMessages from '../../../messages/en.json';
 import ruMessages from '../../../messages/ru.json';
+import { findSpaces } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,7 +78,7 @@ export default async function ConnectPage() {
   // in it is one a person has to think about before running. So the keys the
   // reader can actually reach are offered, and `KEY` is only the fallback for
   // a workspace with no spaces yet.
-  const spaces = await listSpaces(session.workspace.id);
+  const spaces = await findSpaces(session);
   const spaceKeys = spaces.map((space) => space.key);
   const keysForCommands = spaceKeys.length > 0 ? spaceKeys : ['KEY'];
   const skills: SkillsSetup = {

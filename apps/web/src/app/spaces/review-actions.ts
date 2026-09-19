@@ -5,15 +5,14 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { isPageServiceError } from '@/lib/pages/errors';
-import { getPageById } from '@/lib/pages/service';
 import {
   MAX_REVIEW_NOTE_LENGTH,
   acceptPageChanges,
   revertPageChanges,
 } from '@/lib/reviews/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceById } from '@/lib/spaces/service';
 import { spacePageChangesHref } from '@/lib/spaces/urls';
+import { findPage, findSpaceById } from '@/lib/spaces/visibility';
 
 /**
  * A person's decision about what agents changed on a page.
@@ -58,9 +57,9 @@ export async function reviewPageAction(
     return { error: 'validation', message: parsed.error.issues[0]?.message };
   }
 
-  const page = await getPageById(session.workspace.id, parsed.data.pageId);
+  const page = await findPage(session, parsed.data.pageId);
   if (!page) return { error: 'not_found' };
-  const space = await getSpaceById(session.workspace.id, page.spaceId);
+  const space = await findSpaceById(session, page.spaceId);
   if (!space) return { error: 'not_found' };
 
   let from: number;

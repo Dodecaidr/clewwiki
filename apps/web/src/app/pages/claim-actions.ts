@@ -8,6 +8,7 @@ import { heartbeatIntervalMs, remainingSeconds, resolveTtlSeconds } from '@/lib/
 import { isPageServiceError } from '@/lib/pages/errors';
 import { getSessionContext } from '@/lib/session';
 import type { SessionContext } from '@/lib/session';
+import { canViewClaim, canViewPage } from '@/lib/spaces/guards';
 
 /**
  * The browser's half of the claim protocol.
@@ -61,6 +62,8 @@ export async function acquireClaimAction(pageId: string): Promise<LeaseResult> {
   const session = await getSessionContext();
   if (!session) return { ok: false, error: 'forbidden' };
   if (!pageIdSchema.safeParse(pageId).success) return { ok: false, error: 'validation' };
+  // A page in a space this person cannot see is, to them, a page that is not there.
+  if (!(await canViewPage(session, pageId))) return { ok: false, error: 'not_found' };
 
   try {
     const { claim } = await acquireClaim({
@@ -91,6 +94,7 @@ export async function renewClaimAction(claimId: string): Promise<LeaseResult> {
   const session = await getSessionContext();
   if (!session) return { ok: false, error: 'forbidden' };
   if (!pageIdSchema.safeParse(claimId).success) return { ok: false, error: 'validation' };
+  if (!(await canViewClaim(session, claimId))) return { ok: false, error: 'not_found' };
 
   try {
     const claim = await renewClaim({
@@ -110,6 +114,7 @@ export async function releaseClaimAction(claimId: string): Promise<LeaseResult> 
   const session = await getSessionContext();
   if (!session) return { ok: false, error: 'forbidden' };
   if (!pageIdSchema.safeParse(claimId).success) return { ok: false, error: 'validation' };
+  if (!(await canViewClaim(session, claimId))) return { ok: false, error: 'not_found' };
 
   try {
     await releaseClaim({

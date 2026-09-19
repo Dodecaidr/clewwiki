@@ -8,13 +8,13 @@ import { buttonVariants } from '@/components/ui/button';
 import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { getActiveClaimsForPage } from '@/lib/claims/service';
 import { lastSegment } from '@/lib/pages/paths';
-import { getPageById, getPageTree } from '@/lib/pages/service';
+import { getPageTree } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceById } from '@/lib/spaces/service';
 import { flattenTree, subtreeIds } from '@/lib/spaces/tree';
 import { spacePageEditHref, spacePageHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 import { assertSameWorkspace } from '@/lib/workspace';
+import { findPage, findSpaceById } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,12 +38,12 @@ export default async function EditPage({ params }: Props) {
     notFound();
   }
 
-  const page = await getPageById(session.workspace.id, id);
+  const page = await findPage(session, id);
   if (!page) {
     notFound();
   }
   assertSameWorkspace(session.workspace.id, page.workspaceId);
-  const space = await getSpaceById(session.workspace.id, page.spaceId);
+  const space = await findSpaceById(session, page.spaceId);
   if (!space) {
     notFound();
   }

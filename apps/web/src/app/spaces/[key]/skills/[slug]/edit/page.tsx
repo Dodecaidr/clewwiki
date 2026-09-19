@@ -5,8 +5,8 @@ import type { Metadata } from 'next';
 import { SkillForm } from '../../skill-form';
 import { getSessionContext } from '@/lib/session';
 import { getSkillBySlug } from '@/lib/skills/service';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { spaceSkillHref } from '@/lib/spaces/urls';
+import { findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +24,7 @@ export default async function EditSkillPage({ params }: Props) {
     redirect('/login');
   }
   const { key, slug } = await params;
-  const space = await getSpaceByKey(session.workspace.id, key);
+  const space = await findSpaceByKey(session, key);
   if (!space) {
     notFound();
   }

@@ -138,7 +138,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'roles',
-    blocks: [p('p1'), ul('admin', 'editor'), p('p2'), p('p3')],
+    blocks: [p('p1'), ul('admin', 'editor'), p('p2'), p('p3'), p('pRestricted')],
   },
   {
     id: 'more',

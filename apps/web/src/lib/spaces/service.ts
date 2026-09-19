@@ -42,6 +42,8 @@ export interface SpaceRecord {
   createdAt: Date;
   updatedAt: Date;
   archivedAt: Date | null;
+  /** True when only members and workspace administrators can see the space. */
+  restricted: boolean;
 }
 
 /** The part of a space every page, hit and claim carries with it. */
@@ -72,6 +74,7 @@ const spaceColumns = {
   createdAt: spaces.createdAt,
   updatedAt: spaces.updatedAt,
   archivedAt: spaces.archivedAt,
+  restricted: spaces.restricted,
 } as const;
 
 const UNIQUE_VIOLATION = '23505';
@@ -311,6 +314,8 @@ export interface UpdateSpaceInput {
   rulesPageId?: string | null;
   /** `null` unlinks the repository. */
   repository?: RepositorySettings | null;
+  /** Whether only members and workspace administrators can see the space. */
+  restricted?: boolean;
   /**
    * The space's discussion retention policy. Given whole, because the two
    * windows and the decisions page are edited on one form and a half-applied
@@ -332,7 +337,9 @@ export interface UpdateSpaceInput {
 export async function updateSpace(input: UpdateSpaceInput): Promise<SpaceRecord> {
   const db = getDatabase();
 
-  return db.transaction(async (tx) => {
+  let restrictionChanged = false;
+
+  const result = await db.transaction(async (tx) => {
     const [current] = await tx
       .select(spaceColumns)
       .from(spaces)
@@ -411,6 +418,11 @@ export async function updateSpace(input: UpdateSpaceInput): Promise<SpaceRecord>
       changed.push('discussions');
     }
     if (settings !== null) changes.settings = settings;
+    if (input.restricted !== undefined && input.restricted !== current.restricted) {
+      changes.restricted = input.restricted;
+      changed.push('restricted');
+      restrictionChanged = true;
+    }
 
     if (changed.length === 0) return current;
 
@@ -456,6 +468,13 @@ export async function updateSpace(input: UpdateSpaceInput): Promise<SpaceRecord>
 
     return updated;
   });
+
+  if (restrictionChanged) {
+    // Streams opened while the space was open were authorised as it then was.
+    const { endLiveSessions } = await import('./visibility');
+    await endLiveSessions(result.id);
+  }
+  return result;
 }
 
 export interface ArchiveSpaceInput {

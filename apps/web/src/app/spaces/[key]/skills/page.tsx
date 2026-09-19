@@ -10,9 +10,9 @@ import { getAuthBaseUrl } from '@/lib/env';
 import { getSessionContext } from '@/lib/session';
 import { buildSkillsInstallCommand } from '@/lib/skills/install';
 import { listSkills, listSkillTags } from '@/lib/skills/service';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { newSpaceSkillHref, spaceSkillHref, spaceSkillsHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
+import { findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +33,7 @@ export default async function SpaceSkillsPage({ params, searchParams }: Props) {
   if (!session) {
     redirect('/login');
   }
-  const space = await getSpaceByKey(session.workspace.id, (await params).key);
+  const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
   }

@@ -8,11 +8,11 @@ import {
   confirmAnchor,
   createAnchor,
   deleteAnchor,
-  getAnchorById,
-} from '@/lib/anchors/service';
+  } from '@/lib/anchors/service';
 import { isPageServiceError } from '@/lib/pages/errors';
 import { getSessionContext } from '@/lib/session';
 import type { SessionContext } from '@/lib/session';
+import { canViewAnchor, canViewPage, findAnchor } from '@/lib/spaces/guards';
 
 /**
  * The browser's half of the anchor mechanism.
@@ -71,6 +71,7 @@ export async function createAnchorAction(
     sectionId: formData.get('sectionId') ?? '',
   });
   if (!parsed.success) return { ok: false, error: 'validation' };
+  if (!(await canViewPage(session, parsed.data.pageId))) return { ok: false, error: 'not_found' };
 
   const target = parsed.data.target?.trim() ?? '';
   const range = /^(\d+)\s*-\s*(\d+)$/.exec(target);
@@ -106,6 +107,7 @@ export async function checkAnchorsAction(
 
   const parsed = z.object({ pageId: z.uuid() }).safeParse({ pageId: formData.get('pageId') });
   if (!parsed.success) return { ok: false, error: 'validation' };
+  if (!(await canViewPage(session, parsed.data.pageId))) return { ok: false, error: 'not_found' };
 
   try {
     await checkPageAnchors({
@@ -133,7 +135,7 @@ export async function confirmAnchorAction(
   if (!parsed.success) return { ok: false, error: 'validation' };
 
   try {
-    const anchor = await getAnchorById(session.workspace.id, parsed.data.anchorId);
+    const anchor = await findAnchor(session, parsed.data.anchorId);
     if (!anchor) return { ok: false, error: 'not_found' };
 
     await confirmAnchor({
@@ -159,6 +161,7 @@ export async function deleteAnchorAction(
 
   const parsed = anchorIdSchema.safeParse({ anchorId: formData.get('anchorId') });
   if (!parsed.success) return { ok: false, error: 'validation' };
+  if (!(await canViewAnchor(session, parsed.data.anchorId))) return { ok: false, error: 'not_found' };
 
   try {
     await deleteAnchor({

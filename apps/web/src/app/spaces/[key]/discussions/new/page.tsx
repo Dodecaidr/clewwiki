@@ -5,10 +5,9 @@ import type { Metadata } from 'next';
 import { OpenDiscussionForm } from '../open-form';
 import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { readDiscussionPolicy } from '@/lib/discussions/retention';
-import { getPageById } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
-import { getSpaceByKey } from '@/lib/spaces/service';
 import { spaceDiscussionsHref } from '@/lib/spaces/urls';
+import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +27,7 @@ export default async function NewDiscussionPage({ params, searchParams }: Props)
   if (!session) {
     redirect('/login');
   }
-  const space = await getSpaceByKey(session.workspace.id, (await params).key);
+  const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
   }
@@ -39,7 +38,7 @@ export default async function NewDiscussionPage({ params, searchParams }: Props)
   const requested = (await searchParams).page;
   // A page from another space, or one that has been deleted, simply does not
   // prefill: the thread is still worth opening.
-  const about = requested ? await getPageById(session.workspace.id, requested) : null;
+  const about = requested ? await findPage(session, requested) : null;
   const page = about && about.spaceId === space.id && about.deletedAt === null ? about : null;
 
   if (space.archivedAt !== null) {

@@ -11,6 +11,18 @@ tagged.
 
 ### Added
 
+- **Restricted spaces.** A space can be restricted to its members: to everybody
+  else in the workspace it does not exist — not listed, not searched, and every
+  link into it answers `404`, exactly as a space in another workspace does.
+  Workspace administrators see every space. Membership is about visibility only:
+  a member can do in the space what their workspace role lets them do anywhere.
+  Migration `0011_space_members` (`spaces.restricted`, `space_members`); existing
+  spaces stay open.
+- `PATCH /api/v1/spaces/{key}` takes `restricted`, and
+  `GET`/`PUT /api/v1/spaces/{key}/members` reads and replaces the member list —
+  signed-in workspace administrators only. **Settings → Access** in every space
+  does the same from the interface, and a restricted space says so next to its
+  name. Changes are audited as `space.members_changed` and in `space.updated`.
 - **Editing together.** Several people can be in one page at once, with each
   other's cursors and edits appearing as they are typed. Opening the editor joins
   the page's live session; there is nothing to switch on. The shared document is
@@ -49,6 +61,20 @@ tagged.
 
 ### Security
 
+- A person's visibility is computed into the same allowlist a space-limited token
+  carries, so every REST handler that already checked a resource's space against
+  the caller enforces restricted spaces without having been changed — 27 ways
+  into a restricted space are tested to answer `404` to a non-member. Pages and
+  server actions look spaces, pages, claims, anchors, comments and discussions up
+  through guarded lookups with the session as the viewer, and a test fails the
+  build if interface code calls an unguarded one. That includes
+  `generateMetadata`: a page title is sent to the browser even when the page
+  answers "not found", which is how a restricted discussion's title would
+  otherwise have reached somebody who could not open it.
+- Live editing sessions in a space are ended when who may see it changes, so a
+  stream that was authorised while the space was open does not go on delivering
+  its edits to somebody removed from it. Browsers reconnect and are authorised
+  again; nothing typed is lost.
 - A browser in a session may report its own cursor and nobody else's, and the
   name and colour shown next to a cursor come from the server's participant
   list, never from what another browser says about itself. Messages are taken
