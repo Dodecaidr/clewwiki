@@ -166,8 +166,19 @@ jobs:
         if: env.IS_DRY_RUN == 'true'
         working-directory: packages/mcp-server
         run: |
+          set -eu
           echo "::notice::dry run — checking the tarball, skipping npm publish"
-          npm publish ./clewwiki-mcp-server-*.tgz --access public --dry-run
+          # Not `npm publish --dry-run`: it asks the registry, and refuses a
+          # version that is already out, which a dry run usually is.
+          tar -xzOf clewwiki-mcp-server-*.tgz package/package.json > "${RUNNER_TEMP}/manifest.json"
+          node -e '
+            const m = require(process.argv[1]);
+            const problems = [];
+            if (!m.bin || !m.bin["clewwiki-mcp"]) problems.push("bin is missing: publishConfig was not applied");
+            if (!/github\.com\/Dodecaidr\/clewwiki/.test(m.repository?.url ?? "")) problems.push("repository.url does not name this repository; provenance would be refused");
+            if (problems.length) { console.error(problems.join("\n")); process.exit(1); }
+            console.log(`${m.name}@${m.version} is ready to publish`);
+          ' "${RUNNER_TEMP}/manifest.json"
 
   github-release:
     name: Create the GitHub Release
