@@ -3,7 +3,7 @@ import 'server-only';
 import type { NextResponse } from 'next/server';
 
 import { authenticateRequest, requireScopes } from './api-auth';
-import type { ApiIdentity } from './api-auth';
+import type { ApiIdentity, AuthenticateOptions } from './api-auth';
 import type { ClaimActor } from './claims/service';
 import type { PageActor } from './pages/service';
 
@@ -35,8 +35,9 @@ export const DELETE_SCOPES = ['pages:write', 'pages:delete'] as const;
 export async function authorizePagesRequest(
   request: Request,
   scopes: readonly string[],
+  options: AuthenticateOptions = {},
 ): Promise<PagesAuthResult> {
-  const auth = await authenticateRequest(request);
+  const auth = await authenticateRequest(request, options);
   if (!auth.ok) return { ok: false, response: auth.response };
 
   const scopeError = requireScopes(auth.identity, scopes);

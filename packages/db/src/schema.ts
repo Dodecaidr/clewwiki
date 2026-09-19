@@ -1111,6 +1111,54 @@ export const pageCollabStates = pgTable(
 );
 
 /**
+ * Images uploaded into pages.
+ *
+ * Bytes live in the database, next to the pages that show them: one backup
+ * restores a wiki whole, the container keeps its read-only filesystem, and an
+ * image can only ever be read through a handler that has checked who is asking.
+ * The price is paid in size, so an image is bounded here as well as in the
+ * handler, and only raster formats a browser decodes without running anything
+ * are accepted — the type stored is the one detected from the bytes, never the
+ * one the client claimed, and it is the only type the image is served as.
+ *
+ * An image belongs to a page and is visible to whoever can see that page, in
+ * whichever space the page is now. `page_id` is null only between an upload
+ * from the new-page form and the save that creates the page; until then the
+ * image is visible inside `space_id`, and one never claimed by a page is swept.
+ * `space_id` is where it was uploaded and stops mattering once it is attached.
+ */
+export const pageImages = pgTable(
+  'page_images',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    pageId: uuid('page_id').references((): AnyPgColumn => pages.id, { onDelete: 'cascade' }),
+    contentType: text('content_type').notNull(),
+    byteSize: integer('byte_size').notNull(),
+    sha256: text('sha256').notNull(),
+    data: bytea('data').notNull(),
+    createdByType: actorType('created_by_type').notNull(),
+    createdById: text('created_by_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('page_images_page_idx').on(table.pageId, table.sha256),
+    index('page_images_workspace_created_idx').on(table.workspaceId, table.createdAt),
+    index('page_images_unattached_idx').on(table.createdAt).where(sql`${table.pageId} is null`),
+    check('page_images_size', sql`octet_length(${table.data}) <= 10485760`),
+    check(
+      'page_images_type',
+      sql`${table.contentType} in ('image/png', 'image/jpeg', 'image/gif', 'image/webp')`,
+    ),
+  ],
+);
+
+/**
  * Who may see a restricted space.
  *
  * Membership is about visibility and nothing more: a member of a restricted
@@ -1141,6 +1189,7 @@ export const spaceMembers = pgTable(
   ],
 );
 
+export type PageImage = typeof pageImages.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type Space = typeof spaces.$inferSelect;
 export type NewSpace = typeof spaces.$inferInsert;

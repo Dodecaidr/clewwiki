@@ -1,6 +1,8 @@
 import { CHART_PALETTE } from '@clewwiki/content/chart';
 
 import { escapeHtml, renderMarkdown } from './markdown';
+import { imageHref, referencedImageIds } from '../images/detect';
+import { getImageData, listImagesForPage } from '../images/service';
 import { lastSegment } from './paths';
 import type { PageRecord } from './service';
 
@@ -112,6 +114,36 @@ img { max-width: 100%; }
 }
 `.trim();
 
+/** Most image bytes one exported document carries inline; past it, images stay as addresses. */
+const MAX_INLINE_IMAGE_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Puts the page's own uploaded images into the document as `data:` addresses.
+ *
+ * The export has to open from disk with nothing fetched, and an address on this
+ * instance is a fetch — one that needs a session besides. Only images that
+ * belong to this page are inlined: whoever may export the page may see those,
+ * while an address pointing at another page's image proves nothing about it and
+ * is left as the address it was.
+ */
+async function inlineOwnImages(page: PageRecord, html: string): Promise<string> {
+  const wanted = new Set(referencedImageIds(html));
+  if (wanted.size === 0) return html;
+
+  const own = (await listImagesForPage(page.workspaceId, page.id)).filter((image) => wanted.has(image.id));
+  let budget = MAX_INLINE_IMAGE_BYTES;
+  let out = html;
+  for (const image of own) {
+    if (image.byteSize > budget) continue;
+    const data = await getImageData(page.workspaceId, image.id);
+    if (!data) continue;
+    budget -= image.byteSize;
+    const address = `data:${image.contentType};base64,${Buffer.from(data).toString('base64')}`;
+    out = out.replaceAll(`src="${imageHref(image.id)}"`, `src="${address}"`);
+  }
+  return out;
+}
+
 /**
  * HTML export: a standalone document, server-rendered and sanitised.
  *
@@ -125,7 +157,7 @@ img { max-width: 100%; }
  * the way to get them on paper.
  */
 export async function exportPageHtml(page: PageRecord): Promise<ExportedPage> {
-  const rendered = await renderMarkdown(page.body);
+  const rendered = await inlineOwnImages(page, await renderMarkdown(page.body));
   const title = escapeHtml(page.title);
 
   const document = `<!doctype html>

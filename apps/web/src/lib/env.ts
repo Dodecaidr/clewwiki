@@ -206,3 +206,33 @@ export function getConfiguredSetupToken(): string | null {
 export function isProduction(): boolean {
   return process.env.NODE_ENV === 'production';
 }
+
+/**
+ * Largest image a page accepts, in megabytes. `0` switches image uploads off:
+ * an instance that does not want to serve bytes its users supplied can say so.
+ * The table refuses anything past 10 MB whatever this says.
+ */
+export function getImageMaxUploadMb(): number {
+  const raw = process.env.IMAGE_MAX_UPLOAD_MB;
+  if (raw !== undefined && raw.trim() === '0') return 0;
+  return Math.min(optionalNumber('IMAGE_MAX_UPLOAD_MB', 5), 10);
+}
+
+/**
+ * Most a workspace's images may occupy together, in megabytes. Images live in
+ * the database, so this is what keeps a wiki's backup from becoming a photo
+ * archive without anybody having decided that.
+ */
+export function getImageStoreMaxMb(): number {
+  return optionalNumber('IMAGE_STORE_MAX_MB', 2048);
+}
+
+/** Image uploads one actor may make per window. */
+export function getImageUploadRateLimitMax(): number {
+  return optionalNumber('IMAGE_UPLOAD_RATE_LIMIT_MAX', 30);
+}
+
+/** Length of the image-upload rate limit window, in seconds. */
+export function getImageUploadRateLimitWindowSeconds(): number {
+  return optionalNumber('IMAGE_UPLOAD_RATE_LIMIT_WINDOW', 60);
+}

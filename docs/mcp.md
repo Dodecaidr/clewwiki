@@ -29,7 +29,7 @@ An agent token belongs to exactly one workspace and carries a scope set:
 |---|---|
 | `pages:read` | `wiki.list_spaces`, `wiki.format_guide`, `wiki.get_rules`, `wiki.list_skills`, `wiki.get_skill`, `wiki.search`, `wiki.get_page`, `wiki.list_pages`, `wiki.get_presence`, `wiki.list_discussions`, `wiki.get_discussion`, `wiki.list_changes`, `wiki.get_review`, `wiki.diff_page`, `wiki.list_comments` |
 | `pages:write` | `wiki.create_page`, `wiki.claim`, `wiki.renew_claim`, `wiki.write_page`, `wiki.release_claim`, `wiki.post_note`, `wiki.open_discussion`, `wiki.post_discussion_message`, `wiki.resolve_discussion`, `wiki.post_comment`, `wiki.resolve_comment`, `wiki.check_anchors`, `wiki.link_docs`. Over REST also `POST`/`PATCH` on a space's skills, and `DELETE /api/v1/discussions/{id}`. |
-| `pages:delete` | No tool. `DELETE /api/v1/pages/{id}`, `POST /api/v1/pages/{id}/move` (to another space) and `DELETE /api/v1/spaces/{key}/skills/{slug}` over REST, together with `pages:write`. |
+| `pages:delete` | No tool. `DELETE /api/v1/pages/{id}`, `DELETE /api/v1/images/{imageId}`, `POST /api/v1/pages/{id}/move` (to another space) and `DELETE /api/v1/spaces/{key}/skills/{slug}` over REST, together with `pages:write`. |
 
 **Restricted spaces and tokens.** A space can be restricted to its members, and
 members are people. A token is not a member of anything: it reaches the spaces on

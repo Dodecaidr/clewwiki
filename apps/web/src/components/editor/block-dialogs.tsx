@@ -8,6 +8,8 @@ import { isAllowedLinkTarget } from './commands';
 import { EditorDialog } from './editor-dialog';
 import { MermaidPreview } from './mermaid-preview';
 import { isAllowedImageSource } from './schema';
+import { altFromFileName, UPLOADABLE_IMAGE_TYPES, uploadImage } from './upload-image';
+import type { ImageUploadError } from './upload-image';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select } from '@/components/ui/field';
 
@@ -215,27 +217,48 @@ function LinkDialogBody({
 
 export function ImageDialog({
   open,
+  uploadEndpoint,
   onCancel,
   onSave,
 }: {
   open: boolean;
+  /** Where a chosen file is sent. Without it the dialog takes an address only. */
+  uploadEndpoint?: string;
   onCancel: () => void;
   onSave: (image: { src: string; alt: string }) => void;
 }) {
   if (!open) return null;
-  return <ImageDialogBody onCancel={onCancel} onSave={onSave} />;
+  return <ImageDialogBody uploadEndpoint={uploadEndpoint} onCancel={onCancel} onSave={onSave} />;
 }
 
 function ImageDialogBody({
+  uploadEndpoint,
   onCancel,
   onSave,
 }: {
+  uploadEndpoint?: string;
   onCancel: () => void;
   onSave: (image: { src: string; alt: string }) => void;
 }) {
   const t = useTranslations('editor');
   const [src, setSrc] = useState('');
   const [alt, setAlt] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<ImageUploadError | null>(null);
+
+  const upload = async (file: File | undefined) => {
+    if (!file || !uploadEndpoint) return;
+    setUploading(true);
+    setUploadError(null);
+    const result = await uploadImage(uploadEndpoint, file);
+    setUploading(false);
+    if (!result.ok) {
+      setUploadError(result.error);
+      return;
+    }
+    setSrc(result.url);
+    setAlt((current) => (current.trim() === '' ? altFromFileName(file.name) : current));
+  };
   const valid = src.trim() === '' || isAllowedImageSource(src);
   const ready = src.trim() !== '' && valid;
 
@@ -244,19 +267,45 @@ function ImageDialogBody({
       open
       onClose={onCancel}
       title={t('imageTitle')}
-      description={t('imageUploadsNote')}
+      description={uploadEndpoint ? t('imageUploadNote') : t('imageUploadsNote')}
       footer={
         <>
           <Button variant="outline" size="sm" onClick={onCancel}>
             {t('dialogCancel')}
           </Button>
-          <Button size="sm" disabled={!ready} onClick={() => onSave({ src: src.trim(), alt: alt.trim() })}>
+          <Button
+            size="sm"
+            disabled={!ready || uploading}
+            onClick={() => onSave({ src: src.trim(), alt: alt.trim() })}
+          >
             {t('imageInsert')}
           </Button>
         </>
       }
     >
       <div className="grid gap-4">
+        {uploadEndpoint ? (
+          <Field label={t('imageFile')} htmlFor="image-file" hint={t('imageFileHint')}>
+            <input
+              id="image-file"
+              type="file"
+              accept={UPLOADABLE_IMAGE_TYPES.join(',')}
+              disabled={uploading}
+              className="text-sm file:mr-3 file:rounded-(--radius-base) file:border file:border-input file:bg-card file:px-3 file:py-1.5 file:text-sm"
+              onChange={(event) => void upload(event.target.files?.[0])}
+            />
+          </Field>
+        ) : null}
+        {uploading ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {t('imageUploading')}
+          </p>
+        ) : null}
+        {uploadError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {t(`imageUploadError_${uploadError}`)}
+          </p>
+        ) : null}
         <Field label={t('imageUrl')} htmlFor="image-src">
           <Input
             id="image-src"

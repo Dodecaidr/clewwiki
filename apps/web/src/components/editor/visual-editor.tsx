@@ -26,6 +26,8 @@ import { createEditorExtensions } from './schema';
 import { CLOSED_SLASH_MENU, createSlashCommand, SlashMenu } from './slash-menu';
 import type { SlashMenuState } from './slash-menu';
 import { Toolbar } from './toolbar';
+import { altFromFileName, imageFilesOf, uploadImage } from './upload-image';
+import type { ImageUploadError } from './upload-image';
 
 /**
  * The visual editor: a word-processor surface over a Markdown page.
@@ -57,6 +59,8 @@ export interface VisualEditorProps {
    * unchanged blocks are written back from. It changes whenever anybody saves.
    */
   session?: { provider: SessionProvider; parsed: ParsedMarkdown; editable: boolean };
+  /** Where image files are uploaded. Without it, pasted and dropped files are ignored. */
+  imageUploadEndpoint?: string;
 }
 
 type DialogState =
@@ -205,8 +209,13 @@ export default function VisualEditor({
   ariaLabel,
   describedBy,
   session,
+  imageUploadEndpoint,
 }: VisualEditorProps) {
   const t = useTranslations('editor');
+  const [uploadNotice, setUploadNotice] = useState<ImageUploadError | 'uploading' | null>(null);
+  // The editor's props are read once, when it is created; what a paste or a
+  // drop should do is looked up through this at the moment it happens.
+  const uploadFiles = useRef<(files: File[], position?: number) => boolean>(() => false);
   const tc = useTranslations('content');
   const [ownParsed] = useState<ParsedMarkdown>(() => session?.parsed ?? parseMarkdown(markdown));
   // In a session the base moves under the editor each time somebody saves.
@@ -250,9 +259,21 @@ export default function VisualEditor({
       handlePaste: (view, event) => {
         const html = event.clipboardData?.getData('text/html') ?? '';
         const text = event.clipboardData?.getData('text/plain') ?? '';
+        // A screenshot, or a picture copied out of another program: files and no
+        // text. Copied text that merely comes with a rendering of itself is text.
+        const files = imageFilesOf(event.clipboardData);
+        if (files.length > 0 && text.trim() === '') return uploadFiles.current(files);
         if (html.trim() !== '' || !looksLikeMarkdown(text)) return false;
         if (view.state.selection.$from.parent.type.spec.code) return false;
         return controller.pasteMarkdown(text);
+      },
+      handleDrop: (view, event, _slice, moved) => {
+        // `moved` is a drag inside the document, which is the editor's own business.
+        if (moved) return false;
+        const files = imageFilesOf(event.dataTransfer);
+        if (files.length === 0) return false;
+        const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+        return uploadFiles.current(files, at);
       },
     },
     onCreate: ({ editor: created }) =>
@@ -303,6 +324,32 @@ export default function VisualEditor({
     };
   }, [controller, editor, handleRef]);
 
+  useEffect(() => {
+    uploadFiles.current = (files, position) => {
+      const target = controller.editor;
+      // Handled even with nowhere to upload to: the alternative is the browser
+      // navigating away from a half-written page to show the dropped file.
+      if (!imageUploadEndpoint || !target || !target.isEditable) return true;
+      void (async () => {
+        setUploadNotice('uploading');
+        let at = position;
+        for (const file of files) {
+          const result = await uploadImage(imageUploadEndpoint, file);
+          if (!result.ok) {
+            setUploadNotice(result.error);
+            return;
+          }
+          const image = { type: 'image', attrs: { src: result.url, alt: altFromFileName(file.name) } };
+          const where = Math.min(at ?? target.state.selection.from, target.state.doc.content.size);
+          target.chain().focus().insertContentAt(where, image).run();
+          at = undefined;
+        }
+        setUploadNotice(null);
+      })();
+      return true;
+    };
+  }, [controller, imageUploadEndpoint]);
+
   // A paused session is read-only: what is typed into it could not be sent.
   const editable = session?.editable ?? true;
   useEffect(() => {
@@ -330,6 +377,16 @@ export default function VisualEditor({
   return (
     <EditorUiContext.Provider value={ui}>
       <Toolbar editor={editor} actions={controller.blockActions} onLink={controller.openLink} />
+      {uploadNotice === 'uploading' ? (
+        <p role="status" className="border-b border-border px-4 py-2 text-sm text-muted-foreground">
+          {t('imageUploading')}
+        </p>
+      ) : null}
+      {uploadNotice !== null && uploadNotice !== 'uploading' ? (
+        <p role="alert" className="border-b border-border px-4 py-2 text-sm text-destructive">
+          {t(`imageUploadError_${uploadNotice}`)}
+        </p>
+      ) : null}
       <EditorContent editor={editor} />
       <SlashMenu
         state={slash}
@@ -351,6 +408,7 @@ export default function VisualEditor({
       />
       <ImageDialog
         open={dialog.kind === 'image'}
+        uploadEndpoint={imageUploadEndpoint}
         onCancel={close}
         onSave={({ src, alt }) => {
           close();

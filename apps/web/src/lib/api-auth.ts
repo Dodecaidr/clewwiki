@@ -8,7 +8,7 @@ import { lookupAgentToken, touchAgentToken } from './agent-tokens';
 import { auth } from './auth';
 import { recordAudit } from './audit';
 import { getAuditSampler } from './audit-sampler';
-import { checkSessionMutation } from './csrf';
+import { checkImageUploadMutation, checkSessionMutation } from './csrf';
 import { visibleSpaceIdsForUser } from './spaces/visibility';
 import { getAgentRateLimitMax, getAgentRateLimitWindowSeconds, getAuthBaseUrl } from './env';
 import { TokenBucketRateLimiter } from './rate-limit';
@@ -88,18 +88,32 @@ const UNAUTHORIZED_HEADERS = { 'WWW-Authenticate': 'Bearer realm="clewwiki"' } a
  * ever evaluated as a token — it never silently falls back to a session cookie,
  * which would let a rejected token borrow the browser's identity.
  */
-export async function authenticateRequest(request: Request): Promise<AuthResult> {
+export interface AuthenticateOptions {
+  /**
+   * What a cookie-authenticated mutation's body is. Everything is JSON except
+   * the image upload, whose body is the image; it has a check of its own.
+   */
+  body?: 'json' | 'image';
+}
+
+export async function authenticateRequest(
+  request: Request,
+  options: AuthenticateOptions = {},
+): Promise<AuthResult> {
   const bearer = extractBearerToken(request.headers.get('authorization'));
   if (bearer !== null) {
     return authenticateAgent(request, bearer);
   }
-  return authenticateSession(request);
+  return authenticateSession(request, options);
 }
 
-async function authenticateSession(request: Request): Promise<AuthResult> {
+async function authenticateSession(request: Request, options: AuthenticateOptions): Promise<AuthResult> {
   // Before the session is even read: a forged cross-site request should learn
   // nothing, not even whether the cookie it borrowed is valid.
-  const csrf = checkSessionMutation(request, getAuthBaseUrl());
+  const csrf =
+    options.body === 'image'
+      ? checkImageUploadMutation(request, getAuthBaseUrl())
+      : checkSessionMutation(request, getAuthBaseUrl());
   if (!csrf.ok) {
     return { ok: false, response: errorResponse(403, 'forbidden', csrf.message) };
   }

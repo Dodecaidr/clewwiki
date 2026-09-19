@@ -311,8 +311,31 @@ partly in place, the gap is named rather than implied away.
   all of it is stripped. Chart JSON is parsed as data — no expressions, no
   functions — and every label is escaped as text. Mermaid still runs only in
   the reader's browser with `securityLevel: 'strict'`.
-- **Images from other sites.** Pages reference images by address; there are no
-  uploads. The Content-Security-Policy allows images from the instance itself
+- **Uploaded images.** A page takes PNG, JPEG, GIF and WebP uploads, and
+  nothing else: no SVG, which is a document that can carry script, and no other
+  attachment. Serving bytes a user supplied from the application's own origin
+  is the risk, and it is fenced in on both ends. On the way in, the type is
+  detected from the file's signature — the declared type and the file name are
+  never used — so an upload is one of four formats or it is refused; the size
+  is refused from the declared `Content-Length` and again while reading
+  (`IMAGE_MAX_UPLOAD_MB`, 5, at most 10, and a `CHECK` on the table); a
+  workspace's images are capped together (`IMAGE_STORE_MAX_MB`); uploads are
+  rate limited per actor; and `IMAGE_MAX_UPLOAD_MB=0` switches the whole
+  surface off. On the way out, an image is served as its detected type only,
+  with `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src
+  'none'; sandbox` and `Cross-Origin-Resource-Policy: same-origin`, so bytes
+  that are also a valid HTML document reach a browser as a picture or not at
+  all. A cookie-authenticated upload needs a matching `Origin` outright and an
+  `image/*` content type, which no plain HTML form can send. An image is
+  visible to whoever can see its page — in whichever space the page is now,
+  and not at all once the page is deleted — and is always revalidated, so a
+  browser's copy stops being used when its page moves out of the reader's
+  sight. One uploaded from the new-page form is visible to its uploader alone
+  until that same actor's new page claims it. Known limits: images are not
+  re-encoded, so metadata inside a file (a photograph's location, for one)
+  stays in it, and pixel dimensions are not bounded separately from bytes.
+- **Images from other sites.** Pages can also reference images by address.
+  The Content-Security-Policy allows images from the instance itself
   only, so a page cannot make every reader's browser contact a third-party
   server that learns who read it and when (a tracking pixel). An operator who
   accepts that can set `ALLOW_EXTERNAL_IMAGES=true`, which adds `https:` to
@@ -463,11 +486,11 @@ partly in place, the gap is named rather than implied away.
   cover this threat model.
 - SSO/OIDC — a scope decision, not a security gap; credential-based login
   already satisfies the self-hosted-without-a-cloud-provider requirement.
-- Attachment and image storage — no import uploads files, and no endpoint
-  accepts one outside the import ZIP it parses in memory. An imported image
-  keeps pointing at the system it came from, or is reported as a warning. A
-  file store is a different threat surface (content sniffing, serving
-  attacker-supplied bytes from this origin) and is deliberately not opened here.
+- Attachments other than images, and images carried in by an import. Pages
+  take raster image uploads, under the controls described above; any other
+  file type is a wider surface (content sniffing, active documents served from
+  this origin) and stays closed. No import uploads files: an imported image
+  keeps pointing at the system it came from, or is reported as a warning.
 - Optical character recognition for scanned PDFs — a PDF with no extractable
   text is refused rather than passed to an external service.
 

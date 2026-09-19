@@ -77,3 +77,31 @@ export function checkUploadMutation(request: RequestLike, baseUrl: string): Csrf
   }
   return { ok: true };
 }
+
+/** The content types an image upload may declare. What the image *is* gets decided from its bytes. */
+const IMAGE_UPLOAD_TYPE = /^image\/(png|jpeg|gif|webp)\s*(;|$)/i;
+
+/**
+ * The check for an image upload, whose body is the image itself.
+ *
+ * None of these content types is one a plain HTML form can send, so a
+ * cross-origin page cannot make this request without a preflight, which this
+ * application never answers. As with the multipart upload, the content type
+ * cannot be JSON and the origin half carries the check: a matching `Origin` is
+ * required outright.
+ */
+export function checkImageUploadMutation(request: RequestLike, baseUrl: string): CsrfDecision {
+  if (SAFE_METHODS.has(request.method.toUpperCase())) return { ok: true };
+
+  const expected = originOf(baseUrl);
+  const origin = request.headers.get('origin');
+  if (origin === null || expected === null || origin !== expected) {
+    return { ok: false, message: 'Cross-origin request refused for a cookie-authenticated upload' };
+  }
+
+  const contentType = request.headers.get('content-type') ?? '';
+  if (!IMAGE_UPLOAD_TYPE.test(contentType.trim())) {
+    return { ok: false, message: 'Content-Type must be image/png, image/jpeg, image/gif or image/webp' };
+  }
+  return { ok: true };
+}

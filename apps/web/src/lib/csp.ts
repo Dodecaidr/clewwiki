@@ -6,7 +6,7 @@
  * development, no plugins, no framing.
  *
  * Images are the one directive an operator may widen. Pages can reference an
- * image by address — there are no uploads — and by default only this origin's
+ * image by address as well as upload one, and by default only this origin's
  * images load, so a page cannot make every reader's browser call a third-party
  * server (a tracking pixel, or an address that learns who read what and when).
  * `ALLOW_EXTERNAL_IMAGES=true` allows images from any `https:` origin for an

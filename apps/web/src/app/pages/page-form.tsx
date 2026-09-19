@@ -381,6 +381,11 @@ export function PageForm({ mode, spaceKey, parents, initial, cancelHref }: PageF
               handleRef={bodyEditor}
               renderPreview={renderPreviewAction}
               session={bodySession}
+              imageUploadEndpoint={
+                initial.pageId
+                  ? `/api/v1/pages/${initial.pageId}/images`
+                  : `/api/v1/spaces/${encodeURIComponent(spaceKey)}/images`
+              }
             />
           )}
         </div>
