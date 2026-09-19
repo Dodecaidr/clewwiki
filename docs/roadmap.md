@@ -269,6 +269,20 @@ phase. Swift and TypeScript are, the pipeline above the grammar is
 language-independent, and adding Kotlin is a declaration table plus a
 `.wasm` file rather than a change to the mechanism.
 
+**Kotlin — added since.** It was what that paragraph said it would be: one
+table in `declarations.ts` and the grammar from
+`@tree-sitter-grammars/tree-sitter-kotlin`, which ships a prebuilt `.wasm`, with
+nothing above the grammar touched. Three choices are Kotlin's own. A function's
+identity carries its parameter *names* — `pay(items)` — because overloads are
+everyday Kotlin and a name is one token where a type can be a line of generics;
+two overloads that differ only by type share an identity. An extension carries
+its receiver, `String.slug()`, since the same name on different receivers is
+the normal case. And a companion object is looked through, so its members are
+`Checkout.create(gateway)`, the way Kotlin code reaches them.
+The grammar's package lists an update-checking tool among its runtime
+dependencies; nothing here uses it, and an override leaves it out of the
+install, as its native build is left out by `ignoredBuiltDependencies`.
+
 A fourth thing is worth stating as a limitation rather than a deviation:
 the repository-wide stages of the ladder read at most four thousand
 source files per check. Past that ceiling a move out of the indexed

@@ -280,8 +280,8 @@ line-range anchors produced ~50%):
   declaration (configuration, prose) keep a `line_range` plus hash; the
   share of line-range anchors per repository is logged as an early signal
   of eroding trust.
-- **Parsers via tree-sitter, compiled to WebAssembly.** Swift and
-  TypeScript/TSX ship; Kotlin is the next table. Adding a language means
+- **Parsers via tree-sitter, compiled to WebAssembly.** Swift,
+  TypeScript/TSX and Kotlin ship. Adding a language means
   adding its declaration node-type table and a grammar file, not touching
   the pipeline. The grammars are WebAssembly rather than native bindings
   so that the runtime image stays a plain `node:22-slim` with no compiler

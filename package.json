@@ -8,10 +8,11 @@
   },
   "pnpm": {
     "overrides": {
-      "lodash-es": "^4.18.0"
+      "lodash-es": "^4.18.0",
+      "@tree-sitter-grammars/tree-sitter-kotlin>npm-check-updates": "-"
     },
     "onlyBuiltDependencies": ["@parcel/watcher", "@swc/core", "esbuild", "unrs-resolver"],
-    "ignoredBuiltDependencies": ["tree-sitter-javascript", "tree-sitter-typescript"]
+    "ignoredBuiltDependencies": ["@tree-sitter-grammars/tree-sitter-kotlin", "tree-sitter-javascript", "tree-sitter-typescript"]
   },
   "scripts": {
     "dev": "pnpm --filter @clewwiki/web dev",
