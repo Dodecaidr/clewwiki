@@ -9,6 +9,11 @@ tagged.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-19
+
+Imports bring their images with them. Upgrading runs migration
+`0013_import_images`.
+
 ### Added
 
 - A Notion export and a Markdown archive bring their images with them. PNG,
@@ -544,7 +549,8 @@ image are published from this tag; earlier commits were development on
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Dodecaidr/clewwiki/releases/tag/v0.1.0
