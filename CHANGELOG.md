@@ -9,6 +9,14 @@ tagged.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-19
+
+Working together: several people in one page at once, spaces that only their
+members can see, pages that move between spaces, images in pages, and anchors
+for Kotlin. Migrations `0010_collab`, `0011_space_members` and `0012_images` are
+applied on start; nothing in an existing instance changes until a space is
+restricted or an image is uploaded.
+
 ### Added
 
 - **Kotlin anchors.** `.kt` and `.kts` files are parsed like Swift and
@@ -488,5 +496,6 @@ image are published from this tag; earlier commits were development on
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Dodecaidr/clewwiki/releases/tag/v0.1.0

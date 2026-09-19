@@ -83,7 +83,7 @@ The first run pulls the published image
 healthcheck, and starts the application, which applies its own database
 migrations before serving the first request. **Pin a version in production**
 rather than tracking `latest` — set `CLEWWIKI_VERSION` in `.env` to a specific
-release tag (e.g. `0.1.0`) so an upgrade is a deliberate `docker compose pull`
+release tag (e.g. `0.2.0`) so an upgrade is a deliberate `docker compose pull`
 rather than whatever `latest` happens to point at that day. Images and the npm
 package are published starting with the first tagged release; before that,
 [build from source](#build-from-source) instead.
