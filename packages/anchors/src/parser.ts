@@ -39,6 +39,7 @@ const GRAMMAR_FILE_NAMES: Record<AnchorLanguage, string> = {
   swift: 'tree-sitter-swift.wasm',
   typescript: 'tree-sitter-typescript.wasm',
   tsx: 'tree-sitter-tsx.wasm',
+  kotlin: 'tree-sitter-kotlin.wasm',
 };
 
 const RUNTIME_FILE_NAME = 'web-tree-sitter.wasm';
@@ -57,6 +58,7 @@ const WASM_SOURCES: Record<string, readonly string[]> = {
   'tree-sitter-swift.wasm': ['@repomix/tree-sitter-wasms', 'out', 'tree-sitter-swift.wasm'],
   'tree-sitter-typescript.wasm': ['tree-sitter-typescript', 'tree-sitter-typescript.wasm'],
   'tree-sitter-tsx.wasm': ['tree-sitter-typescript', 'tree-sitter-tsx.wasm'],
+  'tree-sitter-kotlin.wasm': ['@tree-sitter-grammars/tree-sitter-kotlin', 'tree-sitter-kotlin.wasm'],
 };
 
 /**

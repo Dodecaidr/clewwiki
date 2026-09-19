@@ -1484,8 +1484,11 @@ curl -sS -X POST -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
 
 The declaration is resolved against the repository before the anchor is stored,
 so a misspelled symbol is refused there and then rather than reported as `lost`
-a week later. Swift, TypeScript and TSX have declaration tables today; any other
-file can still be anchored by line range.
+a week later. Swift, TypeScript, TSX and Kotlin have declaration tables today; any
+other file can still be anchored by line range. A Kotlin function is named with
+its parameter names, `Checkout.pay(items)`, which is what tells overloads apart;
+an extension carries its receiver, `String.slug()`; and a companion's members
+are members of the class, `Checkout.create(gateway)`.
 
 **Check** recomputes every anchor on a page against the repository and stores
 the result, so it is a `POST` and needs `pages:write`:

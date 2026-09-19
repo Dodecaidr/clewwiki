@@ -11,6 +11,13 @@ tagged.
 
 ### Added
 
+- **Kotlin anchors.** `.kt` and `.kts` files are parsed like Swift and
+  TypeScript, so a page can be anchored to a Kotlin class, interface, object,
+  enum, function, property, type alias or secondary constructor, and is told
+  apart from a line-range anchor the same way. A function is named with its
+  parameter names — `Checkout.pay(items)` — which is what separates overloads;
+  an extension carries its receiver, `String.slug()`; a companion's members are
+  members of the class, `Checkout.create(gateway)`.
 - **Image uploads.** Pages take PNG, JPEG, GIF and WebP images: choose a file in
   the editor's **Image** dialog, paste a screenshot, or drop a file into the
   page. Over REST, `POST /api/v1/pages/{id}/images` with the image as the request

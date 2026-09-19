@@ -8,7 +8,7 @@
  */
 
 /** Languages with a declaration table and a grammar shipped as WebAssembly. */
-export const ANCHOR_LANGUAGES = ['swift', 'typescript', 'tsx'] as const;
+export const ANCHOR_LANGUAGES = ['swift', 'typescript', 'tsx', 'kotlin'] as const;
 
 export type AnchorLanguage = (typeof ANCHOR_LANGUAGES)[number];
 

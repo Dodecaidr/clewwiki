@@ -13,6 +13,8 @@ const BY_EXTENSION: Record<string, AnchorLanguage> = {
   '.mts': 'typescript',
   '.cts': 'typescript',
   '.tsx': 'tsx',
+  '.kt': 'kotlin',
+  '.kts': 'kotlin',
 };
 
 export function languageForPath(filePath: string): AnchorLanguage | null {

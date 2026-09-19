@@ -20,6 +20,7 @@ const SPECIFIERS = [
   'tree-sitter-typescript/tree-sitter-typescript.wasm',
   'tree-sitter-typescript/tree-sitter-tsx.wasm',
   '@repomix/tree-sitter-wasms/out/tree-sitter-swift.wasm',
+  '@tree-sitter-grammars/tree-sitter-kotlin/tree-sitter-kotlin.wasm',
 ];
 
 const target = process.argv[2];

@@ -727,4 +727,79 @@ describe.skipIf(!probe.reachable)('anchors REST API', () => {
     // The share describes this space's anchors only.
     expect(checked.json.fallback_share.total).toBe(1);
   }, 120_000);
+  it('anchors Kotlin declarations, overloads and extensions included', async () => {
+    const kotlinRepo = path.join(scratch, 'android');
+    const file = 'app/src/main/kotlin/shop/Checkout.kt';
+    const source = [
+      'package shop',
+      '',
+      'fun String.slug(): String = lowercase()',
+      '',
+      'class Checkout(private val gateway: Gateway) {',
+      '    fun pay(items: List<Item>): Receipt {',
+      '        val amount = items.sumOf { it.price }',
+      '        return gateway.charge(amount)',
+      '    }',
+      '',
+      '    fun pay(item: Item): Receipt = gateway.charge(item.price)',
+      '}',
+      '',
+    ].join('\n');
+    const commit = (text: string, message: string) => {
+      mkdirSync(path.dirname(path.join(kotlinRepo, file)), { recursive: true });
+      writeFileSync(path.join(kotlinRepo, file), text, 'utf8');
+      git(['add', '-A'], kotlinRepo);
+      git(['-c', 'user.email=tests@clewwiki.invalid', '-c', 'user.name=clewwiki tests', 'commit', '-q', '-m', message], kotlinRepo);
+    };
+    mkdirSync(kotlinRepo, { recursive: true });
+    git(['init', '-q', '-b', 'main', '.'], kotlinRepo);
+    commit(source, 'checkout');
+
+    await db.insert(schema.spaces).values({
+      workspaceId,
+      key: 'ANDROID',
+      name: 'Android',
+      settings: { repository: { url: `file://${kotlinRepo}`, default_ref: 'main' } },
+    });
+    const made = await pagesRoute.POST(
+      request(readWrite, '/api/v1/pages', {
+        method: 'POST',
+        body: JSON.stringify({ space: 'ANDROID', title: 'Checkout', path: `/${suiteTag}-checkout` }),
+      }),
+    );
+    expect(made.status).toBe(201);
+    const kotlinPage = ((await made.json()) as JsonRecord).page_id as string;
+
+    const anchorOn = async (qualifiedName: string) => {
+      const response = await anchorsRoute.POST(
+        request(readWrite, `/api/v1/pages/${kotlinPage}/anchors`, {
+          method: 'POST',
+          body: JSON.stringify({ file, qualified_name: qualifiedName }),
+        }),
+        params(kotlinPage),
+      );
+      return { status: response.status, json: (await response.json()) as JsonRecord };
+    };
+
+    const overload = await anchorOn('Checkout.pay(items)');
+    expect(overload.status, JSON.stringify(overload.json)).toBe(201);
+    expect(overload.json.language).toBe('kotlin');
+    expect(overload.json.kind).toBe('fun');
+    expect((await anchorOn('Checkout.pay(item)')).status).toBe(201);
+    expect((await anchorOn('String.slug()')).status).toBe(201);
+    // Without its parameters an overloaded name says nothing about which one.
+    expect((await anchorOn('Checkout.pay')).status).toBe(400);
+
+    commit(source.replace('items.sumOf { it.price }', 'items.sumOf { it.price } + 1'), 'surcharge');
+    const checked = await check(readWrite, kotlinPage);
+    expect(checked.status).toBe(200);
+    const states = Object.fromEntries(
+      (checked.json.anchors as JsonRecord[]).map((anchor) => [anchor.qualified_name, anchor.state]),
+    );
+    expect(states).toEqual({
+      'Checkout.pay(items)': 'stale',
+      'Checkout.pay(item)': 'fresh',
+      'String.slug()': 'fresh',
+    });
+  }, 120_000);
 });

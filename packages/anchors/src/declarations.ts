@@ -230,10 +230,116 @@ const typescriptTable: LanguageTable = {
   },
 };
 
+/* ------------------------------------------------------------------ */
+/* Kotlin                                                              */
+/* ------------------------------------------------------------------ */
+
+const KOTLIN_RECEIVER_TYPES = new Set(['user_type', 'nullable_type', 'parenthesized_type', 'function_type']);
+
+/**
+ * The receiver of an extension, as written: `String` in `fun String.slug()`.
+ * It is part of the identity — `String.slug()` and `Path.slug()` are unrelated
+ * functions that happen to share a name, and commonly share a file too.
+ */
+function kotlinReceiver(node: Node): string | null {
+  let previous: Node | null = null;
+  for (let index = 0; index < node.childCount; index += 1) {
+    const child = node.child(index);
+    if (!child) continue;
+    if (child.type === '.') {
+      return previous && KOTLIN_RECEIVER_TYPES.has(previous.type) ? previous.text.replace(/\s+/g, '') : null;
+    }
+    // The receiver comes before the name; past it there is nothing to find.
+    if (child.type === 'function_value_parameters' || child.type === 'variable_declaration') return null;
+    if (child.isNamed) previous = child;
+  }
+  return null;
+}
+
+/**
+ * Parameter names, in order: `pay(items)` and `pay(item)` are two overloads.
+ * Names rather than types, because a name is one token and a type can be a
+ * page of generics; two overloads that differ only by type share an identity,
+ * and the first in the file is the one an anchor finds.
+ */
+function kotlinParameterNames(node: Node): string {
+  const list = childOfType(node, new Set(['function_value_parameters']));
+  const names: string[] = [];
+  if (list) {
+    for (let index = 0; index < list.childCount; index += 1) {
+      const child = list.child(index);
+      if (!child || child.type !== 'parameter') continue;
+      const name = childOfType(child, new Set(['identifier']));
+      names.push(name ? name.text : '_');
+    }
+  }
+  return `(${names.join(', ')})`;
+}
+
+function kotlinWithReceiver(node: Node, name: string): string {
+  const receiver = kotlinReceiver(node);
+  return receiver === null ? name : `${receiver}.${name}`;
+}
+
+const kotlinTable: LanguageTable = {
+  containerBodyTypes: new Set(['class_body', 'enum_class_body']),
+  bodyTypes: new Set(['function_body', 'class_body', 'enum_class_body', 'block', 'getter']),
+  containerKinds: new Set(['class', 'interface', 'object', 'enum']),
+  // A companion's members are reached the way Kotlin code reaches them, as
+  // members of the class: `Checkout.create`, not `Checkout.Companion.create`.
+  transparentTypes: new Set(['companion_object', 'class_body']),
+  kindOf(node) {
+    switch (node.type) {
+      case 'class_declaration': {
+        let kind = 'class';
+        for (let index = 0; index < node.childCount; index += 1) {
+          const child = node.child(index);
+          if (!child) continue;
+          if (child.type === 'interface') return 'interface';
+          if (child.type === 'modifiers' && /(^|\s)enum(\s|$)/.test(child.text)) kind = 'enum';
+        }
+        return kind;
+      }
+      case 'object_declaration':
+        return 'object';
+      case 'function_declaration':
+        return 'fun';
+      case 'property_declaration': {
+        for (let index = 0; index < node.childCount; index += 1) {
+          const child = node.child(index);
+          if (child && (child.type === 'val' || child.type === 'var')) return child.type;
+        }
+        return 'val';
+      }
+      case 'type_alias':
+        return 'typealias';
+      case 'secondary_constructor':
+        return 'constructor';
+      default:
+        return null;
+    }
+  },
+  nameOf(node, kind) {
+    if (kind === 'constructor') return `constructor${kotlinParameterNames(node)}`;
+    if (kind === 'typealias') return fieldNode(node, 'type')?.text ?? null;
+    if (kind === 'val' || kind === 'var') {
+      // `val (a, b) = pair` binds a pattern; there is no one declaration to anchor to.
+      const declared = childOfType(node, new Set(['variable_declaration']));
+      const name = declared ? childOfType(declared, new Set(['identifier'])) : null;
+      return name ? kotlinWithReceiver(node, name.text) : null;
+    }
+    const named = fieldNode(node, 'name');
+    if (!named) return null;
+    if (kind === 'fun') return kotlinWithReceiver(node, `${named.text}${kotlinParameterNames(node)}`);
+    return named.text;
+  },
+};
+
 const TABLES: Record<AnchorLanguage, LanguageTable> = {
   swift: swiftTable,
   typescript: typescriptTable,
   tsx: typescriptTable,
+  kotlin: kotlinTable,
 };
 
 /* ------------------------------------------------------------------ */

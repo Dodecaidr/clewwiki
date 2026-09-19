@@ -6,6 +6,7 @@ settings:
 
 overrides:
   lodash-es: ^4.18.0
+  '@tree-sitter-grammars/tree-sitter-kotlin>npm-check-updates': '-'
 
 importers:
 
@@ -185,6 +186,9 @@ importers:
       '@repomix/tree-sitter-wasms':
         specifier: ^0.1.17
         version: 0.1.17
+      '@tree-sitter-grammars/tree-sitter-kotlin':
+        specifier: 1.1.0
+        version: 1.1.0
       tree-sitter-typescript:
         specifier: ^0.23.2
         version: 0.23.2
@@ -1953,6 +1957,14 @@ packages:
       prosemirror-view: ^1.9.10
       y-protocols: ^1.0.1
       yjs: ^13.5.38
+
+  '@tree-sitter-grammars/tree-sitter-kotlin@1.1.0':
+    resolution: {integrity: sha512-vlVXaxEE8t2kpJgfZpa8XVvxcnKw9AYtRTgy7KWjsDmAsadk06RxAT80IXOgGQnmM9i/orQn1nD84gPNUHu6DQ==}
+    peerDependencies:
+      tree-sitter: ^0.22.4
+    peerDependenciesMeta:
+      tree-sitter:
+        optional: true
 
   '@tybys/wasm-util@0.10.4':
     resolution: {integrity: sha512-W3c4gRigFS0T/Ma4qIYF3GDAc5AQdHb1yL5znJT1Zv1YaD9Kitx656wBjvr19qbiosmZT8lWDM5BEMynUqX65A==}
@@ -6277,6 +6289,11 @@ snapshots:
       prosemirror-view: 1.42.3
       y-protocols: 1.0.6(yjs@13.6.32)
       yjs: 13.6.32
+
+  '@tree-sitter-grammars/tree-sitter-kotlin@1.1.0':
+    dependencies:
+      node-addon-api: 8.9.2
+      node-gyp-build: 4.8.4
 
   '@tybys/wasm-util@0.10.4':
     dependencies:
