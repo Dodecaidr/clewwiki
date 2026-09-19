@@ -28,7 +28,8 @@ partly in place, the gap is named rather than implied away.
   archiving a space and its repository settings, token issuance) is reserved to
   a human administrator, and no scope set
   reaches it. Deleting a page needs `pages:delete` on top of `pages:write`,
-  because one call removes a subtree.
+  because one call removes a subtree; moving a page to another space needs the
+  same, because for the space it leaves that is what it is.
 - **Token TTL.** Tokens past `expires_at` are rejected at the authentication
   layer, before any handler runs. The token form preselects a 30-day lifetime;
   "no expiry" is still available, as the last choice, and has to be picked
@@ -50,7 +51,11 @@ partly in place, the gap is named rather than implied away.
   answer as another workspace. A `space` parameter naming a space outside the
   list is `404` too, and lists, the tree, search and presence are filtered by
   the list in their queries. Pages cannot be paired across spaces, so a pairing
-  never reaches into a space the caller cannot see. The audit log covers every
+  never reaches into a space the caller cannot see. A page moves to another
+  space only when the caller can see both, and an unseen target is `404`; its
+  comments and reviews change space in the same transaction, since their
+  visibility is decided on their own `space_id`, and a pair the move would
+  split is broken rather than left spanning two spaces. The audit log covers every
   space, so a restricted token cannot read it at all, whatever its scopes.
   Issuing a restricted token requires at least one space of the same
   workspace. A space created later is not added to an existing restriction.

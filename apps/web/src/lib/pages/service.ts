@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
-import { claims, pageRevisions, pages, spaces } from '@clewwiki/db';
+import { claims, pageComments, pageRevisions, pageReviews, pages, spaces } from '@clewwiki/db';
 import type { SQL } from 'drizzle-orm';
 import type { ActorKind, PageKind } from '@clewwiki/db';
 
@@ -1041,6 +1041,394 @@ async function resolveMoveTarget(
   return target;
 }
 
+export interface MovePageToSpaceInput {
+  workspaceId: string;
+  pageId: string;
+  actor: PageActor;
+  /** The space the page goes to. It must be another space than the page's own. */
+  targetSpaceId: string;
+  /** The parent in the target space. Exclusive with `parentPath`; neither means top level. */
+  parentId?: string | null;
+  parentPath?: string;
+}
+
+export interface MovePageToSpaceResult {
+  page: PageRecord;
+  fromSpaceId: string;
+  previousPath: string;
+  /** The page and everything below it. */
+  moved: number;
+  /** Pages, on either side, whose pairing was broken because the pair would have spanned two spaces. */
+  unlinked: string[];
+}
+
+/** How many colliding paths or blocking claims a refusal names. */
+const MOVE_DETAIL_LIMIT = 20;
+
+/**
+ * Moves a page, with everything below it, into another space.
+ *
+ * A move inside a space is an ordinary write and goes through `updatePage`.
+ * This is the other kind: the subtree leaves one tree and joins another, and
+ * for anybody who can see only one of the two spaces it is a delete or an
+ * import. It therefore follows the rules of a subtree delete rather than of a
+ * write. It takes no claim of its own, and someone else's live claim anywhere
+ * in the subtree refuses it with `conflict`, naming the claims — a lease means
+ * somebody is writing there, possibly somebody who cannot follow the page to
+ * where it is going. There is no administrator override: a delete can be
+ * undone by a restore, while a move under a writer would hand them a `404` in
+ * the middle of their edit. The caller's own claims stay valid, since a claim
+ * names a page and the page keeps its id.
+ *
+ * Content does not change, so no revision is written and versions and hashes
+ * stay as they were: history, comments and pending reviews travel with the
+ * page. What cannot travel is refused or undone, and reported:
+ *
+ * - a page the source space designates — its home page, its rules, the parent
+ *   of its decisions — refuses the move until the space points elsewhere,
+ *   because silently leaving a project without its rules is worse than a
+ *   refusal that says what to do;
+ * - a pairing whose other half stays behind is broken on both sides, as pairs
+ *   do not span spaces, and the ids are returned;
+ * - anchors stay with their pages and are from then on checked against the
+ *   target space's repository.
+ *
+ * Soft-deleted pages below the moved page stay in the source space, as they do
+ * on a move inside a space, and `restorePage` refuses them afterwards because
+ * their parent is no longer there.
+ *
+ * Whether the caller may see both spaces is the handler's check.
+ */
+export async function movePageToSpace(input: MovePageToSpaceInput): Promise<MovePageToSpaceResult> {
+  if (typeof input.parentId === 'string' && input.parentPath !== undefined) {
+    throw new PageServiceError('validation', 'Give parent_id or parent_path, not both');
+  }
+
+  const db = getDatabase();
+  let result: MovePageToSpaceResult;
+  let movedPageIds: string[] = [];
+
+  try {
+    result = await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select(pageColumns)
+        .from(pages)
+        .where(
+          and(
+            eq(pages.id, input.pageId),
+            eq(pages.workspaceId, input.workspaceId),
+            isNull(pages.deletedAt),
+          ),
+        )
+        .limit(1)
+        .for('update');
+      if (!current) throw new PageServiceError('not_found', 'Page not found');
+
+      if (current.spaceId === input.targetSpaceId) {
+        throw new PageServiceError(
+          'validation',
+          'The page is already in this space; a move inside a space is a page update with parent_id or path',
+        );
+      }
+
+      // Both space rows are locked, in id order so two opposite moves cannot
+      // deadlock: the source so that nobody designates a page of the subtree
+      // while it leaves, the target so that it is not archived under the move.
+      const spaceRows = await tx
+        .select({
+          id: spaces.id,
+          key: spaces.key,
+          archivedAt: spaces.archivedAt,
+          homePageId: spaces.homePageId,
+          rulesPageId: spaces.rulesPageId,
+          settings: spaces.settings,
+        })
+        .from(spaces)
+        .where(
+          and(
+            eq(spaces.workspaceId, input.workspaceId),
+            inArray(spaces.id, [current.spaceId, input.targetSpaceId]),
+          ),
+        )
+        .orderBy(asc(spaces.id))
+        .for('update');
+      const source = spaceRows.find((row) => row.id === current.spaceId);
+      const target = spaceRows.find((row) => row.id === input.targetSpaceId);
+      if (!source) throw new PageServiceError('not_found', 'Page not found');
+      if (!target) throw new PageServiceError('not_found', 'Space not found');
+      if (target.archivedAt !== null) {
+        throw new PageServiceError('conflict', 'This space is archived and takes no new pages', {
+          space: target.key,
+        });
+      }
+
+      const subtree = await tx
+        .select({ id: pages.id, path: pages.path, linkedPageId: pages.linkedPageId })
+        .from(pages)
+        .where(
+          and(
+            eq(pages.workspaceId, input.workspaceId),
+            eq(pages.spaceId, current.spaceId),
+            isNull(pages.deletedAt),
+            sql`(${pages.id} = ${current.id} or ${pages.path} like ${likePrefixPattern(current.path)} escape '\\')`,
+          ),
+        )
+        .for('update');
+      const movedIds = subtree.map((row) => row.id);
+      const movedSet = new Set(movedIds);
+
+      const decisionsPageId =
+        typeof source.settings?.decisions_page_id === 'string' ? source.settings.decisions_page_id : null;
+      const designated = [
+        { role: 'home_page', pageId: source.homePageId },
+        { role: 'rules_page', pageId: source.rulesPageId },
+        { role: 'decisions_page', pageId: decisionsPageId },
+      ].filter((entry): entry is { role: string; pageId: string } =>
+        entry.pageId !== null && movedSet.has(entry.pageId),
+      );
+      if (designated.length > 0) {
+        throw new PageServiceError(
+          'conflict',
+          'The space still uses a page being moved; choose another in the space settings first',
+          {
+            space: source.key,
+            designated: designated.map((entry) => ({ role: entry.role, page_id: entry.pageId })),
+          },
+        );
+      }
+
+      const now = new Date();
+      const held = await tx
+        .select({
+          claimId: claims.id,
+          pageId: claims.pageId,
+          holderType: claims.holderType,
+          holderId: claims.holderId,
+          holderLabel: claims.holderLabel,
+          expiresAt: claims.expiresAt,
+        })
+        .from(claims)
+        .where(
+          and(
+            eq(claims.workspaceId, input.workspaceId),
+            inArray(claims.pageId, movedIds),
+            isNull(claims.releasedAt),
+            gt(claims.expiresAt, now),
+          ),
+        );
+      const others = held.filter(
+        (claim) => claim.holderType !== input.actor.type || claim.holderId !== input.actor.id,
+      );
+      if (others.length > 0) {
+        throw new PageServiceError(
+          'conflict',
+          'Another actor holds a claim on this page or below it; it can be moved once they are done',
+          {
+            claims: others.slice(0, MOVE_DETAIL_LIMIT).map((claim) => ({
+              claim_id: claim.claimId,
+              page_id: claim.pageId,
+              held_by: claim.holderLabel,
+              actor_type: claim.holderType,
+              expires_at: claim.expiresAt.toISOString(),
+            })),
+          },
+        );
+      }
+
+      let parent: { id: string; path: string } | null = null;
+      if (typeof input.parentId === 'string' || input.parentPath !== undefined) {
+        let parentPath: string | undefined;
+        try {
+          parentPath = input.parentPath === undefined ? undefined : normalizePath(input.parentPath);
+        } catch (error) {
+          throw toServiceError(error);
+        }
+        const [row] = await tx
+          .select({ id: pages.id, path: pages.path })
+          .from(pages)
+          .where(
+            and(
+              eq(pages.workspaceId, input.workspaceId),
+              // Looked up inside the target space only, so a parent anywhere
+              // else is "not found" and says nothing about where it is.
+              eq(pages.spaceId, target.id),
+              isNull(pages.deletedAt),
+              parentPath === undefined
+                ? eq(pages.id, input.parentId as string)
+                : eq(pages.path, parentPath),
+            ),
+          )
+          .limit(1)
+          .for('update');
+        if (!row) throw new PageServiceError('not_found', 'Parent page not found');
+        parent = row;
+      }
+
+      // Every path of the subtree is rebuilt and validated, not only the
+      // root's: a deep subtree put under a deep parent can pass the depth or
+      // length limit somewhere below the page that was asked about.
+      const newRootPath = joinPath(parent?.path ?? null, lastSegment(current.path));
+      try {
+        for (const row of subtree) {
+          normalizePath(newRootPath + row.path.slice(current.path.length));
+        }
+      } catch (error) {
+        throw toServiceError(error);
+      }
+
+      // A path on its own can place a page with no page above it, so the target
+      // can hold pages below the new root even when the root itself is free.
+      const occupied = await tx
+        .select({ path: pages.path })
+        .from(pages)
+        .where(
+          and(
+            eq(pages.workspaceId, input.workspaceId),
+            eq(pages.spaceId, target.id),
+            isNull(pages.deletedAt),
+            sql`(${pages.path} = ${newRootPath} or ${pages.path} like ${likePrefixPattern(newRootPath)} escape '\\')`,
+          ),
+        )
+        .orderBy(asc(pages.path))
+        .limit(MOVE_DETAIL_LIMIT);
+      if (occupied.length > 0) {
+        throw new PageServiceError(
+          'conflict',
+          'The target space already has a page at a path this move would use',
+          { space: target.key, paths: occupied.map((row) => row.path) },
+        );
+      }
+
+      // One statement for the whole subtree, as for a move inside a space, and
+      // for the same reason it is written as SQL with every placeholder cast.
+      await tx.execute(sql`
+        update pages
+        set space_id = ${target.id}::uuid,
+            path = ${newRootPath}::text || substring(path from ${current.path.length + 1}::int),
+            updated_at = ${now.toISOString()}::timestamptz
+        where workspace_id = ${input.workspaceId}::uuid
+          and space_id = ${current.spaceId}::uuid
+          and deleted_at is null
+          and (id = ${current.id}::uuid or path like ${likePrefixPattern(current.path)}::text escape '\\')
+      `);
+
+      const [updated] = await tx
+        .update(pages)
+        .set({ parentId: parent?.id ?? null })
+        .where(eq(pages.id, current.id))
+        .returning(pageColumns);
+      if (!updated) throw new PageServiceError('not_found', 'Page not found');
+
+      // Pairs do not span spaces. A pair that moves whole stays; one that would
+      // be split is broken on both sides in this transaction.
+      const split = subtree.filter(
+        (row) => row.linkedPageId !== null && !movedSet.has(row.linkedPageId),
+      );
+      const unlinked = split.flatMap((row) => [row.id, row.linkedPageId as string]);
+      if (unlinked.length > 0) {
+        await tx
+          .update(pages)
+          .set({ linkedPageId: null, updatedAt: now })
+          .where(and(eq(pages.workspaceId, input.workspaceId), inArray(pages.id, unlinked)));
+      }
+
+      // Comments and reviews carry the space of their page, and visibility is
+      // decided on that column: left behind, it would keep a thread readable
+      // from the space the page has just left.
+      await tx
+        .update(pageComments)
+        .set({ spaceId: target.id })
+        .where(
+          and(eq(pageComments.workspaceId, input.workspaceId), inArray(pageComments.pageId, movedIds)),
+        );
+      await tx
+        .update(pageReviews)
+        .set({ spaceId: target.id })
+        .where(
+          and(eq(pageReviews.workspaceId, input.workspaceId), inArray(pageReviews.pageId, movedIds)),
+        );
+
+      await recordAudit(
+        {
+          workspaceId: input.workspaceId,
+          actorType: input.actor.type,
+          actorId: input.actor.id,
+          action: 'page.moved_to_space',
+          target: current.id,
+          metadata: {
+            result: 'success',
+            fromSpaceId: current.spaceId,
+            fromSpace: source.key,
+            toSpaceId: target.id,
+            toSpace: target.key,
+            previousPath: current.path,
+            path: updated.path,
+            parentId: updated.parentId,
+            descendants: movedIds.length - 1,
+            unlinked,
+          },
+        },
+        tx,
+      );
+
+      movedPageIds = movedIds;
+      return {
+        page: linkedAfterMove(updated, unlinked),
+        fromSpaceId: current.spaceId,
+        previousPath: current.path,
+        moved: movedIds.length,
+        unlinked,
+      };
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new PageServiceError(
+        'conflict',
+        'The target space already has a page at a path this move would use',
+      );
+    }
+    if (isPageServiceError(error) && error.code === 'conflict') {
+      try {
+        await recordAudit({
+          workspaceId: input.workspaceId,
+          actorType: input.actor.type,
+          actorId: input.actor.id,
+          action: 'page.move_rejected',
+          target: input.pageId,
+          metadata: {
+            result: 'rejected',
+            reason: error.code,
+            toSpaceId: input.targetSpaceId,
+            ...(error.details ?? {}),
+          },
+        });
+      } catch (auditError) {
+        console.error('[pages] move refusal could not be audited', auditError);
+      }
+    }
+    throw error;
+  }
+
+  // A live editing session remembers the space it was opened in and whom it
+  // authorised there. None can be live here — a session holds a claim, and a
+  // claim refuses the move — but a paused one can, so they are ended and every
+  // browser is authorised again against the space the page is in now.
+  // Imported on demand: the session module sits above this one.
+  try {
+    const { closeRoomsForPages } = await import('../collab/rooms');
+    await closeRoomsForPages(movedPageIds);
+  } catch (error) {
+    console.error('[pages] live sessions could not be ended after a move', error);
+  }
+
+  return result;
+}
+
+/** The record as it stands after the pairing of the moved page itself was broken, if it was. */
+function linkedAfterMove(page: PageRecord, unlinked: readonly string[]): PageRecord {
+  return unlinked.includes(page.id) ? { ...page, linkedPageId: null } : page;
+}
+
 export interface DeletePageInput {
   workspaceId: string;
   pageId: string;
@@ -1243,7 +1631,12 @@ export async function restorePage(input: RestorePageInput): Promise<{ restored: 
 
       if (current.parentId !== null) {
         const [parent] = await tx
-          .select({ id: pages.id, path: pages.path, deletedAt: pages.deletedAt })
+          .select({
+            id: pages.id,
+            path: pages.path,
+            spaceId: pages.spaceId,
+            deletedAt: pages.deletedAt,
+          })
           .from(pages)
           .where(and(eq(pages.id, current.parentId), eq(pages.workspaceId, input.workspaceId)))
           .limit(1)
@@ -1252,6 +1645,16 @@ export async function restorePage(input: RestorePageInput): Promise<{ restored: 
           throw new PageServiceError('conflict', 'The parent page is deleted; restore it first', {
             parent_id: current.parentId,
           });
+        }
+        // A parent that went to another space can carry the very path it had
+        // here, so the path comparison alone would restore this page under a
+        // page of another tree.
+        if (parent.spaceId !== current.spaceId) {
+          throw new PageServiceError(
+            'conflict',
+            'The parent page has moved to another space since this page was deleted',
+            { parent_id: parent.id, path: current.path },
+          );
         }
         if (parentPathOf(current.path) !== parent.path) {
           throw new PageServiceError(

@@ -90,6 +90,7 @@ describe('interface code and restricted spaces', () => {
       ['app/pages/actions.ts', 'updatePageAction', /canViewPage/],
       ['app/pages/actions.ts', 'deletePageAction', /findPage/],
       ['app/pages/actions.ts', 'linkPageAction', /canViewPage/],
+      ['app/pages/actions.ts', 'movePageAction', /findPage[\s\S]*findSpaceByKey/],
       ['app/spaces/comment-actions.ts', 'openCommentAction', /canViewPage/],
       ['app/spaces/comment-actions.ts', 'replyCommentAction', /canViewComment/],
       ['app/spaces/comment-actions.ts', 'resolveCommentAction', /canViewComment/],

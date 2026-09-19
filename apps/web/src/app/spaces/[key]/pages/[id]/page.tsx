@@ -31,6 +31,7 @@ import {
   spaceHref,
   spacePageChangesHref,
   spacePageEditHref,
+  spacePageMoveHref,
   spacePageHistoryHref,
   spacePageHref,
 } from '@/lib/spaces/urls';
@@ -305,6 +306,15 @@ export default async function PageView({ params }: Props) {
                 </a>
               </div>
             </details>
+
+            {/* A link to a screen, not an action: a move asks where to, and
+                says what changes, before anything happens. */}
+            <Link
+              href={spacePageMoveHref(space.key, page.id)}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              {t('move')}
+            </Link>
 
             <DeletePageButton pageId={page.id} label={t('delete')} confirm={t('deleteConfirm')} />
           </div>

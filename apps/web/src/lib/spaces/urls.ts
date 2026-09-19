@@ -88,6 +88,12 @@ export function spaceChangesHref(spaceKey: string, view?: 'all'): string {
   return view ? `${base}?view=${view}` : base;
 }
 
+/** The screen that moves a page to another space; `to` preselects the space. */
+export function spacePageMoveHref(spaceKey: string, pageId: string, to?: string): string {
+  const base = `${spacePageHref(spaceKey, pageId)}/move`;
+  return to ? `${base}?to=${encodeURIComponent(to)}` : base;
+}
+
 export function spacePageHistoryHref(spaceKey: string, pageId: string): string {
   return `${spacePageHref(spaceKey, pageId)}/history`;
 }

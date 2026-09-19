@@ -11,6 +11,25 @@ tagged.
 
 ### Added
 
+- **Moving a page to another space.** **Move** on a page asks for a space and a
+  parent in it, and takes the page there with everything below it. Nothing is
+  rewritten, so no version is made: history, comments and changes waiting for a
+  review travel with the pages, and so do the mover's own claims. Over REST it is
+  `POST /api/v1/pages/{id}/move` with `space` and `parent_id` or `parent_path`.
+  For the space a page leaves this is a subtree delete, and it is scoped like
+  one — a token needs `pages:delete` on top of `pages:write` — and the caller has
+  to see both spaces: a target it cannot see is `404 Space not found`. There is
+  no MCP tool, as there is none for deleting. A move inside a space is still a
+  page update with `parent_id` or `path`.
+- A move between spaces is refused with `409 conflict`, and audited as
+  `page.move_rejected`, while somebody else holds a live claim anywhere in the
+  subtree — a live editing session counts — when the target already has a page at
+  one of the paths, when the target is archived, and while the source space
+  still uses one of the pages as its home page, its rules or the parent of its
+  decisions. A pair of pages that would end up in two spaces is unpaired on both
+  sides and reported in `unlinked_page_ids`. Anchors stay on their pages and are
+  checked against the target space's repository from then on. A success is
+  audited as `page.moved_to_space`.
 - **Restricted spaces.** A space can be restricted to its members: to everybody
   else in the workspace it does not exist — not listed, not searched, and every
   link into it answers `404`, exactly as a space in another workspace does.
@@ -83,6 +102,12 @@ tagged.
   browser that cannot keep up is disconnected rather than buffered for, and the
   shared document is opaque bytes to the server: it is never parsed into a page
   and never handed to an agent.
+
+### Fixed
+
+- Restoring a deleted page checks that its parent is still in the same space. A
+  parent moved to another space can keep the very path it had, which the path
+  comparison alone would have accepted.
 
 ## [0.1.0] - 2026-09-18
 

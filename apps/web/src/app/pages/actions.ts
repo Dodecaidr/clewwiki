@@ -12,7 +12,7 @@ import { blockIssuesFromDetails } from '@/lib/pages/content-blocks';
 import { isPageServiceError } from '@/lib/pages/errors';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
-import { createPage, deletePage, linkPages, updatePage } from '@/lib/pages/service';
+import { createPage, deletePage, linkPages, movePageToSpace, updatePage } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { spaceHref, spacePageHref } from '@/lib/spaces/urls';
 import { findPage, findSpaceById, findSpaceByKey } from '@/lib/spaces/visibility';
@@ -336,6 +336,85 @@ export async function deletePageAction(
 
   revalidateWiki();
   redirect(space ? spaceHref(space.key) : '/');
+}
+
+export interface MovePageFormState {
+  error?: string;
+  /** Which of the things a move is refused for this one was, so the form can say it in the reader's language. */
+  reason?: 'claims' | 'paths' | 'designated' | 'archived';
+  /** Who holds the subtree, the paths already taken, or the roles the page still plays. */
+  names?: string[];
+}
+
+/**
+ * Moves a page and its subtree into another space.
+ *
+ * Both ends go through the guarded lookups: a page the person cannot see is not
+ * found, and neither is a target they cannot see — which is what keeps somebody
+ * outside a restricted space from putting pages into it, or learning that it is
+ * there from the way the refusal reads.
+ */
+export async function movePageAction(
+  _prevState: MovePageFormState,
+  formData: FormData,
+): Promise<MovePageFormState> {
+  const session = await requireWriter();
+  if (!session) return { error: 'forbidden' };
+
+  const parsed = z
+    .object({
+      pageId: z.uuid(),
+      spaceKey: z.string().trim().min(1).max(20),
+      parentId: z.uuid().optional(),
+    })
+    .safeParse({
+      pageId: formData.get('pageId'),
+      spaceKey: formData.get('spaceKey'),
+      parentId: formString(formData, 'parentId'),
+    });
+  if (!parsed.success) return { error: 'validation' };
+
+  const page = await findPage(session, parsed.data.pageId);
+  if (!page) return { error: 'not_found' };
+  const target = await findSpaceByKey(session, parsed.data.spaceKey);
+  if (!target) return { error: 'not_found' };
+
+  let moved;
+  try {
+    moved = await movePageToSpace({
+      workspaceId: session.workspace.id,
+      pageId: page.id,
+      actor: { type: 'user', id: session.userId },
+      targetSpaceId: target.id,
+      parentId: parsed.data.parentId ?? null,
+    });
+  } catch (error) {
+    if (isPageServiceError(error) && error.code === 'conflict') {
+      return { error: 'conflict', ...moveRefusal(error.details) };
+    }
+    const state = toFormState(error);
+    return { error: state.error };
+  }
+
+  revalidateWiki();
+  redirect(spacePageHref(target.key, moved.page.id));
+}
+
+function moveRefusal(details: Record<string, unknown> | undefined): Pick<MovePageFormState, 'reason' | 'names'> {
+  const list = (value: unknown): Record<string, unknown>[] =>
+    Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null) : [];
+  const text = (value: unknown): string[] => (typeof value === 'string' ? [value] : []);
+
+  if (Array.isArray(details?.claims)) {
+    return { reason: 'claims', names: [...new Set(list(details.claims).flatMap((claim) => text(claim.held_by)))] };
+  }
+  if (Array.isArray(details?.paths)) {
+    return { reason: 'paths', names: details.paths.flatMap(text) };
+  }
+  if (Array.isArray(details?.designated)) {
+    return { reason: 'designated', names: list(details.designated).flatMap((entry) => text(entry.role)) };
+  }
+  return { reason: 'archived' };
 }
 
 export async function linkPageAction(
