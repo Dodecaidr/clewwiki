@@ -1189,6 +1189,49 @@ export const pageImages = pgTable(
 );
 
 /**
+ * Who a message or a comment was addressed to.
+ *
+ * Writing `@[Name]` or `@name` in a discussion message or a comment brings that
+ * person or agent in: it shows up in their inbox whether or not they were in
+ * the thread. The name is resolved once, when the text is posted, against the
+ * members and the live tokens of the workspace — so a later rename, or a new
+ * member with the same name, does not change who was asked.
+ *
+ * A row belongs to the message or comment it was written in and goes when that
+ * goes: it cannot outlive a discussion that was cleaned up. Whether the person
+ * it names can *see* the thing is not decided here — a mention of somebody who
+ * cannot see the space is stored and simply never shown to them, because the
+ * inbox applies the reader's visibility when it is read.
+ */
+export const mentions = pgTable(
+  'mentions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id').references((): AnyPgColumn => discussionMessages.id, {
+      onDelete: 'cascade',
+    }),
+    commentId: uuid('comment_id').references((): AnyPgColumn => pageComments.id, {
+      onDelete: 'cascade',
+    }),
+    actorType: actorType('actor_type').notNull(),
+    actorId: text('actor_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('mentions_actor_idx').on(table.workspaceId, table.actorType, table.actorId, table.createdAt),
+    uniqueIndex('mentions_message_actor_key').on(table.messageId, table.actorType, table.actorId),
+    uniqueIndex('mentions_comment_actor_key').on(table.commentId, table.actorType, table.actorId),
+    check(
+      'mentions_one_source',
+      sql`(${table.messageId} is not null) <> (${table.commentId} is not null)`,
+    ),
+  ],
+);
+
+/**
  * How far each person and each agent has read their inbox.
  *
  * The inbox itself is not stored. What somebody should hear about — an answer

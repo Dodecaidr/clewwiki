@@ -13,6 +13,8 @@ import type { ParagraphBlock } from '@clewwiki/content/paragraphs';
 
 import { recordAudit } from '../audit';
 import { getDatabase } from '../db';
+import { recordMentions } from '../mentions/service';
+import type { MentionedActor } from '../mentions/service';
 import type { DbExecutor } from '../db';
 import { PageServiceError } from '../pages/errors';
 import { getRevision, requirePage } from '../pages/service';
@@ -78,6 +80,8 @@ export interface CommentRecord {
   resolvedById: string | null;
   resolvedByLabel: string | null;
   createdAt: Date;
+  /** Who the text addressed — present on the record a write returns, absent on a read. */
+  mentioned?: MentionedActor[];
 }
 
 const commentColumns = {
@@ -427,6 +431,12 @@ export async function openComment(input: OpenCommentInput): Promise<CommentThrea
       })
       .returning(commentColumns);
     if (!root) throw new Error('comment insert returned no row');
+    const mentioned = await recordMentions(tx, {
+      workspaceId: input.workspaceId,
+      source: { commentId: root.id },
+      author: input.actor,
+      body,
+    });
 
     await recordAudit(
       {
@@ -441,7 +451,7 @@ export async function openComment(input: OpenCommentInput): Promise<CommentThrea
       tx,
     );
 
-    return { root, replies: [], anchor: anchorOf(root, splitParagraphs(page.body)) };
+    return { root: { ...root, mentioned }, replies: [], anchor: anchorOf(root, splitParagraphs(page.body)) };
   });
 }
 
@@ -507,6 +517,12 @@ export async function replyToComment(input: ReplyInput): Promise<CommentRecord> 
       })
       .returning(commentColumns);
     if (!reply) throw new Error('reply insert returned no row');
+    const mentioned = await recordMentions(tx, {
+      workspaceId: input.workspaceId,
+      source: { commentId: reply.id },
+      author: input.actor,
+      body,
+    });
 
     await recordAudit(
       {
@@ -519,7 +535,7 @@ export async function replyToComment(input: ReplyInput): Promise<CommentRecord> 
       },
       tx,
     );
-    return reply;
+    return { ...reply, mentioned };
   });
 }
 

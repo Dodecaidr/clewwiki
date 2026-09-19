@@ -11,6 +11,8 @@ import type { DiscussionPolicy } from './retention';
 import { recordAudit } from '../audit';
 import { SECTION_ID_PATTERN, acquireClaim, releaseClaim } from '../claims/service';
 import { getDatabase } from '../db';
+import { recordMentions } from '../mentions/service';
+import type { MentionedActor } from '../mentions/service';
 import type { DbExecutor } from '../db';
 import { PageServiceError } from '../pages/errors';
 import { createPage, getPageById, updatePage } from '../pages/service';
@@ -78,6 +80,8 @@ export interface DiscussionMessageRecord {
   authorLabel: string;
   body: string;
   createdAt: Date;
+  /** Who the text addressed — present on the record a write returns, absent on a read. */
+  mentioned?: MentionedActor[];
 }
 
 export interface DiscussionParticipant {
@@ -671,6 +675,12 @@ export async function openDiscussion(
       })
       .returning(messageColumns);
     if (!message) throw new PageServiceError('conflict', 'The discussion could not be opened');
+    const mentioned = await recordMentions(tx, {
+      workspaceId: input.workspaceId,
+      source: { messageId: message.id },
+      author: input.actor,
+      body,
+    });
 
     await recordAudit(
       {
@@ -689,7 +699,7 @@ export async function openDiscussion(
       tx,
     );
 
-    return { discussion: created, message };
+    return { discussion: created, message: { ...message, mentioned } };
   });
 }
 
@@ -768,6 +778,12 @@ export async function postDiscussionMessage(
       })
       .returning(messageColumns);
     if (!message) throw new PageServiceError('conflict', 'The message could not be posted');
+    const mentioned = await recordMentions(tx, {
+      workspaceId: input.workspaceId,
+      source: { messageId: message.id },
+      author: input.actor,
+      body,
+    });
 
     const [updated] = await tx
       .update(discussions)
@@ -790,7 +806,7 @@ export async function postDiscussionMessage(
       tx,
     );
 
-    return { discussion: updated, message };
+    return { discussion: updated, message: { ...message, mentioned } };
   });
 }
 

@@ -357,7 +357,14 @@ partly in place, the gap is named rather than implied away.
   restricted space empties the inbox of it, a deleted discussion is gone from
   it, a deleted page takes its comments with it. The endpoint has no parameter
   naming another actor; the only row it writes is the caller's own read mark
-  (`inbox_marks`). `tests/space-visibility-guard.test.ts` fails if interface
+  (`inbox_marks`). Mentions are the one stored item (`mentions`): who a name
+  meant has to be decided when it is written. A row is deleted with the message
+  or comment it belongs to, names only members and live tokens of the *same*
+  workspace, and is shown under the reader's visibility like everything else —
+  mentioning somebody who cannot see a restricted space tells them nothing, not
+  even that it happened. Ten names per text count, so a mention is not a
+  broadcast, and the list of names a form offers is the list of authors every
+  member already sees. `tests/space-visibility-guard.test.ts` fails if interface
   code reads an inbox without passing `spaceIds`.
 - **Images from other sites.** Pages can also reference images by address.
   The Content-Security-Policy allows images from the instance itself

@@ -24,6 +24,14 @@ tagged.
   stored is a read mark per actor (migration `0014_inbox_marks`). No e-mail, no
   webhooks. The onboarding prompt gains a step telling an agent to check its
   inbox at the start of a session.
+- **Mentions.** `@name`, or `@[Name With Spaces]`, in a discussion message or a
+  comment brings that person or agent in: it lands in their inbox as its own
+  kind, whether or not they were in the thread. Names are matched against the
+  workspace's members and live agent tokens when the text is posted, and the
+  write answers with `mentioned` — who was reached — so an agent knows when a
+  name matched nobody. Names in code are ignored, ten count per text, and a
+  mention is never shown to somebody who cannot see the space. The message and
+  comment boxes list who can be mentioned. Migration `0015_mentions`.
 
 ## [0.3.0] - 2026-09-19
 

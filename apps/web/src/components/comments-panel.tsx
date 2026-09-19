@@ -7,6 +7,7 @@ import {
   ReplyForm,
   ResolveButton,
 } from '@/components/comment-thread-forms';
+import { MentionHint } from '@/components/mention-hint';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import type { CommentRecord, CommentThread } from '@/lib/comments/service';
 import { formatDateTime } from '@/lib/utils';
@@ -136,7 +137,12 @@ export async function CommentsPanel({
           </ul>
         )}
 
-        {canComment ? <PageCommentForm pageId={pageId} version={version} /> : null}
+        {canComment ? (
+          <div className="grid gap-3">
+            <PageCommentForm pageId={pageId} version={version} />
+            <MentionHint />
+          </div>
+        ) : null}
 
         {resolved.length > 0 ? (
           <details>
