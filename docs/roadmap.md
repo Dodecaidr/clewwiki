@@ -568,6 +568,15 @@ Access**. REST enforces it through the allowlist handlers already checked for
 space-limited tokens; the interface through guarded lookups, with a test that
 fails when one is bypassed.
 
+**Moving pages between spaces — built.** `POST /api/v1/pages/{id}/move` and
+**Move** on a page take a subtree to another space the caller can see. It
+follows the rules of a subtree delete rather than of a write — `pages:delete`,
+no claim of its own, refused under anybody else's live claim — writes no
+revision, carries comments and reviews along, breaks a pair it would split, and
+refuses a page the source space still designates as its home, rules or
+decisions page. No administrator override: a move under a writer would answer
+them `404` in the middle of an edit.
+
 **Deliberately not yet: roles inside a space** (viewer, editor, admin). Membership
 is visibility only. Read-only membership has to be enforced on every write path,
 and is the next step if it is wanted.

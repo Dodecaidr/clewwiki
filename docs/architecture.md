@@ -367,9 +367,24 @@ everything that works on the tree stays inside it. The partial unique index on
 live paths is on `(space_id, path)`, so `/backend` can exist once per space. A
 move, a subtree delete and a restore match descendants by path prefix *within
 the page's space*; a parent must be in the same space; a technical/human pair
-is always within one space. A page never changes space. Claims, notes, anchors
-and revisions hang on page ids and needed no change: the space of any of them
-is the space of its page.
+is always within one space. Claims, notes, anchors and revisions hang on page
+ids and needed no change: the space of any of them is the space of its page.
+
+A page changes space in one way only, `movePageToSpace`, and it takes its whole
+subtree along in one statement, so those invariants hold before and after and
+never in between. It is modelled on the subtree delete, not on a write: it
+takes no claim, writes no revision — nothing about the content changed — and is
+refused under anybody else's live claim, with no administrator override,
+because a move under a writer would answer them `404` in the middle of an
+edit. Two tables copy their page's space for the sake of per-space listings,
+`page_comments.space_id` and `page_reviews.space_id`, and visibility is decided
+on that copy, so the move rewrites both in the same transaction. A pair the
+move would split is broken on both sides; a page the source space designates
+(home, rules, parent of decisions) refuses the move rather than leaving a
+project without its rules; both space rows are locked, in id order, so neither
+a designation nor an archive can slip in between the check and the update.
+Soft-deleted descendants are left behind, as they are by a move inside a space,
+and a restore refuses them once their parent is in another space.
 
 Space membership is not a table. Roles stay workspace-wide in this version —
 an editor can edit in every space — and the only per-space access control is

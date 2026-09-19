@@ -793,6 +793,24 @@ export async function closeRoomsInSpace(spaceId: string): Promise<number> {
   return affected.length;
 }
 
+/**
+ * Ends the sessions of particular pages, keeping what was typed — for pages
+ * that have gone to another space. A room remembers the space it was opened in
+ * and the people it let in there; both are out of date once the page has moved,
+ * and everybody is authorised again when their browser reconnects.
+ */
+export async function closeRoomsForPages(pageIds: readonly string[]): Promise<number> {
+  const wanted = new Set(pageIds);
+  const affected = [...rooms().values()].filter((room) => wanted.has(room.pageId));
+  for (const room of affected) {
+    await persist(room).catch((error: unknown) => console.error('[collab] persist failed', error));
+    const clients = [...room.clients.values()];
+    destroyRoom(room);
+    for (const client of clients) client.close();
+  }
+  return affected.length;
+}
+
 /** Closes every room without saving anything. Tests use it; nothing in the application does. */
 export async function closeAllRooms(): Promise<void> {
   for (const room of [...rooms().values()]) {

@@ -241,7 +241,7 @@ grant only the scopes the agent needs:
 | `identity:read` | Call `GET /api/v1/me`. Needed by anything that wants to confirm who it is. |
 | `pages:read` | Read pages, the page tree, search results, exports, claims, notes and anchors. |
 | `pages:write` | Create, change, move and link pages; take and release claims; leave notes; manage and re-check anchors. |
-| `pages:delete` | Soft-delete a page and everything below it. Needs `pages:write` as well. Kept separate because one call removes a whole subtree. |
+| `pages:delete` | Soft-delete a page and everything below it, or move it with everything below it to another space. Needs `pages:write` as well. Kept separate because one call takes a whole subtree out of a space. |
 | `audit:read` | Read the audit log. |
 
 Under **Spaces**, keep **All spaces**, or choose **Only selected spaces** and
@@ -1122,7 +1122,10 @@ that page already chosen as the parent:
 - **Parent page** is picked from the space's tree, so a subsection is made by
   choosing its section rather than by typing a path. Leave it empty for a
   top-level section. Moving a page to another parent later moves everything
-  below it.
+  below it. **Move** on a page takes it, with everything below it, to another
+  space: history, comments and pending reviews go along, anchors are checked
+  against the new space's repository from then on, and who can read the pages
+  becomes whoever can see that space.
 - **Kind** is `technical` or `human`. The two are the linked document pair:
   one written for agents, one written for people. A page of each kind can be
   paired so that a reader of either lands on the other.
@@ -1563,6 +1566,7 @@ noise.
 | `GET /api/v1/pages/{id}` | session or token | `pages:read` | One page with its body, content hash and linked counterpart. |
 | `PATCH /api/v1/pages/{id}` | session or token | `pages:write` | Update or move a page under a claim. Requires `claim_id` and `base_content_hash`. Writes a revision and bumps the version. A changed body is held to the same chart and diagram validation as a new page. |
 | `DELETE /api/v1/pages/{id}` | session or token | `pages:write` + `pages:delete` | Soft-delete a page and everything below it. `409 conflict` while another actor holds a live claim in the subtree, unless the caller is an administrator. |
+| `POST /api/v1/pages/{id}/move` | session or token | `pages:write` + `pages:delete` | Move a page and everything below it to another space: `space`, and `parent_id` or `parent_path` in it (neither means top level). The caller must see both spaces. Content, versions, comments and pending reviews are untouched; a pair that would span two spaces is unpaired and listed in `unlinked_page_ids`. `409 conflict` while another actor holds a live claim in the subtree, when the target has a page at one of the paths or is archived, and while the source space uses one of the pages as its home, rules or decisions page. A move inside a space is a `PATCH` with `parent_id` or `path`. |
 | `POST /api/v1/pages/{id}/restore` | admin session | — | Restore a soft-deleted page and the subtree deleted with it. `409 conflict` when a live page has taken one of its paths or its parent is gone or moved. |
 | `GET /api/v1/pages/{id}/tree` | session or token | `pages:read` | The subtree rooted at a page, nested. |
 | `GET /api/v1/pages/{id}/collab` | session | — | Join the page's live editing session and stream it as server-sent events: `hello` (the document so far, who is present, whether the session holds the page), `update`, `awareness`, `participants`, `saved`, `status`, `reset`. Takes `client` (a UUID for this connection) and `y` (the Yjs client id). `403 forbidden` for any agent token; `409 conflict` when the session or the instance is full. |
