@@ -27,7 +27,7 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the twenty-eight tools docs/mcp.md names', () => {
+  it('registers exactly the thirty tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
       'wiki.list_spaces',
       'wiki.format_guide',
@@ -55,10 +55,12 @@ describe('tool surface', () => {
       'wiki.list_comments',
       'wiki.post_comment',
       'wiki.resolve_comment',
+      'wiki.check_inbox',
+      'wiki.mark_inbox_read',
       'wiki.check_anchors',
       'wiki.link_docs',
     ]);
-    expect(TOOLS).toHaveLength(28);
+    expect(TOOLS).toHaveLength(30);
   });
 
   it('names every tool whose result carries text written by others', () => {
@@ -81,6 +83,7 @@ describe('tool surface', () => {
         'wiki.get_review',
         'wiki.diff_page',
         'wiki.list_comments',
+        'wiki.check_inbox',
         'wiki.check_anchors',
       ].sort(),
     );
@@ -121,7 +124,34 @@ describe('tool surface', () => {
       'wiki.get_review',
       'wiki.diff_page',
       'wiki.list_comments',
+      'wiki.check_inbox',
     ]);
+  });
+
+  it('asks for the unread inbox unless told otherwise', async () => {
+    const seen: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      seen.push(String(input));
+      return jsonResponse(200, { unread: 0, items: [] });
+    }) as unknown as FetchLike;
+    await tool('wiki.check_inbox').run(clientWith(fetchMock), {});
+    await tool('wiki.check_inbox').run(clientWith(fetchMock), { unread_only: false, limit: 5 });
+    expect(seen[0]).toBe('https://wiki.example.com/api/v1/inbox?unread=true');
+    expect(seen[1]).toBe('https://wiki.example.com/api/v1/inbox?unread=false&limit=5');
+  });
+
+  it('marks the inbox read up to the moment it is given', async () => {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')));
+      return jsonResponse(200, { seen_at: '2026-09-20T00:00:00.000Z' });
+    }) as unknown as FetchLike;
+    await tool('wiki.mark_inbox_read').run(clientWith(fetchMock), { up_to: '2026-09-19T10:00:00.000Z' });
+    await tool('wiki.mark_inbox_read').run(clientWith(fetchMock), {});
+    expect(bodies).toEqual([{ up_to: '2026-09-19T10:00:00.000Z' }, {}]);
+    await expect(
+      tool('wiki.mark_inbox_read').run(clientWith(fetchMock), { up_to: 'yesterday' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 
   it('marks page creation as a write that is not idempotent', () => {

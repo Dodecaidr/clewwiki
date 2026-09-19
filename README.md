@@ -53,7 +53,7 @@ several people in one page at once.
 - Project rules and reusable skills that agents read before they start.
 - Import from Confluence, Notion, a Markdown folder or a PDF. Export to
   Markdown, HTML or a ZIP of the space.
-- 28 MCP tools over stdio or HTTP, a REST API, and an audit log of every write.
+- 30 MCP tools over stdio or HTTP, a REST API, and an audit log of every write.
 
 ## Quick start
 

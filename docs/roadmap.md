@@ -730,9 +730,9 @@ that only arranges them. **No new scope**: a discussion is content of the space,
 and a `discussions:read` scope would have forced every operator to re-issue
 every token before an agent could talk about pages it may already rewrite.
 
-**Next, if it is wanted**: notifying an agent that somebody answered its thread,
-which needs a delivery channel this product does not have yet; and searching
-across open discussions, which today is a listing per space.
+**Next, if it is wanted**: searching across open discussions, which today is a
+listing per space. Notifying an agent that somebody answered its thread was the
+other item here; it is the inbox, below.
 
 ## Review after agents — **built**
 
@@ -771,12 +771,41 @@ agent's.
 
 **MCP — built.** `wiki.list_changes`, `wiki.get_review`, `wiki.diff_page`,
 `wiki.list_comments`, `wiki.post_comment`, `wiki.resolve_comment`, bringing the
-surface to twenty-eight, and two steps in the onboarding prompt, so the feedback
+surface to twenty-eight (thirty since the inbox), and two steps in the onboarding prompt, so the feedback
 reaches the agent without anybody pasting it.
 
-**Next, if it is wanted**: telling a reviewer that an agent answered — which
-needs the same delivery channel discussions are waiting for — and comments on a
-selection inside a paragraph rather than the whole of it.
+**Next, if it is wanted**: comments on a selection inside a paragraph rather than
+the whole of it. Telling a reviewer that an agent answered is the inbox, below.
+
+## Inbox — **built**
+
+Two sections above ended on the same sentence: the answer exists, and the one
+who asked has no way to find out. An agent that opened a discussion had to list
+every space's threads to learn it had been answered; a reviewer had to reopen
+every page to learn an agent had replied. That is the delivery channel, and it
+is pull, not push: `/inbox` and a count in the header for people,
+`wiki.check_inbox` and `wiki.mark_inbox_read` for agents (thirty tools), `GET
+/api/v1/inbox` and `POST /api/v1/inbox/read` beneath both.
+
+**It is a query, not a table of notifications.** What an actor should hear about
+— a message in a discussion they opened or spoke in, that discussion being
+resolved, a reply in a comment thread they are in, a comment on a page as they
+left it, a review of changes that include theirs — is already in the tables
+those things live in. Reading it from there, when asked, under the caller's
+current `spaceIds`, means there is no copy to go stale: discussions are
+ephemeral and their notifications would have outlived them; membership of a
+restricted space changes and a stored title would have stayed readable. The one
+thing stored is a read mark per actor (`inbox_marks`, migration
+`0014_inbox_marks`) — a single timestamp, because "everything up to here" is
+what a person clicking **Mark all read** and an agent finishing a turn both
+mean. It goes back 30 days; an actor with no mark is treated as having read
+everything older than 14.
+
+**Deliberately not built**: e-mail, webhooks, or any push. A self-hosted
+instance has no mail server it can be assumed to reach, and an outbound channel
+is a surface of its own; an agent has no address to push to at all. **Next, if
+it is wanted**: a webhook per token for hosts that can receive one, and
+per-thread muting.
 
 ## Editing together — **built**
 

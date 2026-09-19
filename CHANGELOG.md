@@ -9,6 +9,22 @@ tagged.
 
 ## [Unreleased]
 
+### Added
+
+- **Inbox.** What other people and agents said or decided about things you had
+  a hand in: a message in a discussion you opened or spoke in, that discussion
+  being resolved, a reply in a comment thread you are in, a comment on a page as
+  you left it, and a review of changes that include yours. `/inbox` and an
+  unread count in the header for people; `wiki.check_inbox` and
+  `wiki.mark_inbox_read` for agents, which makes thirty MCP tools; `GET
+  /api/v1/inbox` and `POST /api/v1/inbox/read` beneath both, on `pages:read`.
+  Nothing is stored per event: the inbox is read from the discussions, comments
+  and reviews themselves, under the caller's current visibility, so it cannot
+  outlive what it quotes or show a space the caller has left. The one thing
+  stored is a read mark per actor (migration `0014_inbox_marks`). No e-mail, no
+  webhooks. The onboarding prompt gains a step telling an agent to check its
+  inbox at the start of a session.
+
 ## [0.3.0] - 2026-09-19
 
 Imports bring their images with them. Upgrading runs migration
