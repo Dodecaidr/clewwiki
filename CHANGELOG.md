@@ -9,6 +9,11 @@ tagged.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-20
+
+A team can join. Upgrading runs migration `0016_invitations`; nothing changes for
+the account that already exists, which stays the administrator.
+
 ### Added
 
 - **Members and invitations.** Until now `/setup` was the only way an account
@@ -593,7 +598,8 @@ image are published from this tag; earlier commits were development on
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.0...v0.2.1
