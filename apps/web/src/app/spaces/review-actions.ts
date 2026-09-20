@@ -10,7 +10,7 @@ import {
   acceptPageChanges,
   revertPageChanges,
 } from '@/lib/reviews/service';
-import { getSessionContext } from '@/lib/session';
+import { getWriterSession } from '@/lib/session';
 import { spacePageChangesHref } from '@/lib/spaces/urls';
 import { findPage, findSpaceById } from '@/lib/spaces/visibility';
 
@@ -44,7 +44,7 @@ export async function reviewPageAction(
   _previous: ReviewFormState,
   formData: FormData,
 ): Promise<ReviewFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = decisionSchema.safeParse({

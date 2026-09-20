@@ -14,6 +14,13 @@ tagged.
 - **Your account.** Behind your name in the header: change your name, and your
   password by giving the current one. Changing the password signs every other
   session out. Attempts are limited to five per quarter of an hour.
+- **A viewer role.** For the people a wiki is written *for*: a viewer reads
+  everything they can see — pages, discussions, comments, history, search,
+  exports — has an inbox and an account, and changes nothing. Invite somebody as
+  a viewer, or change a member's role, on **Members**. Enforced where a
+  read-only agent token already was: over REST a viewer has `identity:read` and
+  `pages:read` and gets `403` from anything that needs more. Migration
+  `0018_viewer_role`.
 - **Reset links.** An administrator can make a reset link for a member who has
   forgotten their password — **Members** → **Reset link**. Shown once, stored as
   a hash, good once, for 24 hours; using it sets the password and ends every

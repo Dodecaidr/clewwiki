@@ -92,10 +92,12 @@ function AnchorRow({
   anchor,
   labels,
   canConfirm,
+  readOnly,
 }: {
   anchor: AnchorPanelItem;
   labels: AnchorPanelLabels;
   canConfirm: boolean;
+  readOnly: boolean;
 }) {
   const [confirmState, confirmAction, confirming] = useActionState(
     confirmAnchorAction,
@@ -136,7 +138,7 @@ function AnchorRow({
         <p className="text-xs text-destructive">{labels.errorGeneric}</p>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
+      <div className={readOnly ? 'hidden' : 'flex flex-wrap gap-2'}>
         {canConfirm ? (
           <form action={confirmAction}>
             <input type="hidden" name="anchorId" value={anchor.anchorId} />
@@ -157,12 +159,15 @@ function AnchorRow({
 }
 
 export function AnchorPanel({
+  readOnly = false,
   pageId,
   anchors,
   labels,
   hasRepository,
   fallbackShareLabel,
 }: {
+  /** True for a viewer: the anchors and their states are shown, and nothing that changes them. */
+  readOnly?: boolean;
   pageId: string;
   anchors: AnchorPanelItem[];
   labels: AnchorPanelLabels;
@@ -176,7 +181,7 @@ export function AnchorPanel({
     <Card>
       <CardHeader className="flex flex-wrap items-center justify-between gap-2">
         <CardTitle>{labels.heading}</CardTitle>
-        {hasRepository ? (
+        {hasRepository && !readOnly ? (
           <form action={checkAction}>
             <input type="hidden" name="pageId" value={pageId} />
             <Button type="submit" variant="outline" size="sm" disabled={checking}>
@@ -202,6 +207,7 @@ export function AnchorPanel({
                 anchor={anchor}
                 labels={labels}
                 canConfirm={anchor.state === 'stale' || anchor.state === 'moved-renamed'}
+                readOnly={readOnly}
               />
             ))}
           </ul>
@@ -211,7 +217,7 @@ export function AnchorPanel({
           <p className="text-xs text-muted-foreground">{fallbackShareLabel}</p>
         ) : null}
 
-        {hasRepository ? (
+        {hasRepository && !readOnly ? (
           <form action={createAction} className="grid gap-3 border-t border-border pt-4">
             <h3 className="text-sm font-medium">{labels.addHeading}</h3>
             <input type="hidden" name="pageId" value={pageId} />

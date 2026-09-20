@@ -13,7 +13,10 @@ process.env.BETTER_AUTH_SECRET ??= 'integration-test-secret-value-not-used-in-pr
 process.env.BETTER_AUTH_URL ??= 'http://localhost:3000';
 
 const session: { current: Record<string, unknown> | null } = { current: null };
-vi.mock('@/lib/session', () => ({ getSessionContext: async () => session.current }));
+vi.mock('@/lib/session', async () => {
+  const { sessionModuleMock } = await import('./helpers/session-mock');
+  return sessionModuleMock(() => session.current);
+});
 vi.mock('next/cache', () => ({ revalidatePath: () => undefined }));
 
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];

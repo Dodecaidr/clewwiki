@@ -502,7 +502,8 @@
     "error_invalidInvitation": "This invitation no longer works. Ask an administrator for a new one.",
     "error_emailTaken": "An account with this address already exists. Sign in instead.",
     "error_password": "The password must be 12 to 256 characters.",
-    "error_generic": "The account could not be created. Ask an administrator to look at the server log."
+    "error_generic": "The account could not be created. Ask an administrator to look at the server log.",
+    "intro_viewer": "You were invited as a viewer: you can read pages, discussions and comments, search and export, and you have an inbox. You cannot change anything."
   },
   "reset": {
     "title": "Choose a new password",
@@ -600,7 +601,9 @@
     "error_name": "A name is 1 to 100 characters.",
     "error_currentPassword": "The current password is not right.",
     "error_rateLimited": "Too many attempts. Wait a quarter of an hour.",
-    "error_invalidReset": "That reset link no longer works."
+    "error_invalidReset": "That reset link no longer works.",
+    "role_viewer": "Viewer",
+    "rolesHint": "A viewer reads everything they can see and changes nothing. An editor also writes pages, takes part in discussions and reviews what agents change. An administrator also manages members, agent tokens and spaces."
   },
   "account": {
     "title": "Your account",

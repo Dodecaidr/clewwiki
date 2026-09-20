@@ -17,7 +17,7 @@ import {
 } from '@/lib/discussions/service';
 import { MAX_RETENTION_DAYS, MIN_RETENTION_DAYS } from '@/lib/discussions/retention';
 import { isPageServiceError } from '@/lib/pages/errors';
-import { getSessionContext } from '@/lib/session';
+import { getWriterSession } from '@/lib/session';
 import type { SessionContext } from '@/lib/session';
 import { updateSpace } from '@/lib/spaces/service';
 import { spaceDiscussionHref, spaceDiscussionsHref, spacePageHref } from '@/lib/spaces/urls';
@@ -66,7 +66,7 @@ export async function openDiscussionAction(
   _previous: DiscussionFormState,
   formData: FormData,
 ): Promise<DiscussionFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = openSchema.safeParse({
@@ -105,7 +105,7 @@ export async function postDiscussionMessageAction(
   _previous: DiscussionFormState,
   formData: FormData,
 ): Promise<DiscussionFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = z
@@ -163,7 +163,7 @@ export async function resolveDiscussionAction(
   _previous: DiscussionFormState,
   formData: FormData,
 ): Promise<DiscussionFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = resolveSchema.safeParse({
@@ -207,7 +207,7 @@ export async function deleteDiscussionAction(
   _previous: DiscussionFormState,
   formData: FormData,
 ): Promise<DiscussionFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = z.object({ discussionId: z.uuid() }).safeParse({
@@ -257,7 +257,7 @@ export async function saveDiscussionSettingsAction(
   _previous: DiscussionFormState,
   formData: FormData,
 ): Promise<DiscussionFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session || session.role !== 'admin') return { error: 'forbidden' };
 
   const parsed = settingsSchema.safeParse({

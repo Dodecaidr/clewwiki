@@ -279,6 +279,24 @@ partly in place, the gap is named rather than implied away.
   name it was written under. Every step is audited: `invitation.created`,
   `invitation.revoked`, `member.joined`, `member.role_changed`,
   `member.removed`.
+- **The viewer role.** A viewer is to people what a default, read-only token is
+  to agents, and is held at the same doors. Over REST a person's role stands in
+  for a scope list in `requireScopes`: an editor or an administrator has every
+  scope, a viewer has `identity:read` and `pages:read` and gets `403` from
+  anything that asks for more — the same single decision that refuses a
+  read-only token, so there is no second list of "write endpoints" to keep in
+  step. `tests/viewer-role.integration.test.ts` does not trust that: it finds
+  every route file that exports `POST`, `PATCH`, `PUT` or `DELETE` on disk,
+  calls each one as a viewer, and fails on anything but `403` — a route added
+  later is swept without anybody remembering to list it. Server actions that
+  change content ask for the session through `getWriterSession`, which answers a
+  viewer exactly as it answers nobody; `tests/viewer-role-guard.test.ts` fails
+  on a server action that uses the plain session instead, outside a short list
+  of actions a viewer is meant to reach (their own inbox, their own account,
+  signing out). The interface hides what a viewer cannot do and sends them away
+  from the screens that write, but that is a courtesy: every write is refused
+  where it is made. Which spaces a viewer can *see* is the separate question it
+  is for everybody — restricted spaces and their members.
 - **Passwords.** A member changes their own password by giving the current one,
   and the change signs every other session of the account out — whoever changes
   a password because somebody else may have it means exactly that. Attempts are

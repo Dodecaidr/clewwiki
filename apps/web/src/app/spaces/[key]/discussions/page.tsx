@@ -5,6 +5,7 @@ import type { Metadata } from 'next';
 
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { listDiscussions, wasClosedForInactivity } from '@/lib/discussions/service';
 import { readDiscussionPolicy } from '@/lib/discussions/retention';
 import { getSessionContext } from '@/lib/session';
@@ -78,7 +79,7 @@ export default async function SpaceDiscussionsPage({ params, searchParams }: Pro
             })}
           </p>
         </div>
-        {space.archivedAt ? null : (
+        {space.archivedAt || !canWrite(session.role) ? null : (
           <Link href={newSpaceDiscussionHref(space.key)} className={buttonVariants({ size: 'sm' })}>
             {t('new')}
           </Link>
@@ -112,7 +113,7 @@ export default async function SpaceDiscussionsPage({ params, searchParams }: Pro
           <CardBody className="grid justify-items-start gap-4 text-sm">
             <p className="text-muted-foreground">{status ? t('emptyFiltered') : t('empty')}</p>
             <div className="flex flex-wrap items-center gap-4">
-              {space.archivedAt ? null : (
+              {space.archivedAt || !canWrite(session.role) ? null : (
                 <Link
                   href={newSpaceDiscussionHref(space.key)}
                   className={buttonVariants({ size: 'sm' })}

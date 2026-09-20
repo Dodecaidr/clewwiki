@@ -5,9 +5,10 @@ import type { Metadata } from 'next';
 import { OpenDiscussionForm } from '../open-form';
 import { MentionHint } from '@/components/mention-hint';
 import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { readDiscussionPolicy } from '@/lib/discussions/retention';
 import { getSessionContext } from '@/lib/session';
-import { spaceDiscussionsHref } from '@/lib/spaces/urls';
+import { spaceDiscussionsHref, spaceHref } from '@/lib/spaces/urls';
 import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
@@ -31,6 +32,12 @@ export default async function NewDiscussionPage({ params, searchParams }: Props)
   const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
+  }
+
+  // A viewer has no business on a screen that writes. The action behind it
+  // would refuse them anyway; this saves them filling in a form to find out.
+  if (!canWrite(session.role)) {
+    redirect(spaceHref(space.key));
   }
 
   const t = await getTranslations('discussions');

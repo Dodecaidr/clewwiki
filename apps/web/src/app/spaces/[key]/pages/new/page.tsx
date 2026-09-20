@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 
 import { PageForm } from '@/app/pages/page-form';
 import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { getPageTree } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { flattenTree } from '@/lib/spaces/tree';
@@ -37,6 +38,12 @@ export default async function NewSpacePage({
   const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
+  }
+
+  // A viewer has no business on a screen that writes. The action behind it
+  // would refuse them anyway; this saves them filling in a form to find out.
+  if (!canWrite(session.role)) {
+    redirect(spaceHref(space.key));
   }
 
   const t = await getTranslations('editor');

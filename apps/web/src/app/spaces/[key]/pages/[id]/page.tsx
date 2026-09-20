@@ -11,6 +11,7 @@ import { Breadcrumbs } from '@/components/breadcrumbs';
 import { PageBody } from '@/components/page-body';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { getFallbackShare, listAnchorsForPage } from '@/lib/anchors/service';
 import { imageHref, referencedImageIds } from '@/lib/images/detect';
 import { listImagesForPage } from '@/lib/images/service';
@@ -262,13 +263,15 @@ export default async function PageView({ params }: Props) {
             <p className="font-mono text-xs text-muted-foreground">{page.path}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={spacePageEditHref(space.key, page.id)}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              {t('edit')}
-            </Link>
-            {space.archivedAt ? null : (
+            {canWrite(session.role) ? (
+              <Link
+                href={spacePageEditHref(space.key, page.id)}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                {t('edit')}
+              </Link>
+            ) : null}
+            {space.archivedAt || !canWrite(session.role) ? null : (
               <Link
                 href={newSpacePageHref(space.key, page.id)}
                 className={buttonVariants({ variant: 'outline', size: 'sm' })}
@@ -278,7 +281,7 @@ export default async function PageView({ params }: Props) {
             )}
             {/* Prefilled with this page, so a question about it is attached to
                 it rather than to the space in general. */}
-            {space.archivedAt ? null : (
+            {space.archivedAt || !canWrite(session.role) ? null : (
               <Link
                 href={newSpaceDiscussionHref(space.key, page.id)}
                 className={buttonVariants({ variant: 'outline', size: 'sm' })}
@@ -316,14 +319,17 @@ export default async function PageView({ params }: Props) {
 
             {/* A link to a screen, not an action: a move asks where to, and
                 says what changes, before anything happens. */}
-            <Link
-              href={spacePageMoveHref(space.key, page.id)}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              {t('move')}
-            </Link>
-
-            <DeletePageButton pageId={page.id} label={t('delete')} confirm={t('deleteConfirm')} />
+            {canWrite(session.role) ? (
+              <>
+                <Link
+                  href={spacePageMoveHref(space.key, page.id)}
+                  className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                >
+                  {t('move')}
+                </Link>
+                <DeletePageButton pageId={page.id} label={t('delete')} confirm={t('deleteConfirm')} />
+              </>
+            ) : null}
           </div>
         </div>
 
@@ -445,7 +451,7 @@ export default async function PageView({ params }: Props) {
 
       {page.body.trim() === '' ? (
         <p className="text-sm text-muted-foreground">{t('emptyBody')}</p>
-      ) : space.archivedAt ? (
+      ) : space.archivedAt || !canWrite(session.role) ? (
         <PageBody html={html} />
       ) : (
         <CommentableBody
@@ -461,11 +467,12 @@ export default async function PageView({ params }: Props) {
         version={page.version}
         open={openThreads}
         resolved={resolvedThreads}
-        viewer={{ userId: session.userId, isAdmin: session.role === 'admin' }}
-        canComment={!space.archivedAt}
+        viewer={{ userId: session.userId, isAdmin: session.role === 'admin', canWrite: canWrite(session.role) }}
+        canComment={!space.archivedAt && canWrite(session.role)}
       />
 
       <AnchorPanel
+        readOnly={!canWrite(session.role)}
         pageId={page.id}
         anchors={anchorItems}
         labels={anchorLabels}
@@ -478,6 +485,7 @@ export default async function PageView({ params }: Props) {
       />
 
       <ImagePanel
+        readOnly={!canWrite(session.role)}
         images={pageImages.map((image) => ({
           imageId: image.id,
           url: imageHref(image.id),

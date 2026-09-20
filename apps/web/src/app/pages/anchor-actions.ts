@@ -10,7 +10,7 @@ import {
   deleteAnchor,
   } from '@/lib/anchors/service';
 import { isPageServiceError } from '@/lib/pages/errors';
-import { getSessionContext } from '@/lib/session';
+import { getWriterSession } from '@/lib/session';
 import type { SessionContext } from '@/lib/session';
 import { canViewAnchor, canViewPage, findAnchor } from '@/lib/spaces/guards';
 
@@ -61,7 +61,7 @@ export async function createAnchorAction(
   _previous: AnchorActionState,
   formData: FormData,
 ): Promise<AnchorActionState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { ok: false, error: 'forbidden' };
 
   const parsed = createSchema.safeParse({
@@ -102,7 +102,7 @@ export async function checkAnchorsAction(
   _previous: AnchorActionState,
   formData: FormData,
 ): Promise<AnchorActionState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { ok: false, error: 'forbidden' };
 
   const parsed = z.object({ pageId: z.uuid() }).safeParse({ pageId: formData.get('pageId') });
@@ -128,7 +128,7 @@ export async function confirmAnchorAction(
   _previous: AnchorActionState,
   formData: FormData,
 ): Promise<AnchorActionState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { ok: false, error: 'forbidden' };
 
   const parsed = anchorIdSchema.safeParse({ anchorId: formData.get('anchorId') });
@@ -156,7 +156,7 @@ export async function deleteAnchorAction(
   _previous: AnchorActionState,
   formData: FormData,
 ): Promise<AnchorActionState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { ok: false, error: 'forbidden' };
 
   const parsed = anchorIdSchema.safeParse({ anchorId: formData.get('anchorId') });

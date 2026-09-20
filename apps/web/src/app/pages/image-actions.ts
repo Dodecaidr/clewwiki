@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { deleteImage, getImageAccess } from '@/lib/images/service';
-import { getSessionContext } from '@/lib/session';
+import { getWriterSession } from '@/lib/session';
 import { canView } from '@/lib/spaces/visibility';
 
 export interface ImageActionState {
@@ -24,7 +24,7 @@ export async function deleteImageAction(
   _previous: ImageActionState,
   formData: FormData,
 ): Promise<ImageActionState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = z.uuid().safeParse(formData.get('imageId'));

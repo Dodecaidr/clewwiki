@@ -6,12 +6,13 @@ import type { Metadata } from 'next';
 import { PageForm } from '@/app/pages/page-form';
 import { buttonVariants } from '@/components/ui/button';
 import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { getActiveClaimsForPage } from '@/lib/claims/service';
 import { lastSegment } from '@/lib/pages/paths';
 import { getPageTree } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { flattenTree, subtreeIds } from '@/lib/spaces/tree';
-import { spacePageEditHref, spacePageHref } from '@/lib/spaces/urls';
+import { spaceHref, spacePageEditHref, spacePageHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 import { assertSameWorkspace } from '@/lib/workspace';
 import { findPage, findSpaceById } from '@/lib/spaces/visibility';
@@ -46,6 +47,12 @@ export default async function EditPage({ params }: Props) {
   const space = await findSpaceById(session, page.spaceId);
   if (!space) {
     notFound();
+  }
+
+  // A viewer has no business on a screen that writes. The action behind it
+  // would refuse them anyway; this saves them filling in a form to find out.
+  if (!canWrite(session.role)) {
+    redirect(spaceHref(space.key));
   }
   if (key !== space.key) {
     redirect(spacePageEditHref(space.key, page.id));

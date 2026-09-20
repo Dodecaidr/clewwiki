@@ -28,14 +28,17 @@ process.env.AGENT_TOKEN_RATE_LIMIT_MAX ??= '1000';
 const session = vi.hoisted(() => ({ current: null as null | Record<string, unknown> }));
 // A session as `getSessionContext` builds it: the workspace's id beside the
 // workspace, and no restricted space hidden from the person unless a test says so.
-vi.mock('@/lib/session', () => ({
-  getSessionContext: async () =>
-    session.current && {
-      workspaceId: (session.current.workspace as { id: string } | undefined)?.id,
-      spaceIds: null,
-      ...session.current,
-    },
-}));
+vi.mock('@/lib/session', async () => {
+  const { sessionModuleMock } = await import('./helpers/session-mock');
+  return sessionModuleMock(
+    () =>
+      session.current && {
+        workspaceId: (session.current.workspace as { id: string } | undefined)?.id,
+        spaceIds: null,
+        ...session.current,
+      },
+  );
+});
 vi.mock('next/cache', () => ({ revalidatePath: () => undefined }));
 
 const BASE = 'http://localhost:3000';

@@ -6,6 +6,7 @@ import type { Metadata } from 'next';
 import { PageBody } from '@/components/page-body';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
 import { listPages } from '@/lib/pages/service';
@@ -62,7 +63,7 @@ export default async function SpaceOverview({ params }: Props) {
    * pages.
    */
   const canImport =
-    (session.role === 'admin' || session.role === 'editor') && space.archivedAt === null;
+    canWrite(session.role) && space.archivedAt === null;
 
   /**
    * The two things an agent is told to read before it starts. They are on the
@@ -90,7 +91,7 @@ export default async function SpaceOverview({ params }: Props) {
       >
         {tdis('title')}
       </Link>
-      {space.archivedAt ? null : (
+      {space.archivedAt || !canWrite(session.role) ? null : (
         <Link
           href={newSpaceDiscussionHref(space.key)}
           className={buttonVariants({ variant: 'outline', size: 'sm' })}
@@ -160,7 +161,7 @@ export default async function SpaceOverview({ params }: Props) {
           <CardBody className="grid justify-items-start gap-4 text-sm">
             <p className="text-muted-foreground">{t('emptyIntro')}</p>
             <div className="flex flex-wrap items-center gap-4">
-              {space.archivedAt ? null : (
+              {space.archivedAt || !canWrite(session.role) ? null : (
                 <Link href={newSpacePageHref(space.key)} className={buttonVariants({ size: 'sm' })}>
                   {tp('new')}
                 </Link>

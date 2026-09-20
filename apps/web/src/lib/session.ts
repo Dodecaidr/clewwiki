@@ -1,3 +1,4 @@
+import { canWrite } from './roles';
 import 'server-only';
 
 import { headers } from 'next/headers';
@@ -50,4 +51,15 @@ export async function getSessionContext(): Promise<SessionContext | null> {
     workspaceId: workspace.id,
     spaceIds: await visibleSpaceIdsForUser(workspace.id, session.user.id, membership.role),
   };
+}
+
+/**
+ * The session, when it belongs to somebody who may write: `null` for a viewer
+ * as for nobody. Server actions that change content ask for this instead of
+ * `getSessionContext`, so a viewer's request fails exactly the way an
+ * unauthenticated one does — there is no third branch to forget.
+ */
+export async function getWriterSession(): Promise<SessionContext | null> {
+  const session = await getSessionContext();
+  return session && canWrite(session.role) ? session : null;
 }

@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { isPageServiceError } from '@/lib/pages/errors';
-import { getSessionContext } from '@/lib/session';
+import { getWriterSession } from '@/lib/session';
 import { createSkill, deleteSkill, updateSkill } from '@/lib/skills/service';
 import { spaceSkillHref, spaceSkillsHref } from '@/lib/spaces/urls';
 import { findSpaceByKey } from '@/lib/spaces/visibility';
@@ -60,7 +60,7 @@ const baseSchema = z.object({
 });
 
 async function requireEditor() {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   return session ?? null;
 }
 
@@ -165,7 +165,7 @@ export async function deleteSkillAction(
   _previous: SkillFormState,
   formData: FormData,
 ): Promise<SkillFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session || session.role !== 'admin') return { error: 'forbidden' };
 
   const parsed = z
