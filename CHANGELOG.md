@@ -28,6 +28,23 @@ tagged.
   inviting them again, which made a new account. Migration
   `0017_password_resets`. `docs/deploy.md` gains a section on recovering a
   workspace's last administrator.
+- **An install check.** A workflow that follows the README's quick start on a
+  clean runner against what is published — the image on GHCR and the MCP package
+  on npm, not a local build — then sets the instance up the way a person would
+  and connects `npx -y @clewwiki/mcp-server` to it over stdio. It runs on every
+  release, weekly, and on demand. `scripts/mcp-stdio-check.mjs` is the second
+  half and runs against any instance.
+
+### Documentation
+
+- **How it compares** (`docs/compare.md`): clewwiki next to Confluence, Docmost,
+  Outline, BookStack and Wiki.js, each claim linked to its source, with the cases
+  where another tool is the better choice.
+- **Moving from Confluence** (`docs/from-confluence.md`): the Cloud importer step
+  by step, and the route through an HTML export and Markdown for Server and Data
+  Center, which the importer does not cover.
+- The README opens with what the wiki is and what it takes to run, and says
+  plainly what is not there yet.
 
 ## [0.5.0] - 2026-09-20
 
