@@ -256,7 +256,10 @@ partly in place, the gap is named rather than implied away.
   fails after the account was created, the account is deleted again, so a
   failed setup cannot leave an instance with an account and no administrator.
   The authentication library's public sign-up route is disabled; `/setup`
-  creates the first account and an invitation creates every one after it.
+  creates the first account and an invitation creates every one after it — or,
+  when the operator turned provisioning on, a first sign-in through the
+  configured identity provider, which is the one other way and is described
+  below.
 - **Invitations.** There is no self-registration and no mail transport, so a
   person joins the way an agent does: an administrator makes a secret and hands
   it over. An invitation is for one e-mail address and one role; its link
