@@ -797,12 +797,14 @@ describe.skipIf(!probe.reachable)('documentation import', () => {
       expect(JSON.stringify(body)).toMatch(/api_token|email/);
     });
 
-    it('takes a Data Center request with no credential, and still refuses a host it may not reach', async () => {
+    it('takes a Data Center request with no credential, and refuses it on the address instead', async () => {
       // No credential is a valid request for a Server or Data Center: a space
-      // may be readable without signing in. What stops this one is the address
-      // — the loopback is refused before any connection is made, whatever the
-      // operator has listed — so the schema is proven without a network.
-      const { status } = await json(
+      // may be readable without signing in. So this one gets past the schema
+      // and is stopped by the address instead — the loopback is refused before
+      // any connection is made, whatever the operator has listed. Which is why
+      // the answer is the adapter's refusal, naming the setting that opens a
+      // private site up, and not a complaint about a missing field.
+      const { status, body } = await json(
         await importsRoute.POST(
           cookie(admin, `/api/v1/spaces/${spaceKey}/imports`, {
             method: 'POST',
@@ -816,8 +818,12 @@ describe.skipIf(!probe.reachable)('documentation import', () => {
           keyParams(spaceKey),
         ),
       );
-      expect(status).toBe(201);
+      expect(status).toBe(400);
+      expect(String(body['error']?.message)).toMatch(/public host/);
+      expect(String(body['error']?.message)).toMatch(/IMPORT_CONFLUENCE_PRIVATE_HOSTS/);
 
+      // And the attempt is kept rather than lost, the way every other failed
+      // import is.
       const listed = await json(
         await importsRoute.GET(cookie(admin, `/api/v1/spaces/${spaceKey}/imports`), keyParams(spaceKey)),
       );
@@ -825,7 +831,6 @@ describe.skipIf(!probe.reachable)('documentation import', () => {
         (record) => record['status'] === 'failed' && String(record['error']).includes('public host'),
       );
       expect(failed).toBeDefined();
-      expect(String(failed?.['error'])).toMatch(/IMPORT_CONFLUENCE_PRIVATE_HOSTS/);
     });
 
     it('refuses an unknown source', async () => {
