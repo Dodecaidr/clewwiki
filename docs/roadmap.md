@@ -843,10 +843,41 @@ mentioned and cannot answer. That is what read-only means, and the way out is
 the editor role — a "may comment" role in between is the next step if it is
 wanted.
 
+**Single sign-on — built.** One OpenID Connect provider, configured by the
+operator, off until it is. It was on the "deliberately not built" list with
+self-registration, and it is built now for a reason that was not true then: a
+company with an identity provider cannot put a wiki behind a second set of
+passwords, and every comparison of self-hosted wikis is decided on this line.
+Docmost keeps it for a paid edition; Outline requires a third-party provider
+before it will run at all.
+
+What it changes is narrow on purpose. The provider answers one question — which
+address this person holds — and the answer is refused without `email_verified`,
+because the address is what matches an identity there to an account here.
+Belonging to the workspace is a second step, taken on the page the provider
+redirects back to: a member goes through, anybody else is signed out again
+unless `OIDC_SIGN_UP` is on, and then they get the one role `OIDC_SIGN_UP_ROLE`
+names, audited like any other join. An account that never came from the provider
+is refused there even with provisioning on, because the check asks for a linked
+provider account rather than for a missing membership. Password sign-in is not
+disabled by any of this: an instance whose provider is down is still one its
+administrator can get into.
+
+One thing had to change underneath. The authentication library will not link a
+provider identity into a local account whose address is unverified — a rule
+against somebody registering at a victim's address and waiting. Here nobody can
+register anything, so the rule protected against nothing and would have refused
+every invited member. An account's address is now recorded as verified when an
+administrator asserts it, which is the only way an account exists at all:
+`/setup` or an invitation. Migration `0019_email_verified_by_invitation` says
+the same about the accounts that already exist, and
+`apps/web/src/lib/members/verified.ts` says why.
+
 **Deliberately not built**: self-service "forgot password" (there is nowhere to
-send the proof), self-registration, SSO. **Next, if it is wanted**: a role that
-reads and comments; a supported way back in for an instance whose only account
-is locked out.
+send the proof), self-registration, SAML, directory sync. **Next, if it is
+wanted**: a role that reads and comments; a supported way back in for an
+instance whose only account is locked out; ending the provider's session as well
+as this one on sign-out.
 
 ## Inbox — **built**
 
