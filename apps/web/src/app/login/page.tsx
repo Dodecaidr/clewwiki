@@ -3,7 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { LoginForm } from './login-form';
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import { getSessionContext } from '@/lib/session';
 import { hasAnyUser } from '@/lib/workspace';
@@ -15,7 +15,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: t('title') };
 }
 
-export default async function LoginPage() {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reset?: string }> }) {
   // A fresh instance has nothing to sign in to yet; send the visitor to setup.
   if (!(await hasAnyUser())) {
     redirect('/setup');
@@ -36,7 +36,8 @@ export default async function LoginPage() {
         </div>
         <CardDescription>{t('intro')}</CardDescription>
       </CardHeader>
-      <CardBody>
+      <CardBody className="grid gap-4">
+        {(await searchParams).reset === 'done' ? <Alert tone="info">{t('resetDone')}</Alert> : null}
         <LoginForm />
       </CardBody>
     </Card>

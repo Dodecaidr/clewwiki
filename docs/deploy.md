@@ -697,6 +697,31 @@ docker compose start web
 still works, but every session has to sign in again; without
 `POSTGRES_PASSWORD` the application cannot reach a restored volume.
 
+## Recovering the last administrator
+
+Anybody's forgotten password is fixed by an administrator, with a reset link
+from **Members**. The exception is a workspace whose *only* administrator has
+lost theirs: there is nobody left to make the link, and clewwiki sends no mail.
+That account is recovered by whoever runs the server, from the database —
+which is the same trust the setup token rests on.
+
+Promote somebody who can still sign in, and let them make the reset link:
+
+```sh
+docker compose exec -T postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+update memberships set role = 'admin'
+ where user_id = (select id from "user" where email = 'colleague@example.com');
+SQL
+```
+
+They open **Members**, press **Reset link** next to the locked-out
+administrator, and hand the link over. Demote them again afterwards if they
+should not stay an administrator. If the locked-out administrator is the only
+account there is, nobody can sign in at all: there is no supported way back in
+short of restoring a backup, so keep that password in a password manager, and
+invite a second administrator as soon as there is a second person.
+
 ## Upgrading
 
 ```sh

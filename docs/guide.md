@@ -49,8 +49,19 @@ tokens, spaces and their settings. A workspace always has at least one
 administrator: the last one cannot be demoted or removed.
 
 **Remove** deletes the account and signs the person out everywhere. What they
-wrote stays, under their name. There is no password reset, because there is no
-mail: if somebody loses their password, remove them and invite them again.
+wrote stays, under their name.
+
+**Your account** is behind your name in the header. Change your name there —
+it is what appears next to what you write from then on, and what others type to
+mention you; what you wrote before keeps the name it was written under — and
+your password, by giving the current one. Changing it signs you out everywhere
+else.
+
+**A forgotten password** needs an administrator, because clewwiki sends no mail
+and so has nowhere to send a reset. On **Members**, **Reset link** next to a
+person gives a link, shown once, that works once, for 24 hours. Send it to them;
+they choose a new password, every session of their account ends, and they sign
+in with the new one. Their account, and everything tied to it, stays as it was.
 
 ## Restricted spaces
 

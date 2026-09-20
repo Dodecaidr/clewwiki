@@ -276,10 +276,28 @@ partly in place, the gap is named rather than implied away.
   is taken under a row lock in the transaction that makes the change, and an
   administrator cannot remove themselves. Removing a member deletes the account
   — sessions and credentials cascade — while what they wrote stays under the
-  name it was written under. There is no password reset: no mail is sent, and
-  an administrator recovering somebody's access removes and re-invites them.
-  Every step is audited: `invitation.created`, `invitation.revoked`,
-  `member.joined`, `member.role_changed`, `member.removed`.
+  name it was written under. Every step is audited: `invitation.created`,
+  `invitation.revoked`, `member.joined`, `member.role_changed`,
+  `member.removed`.
+- **Passwords.** A member changes their own password by giving the current one,
+  and the change signs every other session of the account out — whoever changes
+  a password because somebody else may have it means exactly that. Attempts are
+  limited to five per quarter of an hour per account, so a stolen session does
+  not get to guess the password behind it, and a wrong current password gets
+  one answer whatever was wrong. A *forgotten* password cannot be self-service:
+  every such flow proves who is asking by sending something somewhere, and
+  nothing is sent from here. The proof is an administrator, who makes a **reset
+  link** for a member. It is built like an invitation — 256 random bits, shown
+  once, stored as a SHA-256, claimed by a conditional update so that it sets one
+  password however often it is submitted — and lives for a day rather than a
+  week, because it opens an account that already holds something; making a new
+  one revokes the last. Using it sets the password and deletes every session of
+  that account. It does not sign the visitor in: the new password is proven by
+  using it. `/reset/…` is marked `noindex` and `no-referrer`. Audited as
+  `account.password_changed`, `account.renamed`, `password_reset.created` and
+  `password_reset.completed` — never with a password in the row. The one account
+  nobody else can help is the last administrator's; `docs/deploy.md` says how
+  the operator recovers it.
 - **Cross-site requests.** Server actions carry Next.js's own origin check. REST
   calls authenticated by the session cookie that change state must come from
   the instance's origin (`Origin` equal to `BETTER_AUTH_URL`, or
