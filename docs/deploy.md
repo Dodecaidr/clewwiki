@@ -142,7 +142,8 @@ a password of at least 12 characters. There are no default credentials and no se
 any migration or fixture: this account is the first one that exists. Once it
 does, `/setup` answers 404 and the form cannot be reached again. There is no
 self-registration either: the authentication library's public sign-up route is
-switched off, so `/setup` is the only way an account comes into existence.
+switched off: `/setup` creates this first account, and every later one comes
+from an invitation an administrator makes on the **Members** page (step 9).
 
 Store the password in a password manager. No mail transport is configured, so
 there is no reset email to fall back on.
@@ -220,7 +221,11 @@ WWW-Authenticate: Bearer realm="clewwiki"
 {"error":{"code":"invalid_token","message":"Invalid or expired token"}}
 ```
 
-**9. Create a space.** Pages always live in a space, and a fresh instance has
+**9. Invite your team.** Open **Members**, enter a colleague's e-mail address
+and role, and send them the link it gives you — clewwiki sends no mail itself.
+The link works once, for seven days; they choose their own name and password.
+
+**10. Create a space.** Pages always live in a space, and a fresh instance has
 none. On the home page, which lists the spaces, press **Create space**: a name,
 a **key** of 2–10 letters or digits (`API`, `MOBILE`) that appears in URLs and
 agent prompts and cannot be changed later, and optionally an icon and a short
@@ -228,7 +233,7 @@ description. An existing instance that already had pages gets a space with the
 key `MAIN` holding all of them when it is upgraded — see
 [Upgrading](#upgrading).
 
-**10. Connect an agent.** Continue with
+**11. Connect an agent.** Continue with
 [Connecting an AI coding agent (MCP)](#connecting-an-ai-coding-agent-mcp)
 below. Then go through the [Security checklist](#security-checklist) before
 anyone else starts using the instance.

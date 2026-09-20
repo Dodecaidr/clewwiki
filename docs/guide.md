@@ -30,6 +30,28 @@ space stays readable but drops out of the space list and of searches across
 all spaces, and takes no new pages. Roles are workspace-wide in this version:
 an editor can edit in every space.
 
+## Members
+
+**Members**, in the header, lists the people of the workspace. Anybody can see
+it; administrators manage it.
+
+There is no sign-up page and clewwiki sends no e-mail, so people join by
+invitation. An administrator enters an e-mail address and a role and gets a
+**link**, shown once — copy it and send it yourself, over a channel you trust,
+because whoever has the link can create the account. It works once, for that
+address, for seven days; inviting the same address again replaces the earlier
+link, and **Revoke** cancels one that has not been used. The person who opens
+it chooses their own name and password and lands in the wiki, signed in.
+
+Two roles. An **editor** reads and writes pages, takes part in discussions and
+reviews what agents change. An **administrator** can also manage members, agent
+tokens, spaces and their settings. A workspace always has at least one
+administrator: the last one cannot be demoted or removed.
+
+**Remove** deletes the account and signs the person out everywhere. What they
+wrote stays, under their name. There is no password reset, because there is no
+mail: if somebody loses their password, remove them and invite them again.
+
 ## Restricted spaces
 
 A space is open to everybody in the workspace unless an administrator restricts

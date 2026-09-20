@@ -47,7 +47,8 @@ const SETUP_LOCK_KEY = 0x63_6c_65_77;
  *    undo.
  *
  * No account is ever seeded by a migration or fixture — this is the only way
- * an account comes into existence on a fresh instance.
+ * an account comes into existence on a fresh instance. Every later one comes
+ * from an invitation; see `lib/members/service.ts`.
  */
 export async function completeSetup(input: SetupInput): Promise<SetupOutcome> {
   // Checked before the lock and before the "already done" answer, so a caller

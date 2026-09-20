@@ -60,9 +60,10 @@ export const auth = betterAuth({
     },
   },
   trustedOrigins: [getAuthBaseUrl()],
-  // Accounts come into existence through /setup only, which calls the sign-up
-  // endpoint server-side (`auth.api`, not the HTTP router). Closing the public
-  // route means nobody can register themselves — before setup, when an
+  // Accounts come into existence through /setup (the first) and through an
+  // invitation (`lib/members`), both of which call the sign-up endpoint
+  // server-side (`auth.api`, not the HTTP router). Closing the public route
+  // means nobody can register themselves — before setup, when an
   // account created this way would lock the operator out of /setup, or after.
   disabledPaths: ['/sign-up/email'],
   // `nextCookies` must stay last: it flushes Set-Cookie headers produced by

@@ -255,8 +255,31 @@ partly in place, the gap is named rather than implied away.
   runs under a database advisory lock, and if the membership or audit write
   fails after the account was created, the account is deleted again, so a
   failed setup cannot leave an instance with an account and no administrator.
-  The authentication library's public sign-up route is disabled; `/setup` is
-  the only way an account is created.
+  The authentication library's public sign-up route is disabled; `/setup`
+  creates the first account and an invitation creates every one after it.
+- **Invitations.** There is no self-registration and no mail transport, so a
+  person joins the way an agent does: an administrator makes a secret and hands
+  it over. An invitation is for one e-mail address and one role; its link
+  carries 256 bits of randomness, is shown exactly once, and only the SHA-256 of
+  its secret is stored — a database dump holds no working link. It works once
+  (claimed by a conditional update, so a link opened twice at the same moment
+  makes one account), for seven days, until revoked; inviting the same address
+  again revokes the earlier link. Every way a link can fail — malformed,
+  unknown, used, revoked, expired — gives the same answer, compared in constant
+  time, so a link says nothing about what it once was. The account is created
+  server-side by the authentication library with the invited address, never one
+  the visitor types; if the membership cannot be written after it, the account
+  is deleted again. `/join/…` is marked `noindex` and `no-referrer`, so
+  the link is neither kept by a search engine nor sent on to another site. Only administrators invite, change roles and remove, and that
+  is checked in each server action, not only on the page. **A workspace always
+  has an administrator**: the last one cannot be demoted or removed, the count
+  is taken under a row lock in the transaction that makes the change, and an
+  administrator cannot remove themselves. Removing a member deletes the account
+  — sessions and credentials cascade — while what they wrote stays under the
+  name it was written under. There is no password reset: no mail is sent, and
+  an administrator recovering somebody's access removes and re-invites them.
+  Every step is audited: `invitation.created`, `invitation.revoked`,
+  `member.joined`, `member.role_changed`, `member.removed`.
 - **Cross-site requests.** Server actions carry Next.js's own origin check. REST
   calls authenticated by the session cookie that change state must come from
   the instance's origin (`Origin` equal to `BETTER_AUTH_URL`, or

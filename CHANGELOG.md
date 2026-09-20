@@ -9,6 +9,17 @@ tagged.
 
 ## [Unreleased]
 
+### Added
+
+- **Members and invitations.** Until now `/setup` was the only way an account
+  came into existence, and it closes after the first one. An administrator can
+  now invite people from **Members**: an e-mail address and a role give a link,
+  shown once, that works once, for seven days. No mail is sent — the
+  administrator hands the link over — and the person who opens it chooses their
+  own name and password. Roles can be changed and members removed; the last
+  administrator can be neither demoted nor removed. Only the hash of a link is
+  stored. Migration `0016_invitations`.
+
 ## [0.4.0] - 2026-09-20
 
 An answer finds the one who asked, and a question finds the one who should
