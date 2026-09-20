@@ -34,9 +34,14 @@
  * generated token out of `docker compose logs web`, the way the README tells
  * an operator to.
  *
+ * With SMOKE_TOKEN_FILE set, the agent token issued on the way is written to
+ * that file (mode 0600), so a later step can point another client at the same
+ * instance — the install check uses it for the published MCP package.
+ *
  * Exit status is 0 when every step passed and 1 at the first failure.
  */
 import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
 const BASE_URL = (process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
@@ -445,6 +450,8 @@ async function main() {
   await signIn();
   await createSpace();
   const token = await issueToken();
+  const tokenFile = (process.env.SMOKE_TOKEN_FILE ?? '').trim();
+  if (tokenFile !== '') writeFileSync(tokenFile, token, { mode: 0o600 });
   await wikiRoundTrip(token);
   await mcpOverHttp(token);
   log(`all ${step} checks passed`);
