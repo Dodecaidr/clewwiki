@@ -3,25 +3,52 @@
 [![CI](https://github.com/Dodecaidr/clewwiki/actions/workflows/ci.yml/badge.svg)](https://github.com/Dodecaidr/clewwiki/actions/workflows/ci.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/github/license/Dodecaidr/clewwiki)](LICENSE)
 
-**A self-hosted wiki that AI coding agents write and people read.**
+**A self-hosted, open-source wiki with an MCP server built in.**
 
-Agents reach it over MCP. People read and edit the same pages in a browser. It
-runs on your own server and works with whichever agent tools your team uses.
+A Confluence alternative that your AI coding agents can read and write, not only
+search. People use it in a browser, agents reach the same pages over MCP, and it
+runs on your own server with whichever agent tools your team uses: Claude Code,
+Cursor, Codex, Copilot, or anything else that speaks MCP.
 
 ![A page with a diagram and a chart](docs/images/page.png)
 
 Status: v0.5.0, early and under active development.
 
-## The problem
+## Why this one
 
-- **Agent context rots.** An `AGENTS.md` drifts from the code the day someone
-  refactors, and the next agent trusts it anyway.
+**MCP is part of the wiki, not an add-on.** 30 tools over stdio or streamable
+HTTP, and a REST API beneath them. Agents create and edit pages as well as read
+them. A token is scoped to the spaces it may touch, it expires, it can be
+revoked, and every write it makes lands in an audit log.
+
+**One edition.** AGPL-3.0, and everything is in it: the MCP server, agent
+tokens, import, restricted spaces, roles, the audit log. There is no paid tier
+to unlock them and none is planned.
+
+**Light to run.** One Compose file and PostgreSQL. No Redis, no mail server, no
+third-party login to register an application with. Colleagues join by a one-time
+invitation link, so an instance with no SMTP is a complete instance.
+
+**Your content comes in and goes out.** Import a Confluence Cloud space, a
+Notion export, a folder of Markdown or a PDF, images included. Export a page as
+Markdown or HTML, or a whole space as a ZIP. Pages are stored as Markdown, so
+leaving is a download. [Moving from Confluence](docs/from-confluence.md) walks
+through it.
+
+[How it compares](docs/compare.md) with Confluence, Docmost, Outline, BookStack
+and Wiki.js, including what they do that clewwiki does not.
+
+## What changes when agents write
+
+An agent with write access brings three problems an ordinary wiki was never
+built for.
+
 - **Agents collide.** Two writers on one page means one of them loses their
   work, silently.
-- **One document cannot serve both readers.** What an agent parses well reads
-  badly to a person, and the other way round.
-
-## What it does
+- **Nobody reviewed it.** An agent writes faster than anybody reads, and a wrong
+  page is trusted by the next agent.
+- **Context rots.** An `AGENTS.md` drifts from the code the day someone
+  refactors, and the next agent trusts it anyway.
 
 **Claims instead of lost updates.** A writer, person or agent, takes a lease on
 a page before writing. Anyone else gets a conflict that names the holder, not a
@@ -39,25 +66,35 @@ with a note the agent can read before its next attempt.
 Swift, TypeScript, TSX or Kotlin. A formatter run changes nothing. A body change
 marks the page stale, a rename or a move is recognised, a deletion is reported.
 
+**One set of rules for every agent.** Project rules and reusable skills live in
+the wiki, and any agent reads them over MCP before it starts. The team's
+conventions stop being one file per tool in one person's checkout.
+
+## And the rest of a wiki
+
 **An editor people use.** Visual or Markdown, stored as Markdown either way.
 Tables, callouts, Mermaid diagrams, charts from data, pasted screenshots, and
 several people in one page at once.
 
 <img src="docs/images/editor.png" alt="The visual editor" width="520">
 
-**And the rest of a wiki.**
-
 - Spaces per project, restricted spaces, and agent tokens scoped to spaces.
-- A team, not one account: members join by a one-time invitation link, with no
-  mail server to configure.
 - A technical page and a plain-language page for the same topic, linked as a pair.
 - Discussions between agents that expire, leaving only the written decision.
 - An inbox for people and agents, and `@mentions` that reach it: an answer finds
   whoever asked, without e-mail and without a stored notification.
-- Project rules and reusable skills that agents read before they start.
-- Import from Confluence, Notion, a Markdown folder or a PDF, images included. Export to
-  Markdown, HTML or a ZIP of the space.
-- 30 MCP tools over stdio or HTTP, a REST API, and an audit log of every write.
+- Full-text search across every space you can read.
+- An interface in English and Russian.
+
+## Not there yet
+
+- **Single sign-on.** Login is e-mail and password. There is no OIDC, SAML or
+  LDAP.
+- **Confluence Server and Data Center.** The importer speaks the Cloud REST API.
+  Server and Data Center use an older API and are untested. Until that lands,
+  [the guide](docs/from-confluence.md) shows the route through a Markdown export.
+- **A mobile application.** The web interface works on a phone. There is no
+  native client.
 
 ## Quick start
 
@@ -97,6 +134,8 @@ and [`docs/mcp.md`](docs/mcp.md).
 | | |
 |---|---|
 | [Deploy and operate](docs/deploy.md) | Installation, reverse proxy, configuration reference, backups, upgrades. |
+| [How it compares](docs/compare.md) | clewwiki next to Confluence, Docmost, Outline, BookStack and Wiki.js. |
+| [Moving from Confluence](docs/from-confluence.md) | Importing a Cloud space, and the route for Server and Data Center. |
 | [Using the wiki](docs/guide.md) | Spaces, pages, the editor, import, discussions, review, claims, export, anchors. |
 | [REST API](docs/api.md) | Every endpoint, who may call it, and what it answers. |
 | [MCP server](docs/mcp.md) | The tools an agent gets, their scopes and their errors. |

@@ -913,7 +913,20 @@ complete.
       created GHCR package defaults to private, and `docker compose pull`
       against a private package fails for anyone without registry access.
 - [x] Tag `v0.1.0`.
-- [ ] Verify `docker compose pull && docker compose up -d` and `npx -y
+- [x] Verify `docker compose pull && docker compose up -d` and `npx -y
       @clewwiki/mcp-server` both work from a clean machine, against the
-      just-published image and package — not a local build.
+      just-published image and package — not a local build. The `Install
+      check` workflow does exactly this on a clean runner, on every release and
+      weekly. First green run: 2026-09-20, image and package 0.5.0.
+- [x] A README that opens with what people look for — a self-hosted wiki with
+      MCP built in, one edition, PostgreSQL only — and a comparison page and a
+      Confluence migration page to link to.
+- [ ] Listings: the open-source-alternative and MCP server directories.
 - [ ] Launch posts.
+
+**What the launch is for.** Everything up to here was built on what its author
+needed. The launch is how that gets tested against people who are not him, and
+what comes back decides the order below. **Next, if it is wanted**, by what
+people moving off other wikis ask for: an importer proven against Confluence
+Server and Data Center, whose end of life in March 2029 is why many of them are
+moving; single sign-on (OIDC first); an interface in German.

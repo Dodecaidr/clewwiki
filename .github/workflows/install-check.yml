@@ -1,0 +1,89 @@
+name: Install check
+
+# Follows the README's quick start on a clean runner, against what is
+# PUBLISHED: the container image on GHCR and the MCP package on npm. CI's
+# docker-smoke job builds the tree being pushed; this one answers a different
+# question — can a stranger who copies the README commands get a running wiki
+# and a connected agent today.
+#
+# The repository checkout is `main`, as it is for anybody who runs `git clone`,
+# while the image is the latest release. If this fails right after a change to
+# docker-compose.yml, .env.example or scripts/smoke-test.mjs, the likely cause
+# is that `main` moved ahead of the published image.
+
+on:
+  workflow_dispatch:
+  # A change to the check itself is checked.
+  push:
+    paths:
+      - .github/workflows/install-check.yml
+      - scripts/mcp-stdio-check.mjs
+  release:
+    types: [published]
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-check
+  cancel-in-progress: true
+
+jobs:
+  quick-start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: README quick start, as written
+        run: |
+          set -eu
+          cp .env.example .env && chmod 600 .env
+          sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env
+          sed -i "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -base64 48)|" .env
+          docker compose pull
+          docker compose up -d --wait --wait-timeout 300
+          docker compose logs web | grep "setup token"
+
+      - name: The streamable HTTP endpoint is opt-in, so opt in for the check
+        run: |
+          set -eu
+          sed -i "s|^MCP_HTTP_ENABLED=.*|MCP_HTTP_ENABLED=true|" .env
+          docker compose up -d --wait --wait-timeout 300
+
+      - name: Set up the instance and drive it the way a person would
+        env:
+          SMOKE_BASE_URL: http://127.0.0.1:3000
+          SMOKE_TOKEN_FILE: ${{ runner.temp }}/agent-token
+        run: node scripts/smoke-test.mjs
+
+      - name: Connect the published MCP package over stdio
+        env:
+          CLEWWIKI_URL: http://127.0.0.1:3000
+        run: |
+          set -eu
+          CLEWWIKI_TOKEN="$(cat "$RUNNER_TEMP/agent-token")" node scripts/mcp-stdio-check.mjs
+
+      - name: Published versions
+        if: always()
+        run: |
+          docker compose images || true
+          npm view @clewwiki/mcp-server version || true
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
