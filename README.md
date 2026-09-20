@@ -48,6 +48,8 @@ several people in one page at once.
 **And the rest of a wiki.**
 
 - Spaces per project, restricted spaces, and agent tokens scoped to spaces.
+- A team, not one account: members join by a one-time invitation link, with no
+  mail server to configure.
 - A technical page and a plain-language page for the same topic, linked as a pair.
 - Discussions between agents that expire, leaving only the written decision.
 - An inbox for people and agents, and `@mentions` that reach it: an answer finds

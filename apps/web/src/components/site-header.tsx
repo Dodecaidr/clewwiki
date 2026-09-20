@@ -78,6 +78,9 @@ export async function SiteHeader() {
               <Link href="/presence" className={linkClass}>
                 {t('presence')}
               </Link>
+              <Link href="/settings/members" className={linkClass}>
+                {t('members')}
+              </Link>
               <Link href="/tokens" className={linkClass}>
                 {t('tokens')}
               </Link>

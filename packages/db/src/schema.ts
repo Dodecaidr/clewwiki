@@ -1189,6 +1189,44 @@ export const pageImages = pgTable(
 );
 
 /**
+ * An invitation to join the workspace.
+ *
+ * There is no self-registration and no mail transport, so a person joins the
+ * way an agent does: an administrator creates a secret and hands it over by
+ * whatever channel they trust. The secret is a link, good once, for one e-mail
+ * address and one role, for a week. Only its hash is stored — like an agent
+ * token, the link is shown exactly once, when it is made.
+ *
+ * A row is never deleted by being used: `accepted_at` and `accepted_user_id`
+ * say who came of it, which is the audit trail of how every account after the
+ * first came into existence.
+ */
+export const invitations = pgTable(
+  'invitations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Lower-cased. The account that accepts is created with exactly this address. */
+    email: text('email').notNull(),
+    role: membershipRole('role').notNull(),
+    prefix: text('prefix').notNull().unique(),
+    tokenHash: text('token_hash').notNull(),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    acceptedUserId: text('accepted_user_id').references(() => users.id, { onDelete: 'set null' }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('invitations_workspace_idx').on(table.workspaceId, table.createdAt),
+    check('invitations_email_lower', sql`${table.email} = lower(${table.email})`),
+  ],
+);
+
+/**
  * Who a message or a comment was addressed to.
  *
  * Writing `@[Name]` or `@name` in a discussion message or a comment brings that

@@ -457,7 +457,8 @@ Fixed:
   embedded credentials, `git://`, `ext::` or a leading `-` are refused, and
   `file://` needs `ALLOW_FILE_REPOSITORIES=true`.
 - *Public self-registration* through the authentication library's sign-up
-  route is disabled; `/setup` still creates the first account server-side.
+  route is disabled; `/setup` still creates the first account server-side, and
+  every later account comes from an invitation (see Members).
 - *First-run setup was first come, first served.* It now requires a one-time
   setup token, configured or generated at start-up and printed to the log.
   A setup that fails after the account is created removes the account again.
@@ -776,6 +777,22 @@ reaches the agent without anybody pasting it.
 
 **Next, if it is wanted**: comments on a selection inside a paragraph rather than
 the whole of it. Telling a reviewer that an agent answered is the inbox, below.
+
+## Members — **built**
+
+Until this, `/setup` was the only way an account came into existence — and it
+closes after the first one. A wiki for a team had no way to let the team in,
+while restricted spaces, live co-editing and mentions all assumed more than one
+person. **Members** closes that: an administrator invites by e-mail address and
+role and gets a one-time link to hand over (no mail is sent, deliberately); the
+person who opens it chooses a name and a password and is signed in. Roles can be
+changed and members removed, and a workspace can never be left without an
+administrator. `invitations`, migration `0016_invitations`; the security notes
+say what the link is and is not.
+
+**Deliberately not built**: password reset (no mail transport — remove and
+re-invite), self-registration, SSO. **Next, if it is wanted**: a read-only role;
+an administrator-made reset link, by the same mechanism as an invitation.
 
 ## Inbox — **built**
 
