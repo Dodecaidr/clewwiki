@@ -526,6 +526,59 @@ sudo nginx -t && sudo systemctl reload nginx
 Obtain the certificate with `certbot certonly --webroot -w /var/www/certbot -d
 wiki.example.com` before enabling the HTTPS block.
 
+## Single sign-on (OpenID Connect)
+
+Optional, and off until configured. It is added to password sign-in rather than
+replacing it: an instance whose provider is unreachable is still one its
+administrator can get into.
+
+**At the provider**, register a confidential client with the authorization code
+flow and this redirect URI:
+
+```
+https://wiki.example.com/api/auth/callback/oidc
+```
+
+Use the same scheme and host as `BETTER_AUTH_URL`. The flow uses PKCE.
+
+**In `.env`**, the three that turn it on, and the rest if you want them:
+
+```sh
+OIDC_ISSUER=https://id.example.com/realms/company
+OIDC_CLIENT_ID=clewwiki
+OIDC_CLIENT_SECRET=...
+
+OIDC_NAME=Company SSO
+OIDC_ALLOWED_EMAIL_DOMAINS=example.com
+```
+
+`OIDC_ISSUER` takes the issuer or the discovery document itself; the well-known
+path is appended when it is missing. Setting one or two of the three refuses to
+start, naming the missing one, rather than starting silently without it.
+
+**Who gets in.** By default, the people an administrator has already invited: a
+sign-in is matched to an existing account by address, and somebody with no
+account is refused with a sentence telling them to ask an administrator. That
+keeps accounts an administrator's decision, which is how the rest of this
+product works. To let anybody at the provider join instead:
+
+```sh
+OIDC_SIGN_UP=true
+OIDC_SIGN_UP_ROLE=viewer
+```
+
+They are then given that role in the workspace on first sign-in, and the join is
+written to the audit log like any other.
+
+**What is required of the provider.** The profile must carry an address and
+`email_verified`. A sign-in without either is refused: the address is what
+matches an identity at the provider to an account here, so an unverified one
+would be a way to claim somebody else's. Check this if your provider is one
+where users can set their own address.
+
+**Signing out** ends the session here. It does not end the session at the
+provider, so a person signing in again may not be asked for anything.
+
 ## Security checklist
 
 Work through this before exposing an instance to anything but your own machine.
@@ -554,6 +607,12 @@ Each line is pass or fail, not a matter of judgement.
       never lists it, and `ls -l .env` shows `-rw-------`.
 - [ ] **The administrator account has a strong, stored password.** It was
       created interactively at first boot; there is no reset email configured.
+- [ ] **If single sign-on is on, the provider verifies addresses.** Confirm in
+      the provider's own settings that a user cannot set an address they do not
+      own. clewwiki refuses a profile without `email_verified`, which is the
+      other half of the same check.
+- [ ] **If `OIDC_SIGN_UP` is on, the domain list is set** (or every account at
+      the provider really should be able to join this wiki).
 - [ ] **Agent tokens carry an expiry.** Prefer a fixed TTL and rotation over a
       token that never expires.
 - [ ] **Agent tokens carry the narrowest scopes that work.** A token that only
@@ -614,6 +673,14 @@ container.
 | `IMPORT_MAX_UPLOAD_MB` | no | `200` | Largest import upload. Refused from the declared `Content-Length`, before the body is read. |
 | `IMPORT_MAX_EXPANDED_MB` | no | `256` | Most an uploaded ZIP may expand to. The upload and what it expands to are held in memory together until the import is staged, so on a host with little memory lower both: a container that runs out is killed, not refused. |
 | `IMPORT_CONFLUENCE_PRIVATE_HOSTS` | no | empty | Host names of Confluence Server or Data Center sites on a private network that imports may connect to, comma-separated. Empty keeps imports to public addresses. Only private ranges open up; the loopback, link-local, multicast and reserved space stay refused whatever is listed. Names, not addresses: what a name resolves to is checked again as the socket connects. |
+| `OIDC_ISSUER` | no | empty | The OpenID Connect issuer, or its discovery document. Set with the two below to offer single sign-on; leave all three empty for password sign-in only. Must be `https`, except on localhost. |
+| `OIDC_CLIENT_ID` | no | empty | The client this instance is registered as at the provider. |
+| `OIDC_CLIENT_SECRET` | no | empty | **Secret.** The client secret. Setting only some of these three refuses to start rather than starting without single sign-on. |
+| `OIDC_NAME` | no | `Single sign-on` | What the button on the sign-in page says. |
+| `OIDC_SCOPES` | no | `openid profile email` | Scopes asked for. `openid` is always included. |
+| `OIDC_SIGN_UP` | no | `false` | Whether a person the provider vouches for who has no account here gets one on first sign-in. Off, single sign-on signs in people an administrator already invited and refuses everybody else. |
+| `OIDC_SIGN_UP_ROLE` | no | `viewer` | The role a provisioned account is given: `viewer`, `editor` or `admin`. |
+| `OIDC_ALLOWED_EMAIL_DOMAINS` | no | empty | Address domains accepted, comma-separated. Empty accepts any address the provider verifies. |
 | `CLEWWIKI_VERSION` | no | `latest` | Which published tag of `ghcr.io/dodecaidr/clewwiki` to run. Pin a version in production. Ignored when building from source. |
 | `WEB_BIND_ADDRESS` | no | `127.0.0.1` | Host interface compose publishes the app on. Change it only for a proxy on another machine, and then to a private address. |
 | `WEB_PORT` | no | `3000` | Host port compose publishes the app on. |

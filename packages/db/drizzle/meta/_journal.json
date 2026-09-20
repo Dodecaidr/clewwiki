@@ -134,6 +134,13 @@
       "when": 1789906831890,
       "tag": "0018_viewer_role",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789941900400,
+      "tag": "0019_email_verified_by_invitation",
+      "breakpoints": true
     }
   ]
 }

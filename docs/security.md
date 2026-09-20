@@ -495,6 +495,30 @@ partly in place, the gap is named rather than implied away.
   migration is done. This is the same principle as the repository setting,
   which stores the *name* of an environment variable and never a token; the
   import differs only in that it needs no persistence at all.
+- **Single sign-on decides who somebody is, never what they may do.** When an
+  OpenID Connect provider is configured, it answers one question: which address
+  this person holds. Everything else stays where it was. The provider's answer
+  is refused unless it carries `email_verified`, because the address is what
+  matches an identity there to an account here and an unverified one would let
+  somebody claim another person's account by setting the address at the
+  provider; `OIDC_ALLOWED_EMAIL_DOMAINS` narrows it further when the provider is
+  shared outside the company. Belonging to the workspace is a second, separate
+  step, taken after the provider has answered, on the page it redirects back to:
+  a member is let through, and anybody else is signed out again unless the
+  operator turned provisioning on, in which case they are given the one role
+  `OIDC_SIGN_UP_ROLE` names and the join is audited. An account that never came
+  from the provider — a password account an administrator removed — is refused
+  there even with provisioning on, because the check is for a linked provider
+  account and not for the absence of a membership. Passwords are never
+  disabled by turning this on: an instance whose provider is unreachable is
+  still one its administrator can get into. **What "verified" means on a local
+  account**: there is no mail transport here, so it cannot mean a confirmation
+  link. It means an administrator asserted the address — through an invitation
+  or at `/setup`, the only two ways an account exists, with public sign-up
+  switched off. That assertion is what allows an identity at the provider to be
+  linked into an existing account rather than making a second one; the rule it
+  stands in for exists to stop somebody registering at a victim's address and
+  waiting, which nobody here can do.
 - **An import only talks to a host it is allowed to reach.** The Confluence
   address is typed by a person, and after that the server at that address
   decides what is requested next — through redirects and through the `next` link

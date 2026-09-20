@@ -35,6 +35,22 @@ tagged.
   release, weekly, and on demand. `scripts/mcp-stdio-check.mjs` is the second
   half and runs against any instance.
 
+- **Single sign-on over OpenID Connect.** Three variables — `OIDC_ISSUER`,
+  `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` — put a button on the sign-in page;
+  empty, nothing changes. Password sign-in keeps working either way, so a
+  provider that is down does not lock an administrator out. The provider decides
+  who somebody is and nothing else: a profile without `email_verified` is
+  refused, `OIDC_ALLOWED_EMAIL_DOMAINS` narrows it further, and belonging to the
+  workspace stays an administrator's decision unless `OIDC_SIGN_UP` is turned
+  on, when a first-time arrival is given `OIDC_SIGN_UP_ROLE` and the join is
+  audited. Setting only some of the three refuses to start rather than starting
+  silently without it. `docs/deploy.md` has the provider setup; `docs/security.md`
+  has the trust model.
+- **An account's address is recorded as verified when an administrator asserts
+  it** — at `/setup` or through an invitation, the only two ways an account
+  exists here. Migration `0019_email_verified_by_invitation` says the same about
+  accounts that already exist. This is what lets single sign-on land on an
+  invited member's account instead of making a second one.
 - **Import from Confluence Server and Data Center.** The Confluence form now
   asks where the site runs. A Server or Data Center is read over the REST API
   v1: the address may carry a context path, the hierarchy comes from each page's

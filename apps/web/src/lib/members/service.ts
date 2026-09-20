@@ -10,6 +10,7 @@ import { hashTokenSecret, secureCompareHash } from '../agent-token-crypto';
 import { recordAudit } from '../audit';
 import { auth } from '../auth';
 import { getDatabase } from '../db';
+import { markEmailVerified } from './verified';
 
 /**
  * The people of a workspace: who they are, how they join, how they leave.
@@ -349,6 +350,9 @@ export async function acceptInvitation(input: AcceptInvitationInput): Promise<{ 
     const signUp = await auth.api.signUpEmail({ body: { email: open.email, password: input.password, name } });
     if (!signUp?.user) throw new Error('sign-up returned no user');
     userId = signUp.user.id;
+    // An administrator addressed the invitation to this address, which is what
+    // this instance can assert about it — see `members/verified.ts`.
+    await markEmailVerified(userId);
   } catch (error) {
     await release();
     console.error('[members] the account of an invited person could not be created', error);

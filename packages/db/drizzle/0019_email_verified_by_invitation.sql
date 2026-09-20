@@ -1,0 +1,11 @@
+-- Every account in this database was created either by `/setup` or by an
+-- administrator's invitation: public sign-up is switched off in the
+-- authentication configuration, and always has been. So the address on each of
+-- these rows was asserted by an administrator, which is what this product means
+-- by a verified address — see `apps/web/src/lib/members/verified.ts`.
+--
+-- It is recorded now because the authentication library refuses to link an
+-- identity from an OpenID Connect provider into a row whose address is
+-- unverified. Without this, turning single sign-on on would refuse every member
+-- who already exists.
+UPDATE "user" SET "email_verified" = true WHERE "email_verified" = false;

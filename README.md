@@ -25,9 +25,10 @@ revoked, and every write it makes lands in an audit log.
 tokens, import, restricted spaces, roles, the audit log. There is no paid tier
 to unlock them and none is planned.
 
-**Light to run.** One Compose file and PostgreSQL. No Redis, no mail server, no
-third-party login to register an application with. Colleagues join by a one-time
-invitation link, so an instance with no SMTP is a complete instance.
+**Light to run.** One Compose file and PostgreSQL. No Redis and no mail server:
+colleagues join by a one-time invitation link, so an instance with no SMTP is a
+complete instance. Single sign-on over OpenID Connect when you want it, three
+variables and off by default.
 
 **Your content comes in and goes out.** Import a Confluence space — Cloud, Server or Data
 Center — a Notion export, a folder of Markdown or a PDF, images included. Export a page as
@@ -88,8 +89,8 @@ several people in one page at once.
 
 ## Not there yet
 
-- **Single sign-on.** Login is e-mail and password. There is no OIDC, SAML or
-  LDAP.
+- **SAML and LDAP.** Single sign-on speaks OpenID Connect. There is no SAML
+  connector and no directory sync.
 - **A track record for the Data Center importer.** Confluence Cloud, Server and
   Data Center all import, the last two over the v1 API, but that route is new
   and has been tested against fixtures rather than years of use.

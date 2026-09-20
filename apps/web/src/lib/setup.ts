@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { memberships, users, withAdvisoryLock, workspaces } from '@clewwiki/db';
 
 import { auth } from './auth';
+import { markEmailVerified } from './members/verified';
 import { recordAudit } from './audit';
 import { getDatabaseHandle } from './db';
 import { clearSetupToken, verifySetupToken } from './setup-token';
@@ -71,6 +72,9 @@ export async function completeSetup(input: SetupInput): Promise<SetupOutcome> {
       return { ok: false, error: 'generic' };
     }
     const userId = signUp.user.id;
+    // The operator typed their own address at a fresh instance; see
+    // `members/verified.ts` for what this instance means by verified.
+    await markEmailVerified(userId);
 
     try {
       const workspaceId = await db.transaction(async (tx) => {

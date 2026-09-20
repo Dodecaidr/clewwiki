@@ -4,7 +4,9 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
+import { auth } from '@/lib/auth';
 import { attemptLogin } from '@/lib/login';
+import { OIDC_PROVIDER_ID } from '@/lib/oidc';
 
 export interface LoginFormState {
   error?: 'invalid';
@@ -41,4 +43,34 @@ export async function signInAction(
   }
 
   redirect('/');
+}
+
+/**
+ * Starting the single sign-on round trip.
+ *
+ * The provider is asked for an authorization URL and the browser is sent
+ * there; everything after that is the library's callback route, and the person
+ * comes back to `/sso`, which decides whether they belong to this workspace.
+ *
+ * A failure at the provider comes back to the sign-in page with a reason in the
+ * address bar rather than an error page, because this is somebody trying to get
+ * in and the next thing they need is the password form.
+ */
+export async function signInWithSsoAction(): Promise<void> {
+  let url: string | null = null;
+  try {
+    const started = await auth.api.signInSocial({
+      body: {
+        provider: OIDC_PROVIDER_ID,
+        callbackURL: '/sso',
+        errorCallbackURL: '/login?sso=failed',
+        disableRedirect: true,
+      },
+      headers: new Headers(await headers()),
+    });
+    url = started?.url ?? null;
+  } catch (error) {
+    console.error('[sso] the provider could not be reached', error);
+  }
+  redirect(url ?? '/login?sso=failed');
 }

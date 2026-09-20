@@ -484,7 +484,11 @@
     "password": "Password",
     "submit": "Sign in",
     "error": "Email or password is incorrect, or there have been too many attempts. Wait a few minutes and try again.",
-    "resetDone": "Your password is set. Sign in with it."
+    "resetDone": "Your password is set. Sign in with it.",
+    "ssoIntro": "Your organisation's single sign-on is set up on this wiki.",
+    "ssoSubmit": "Continue with {name}",
+    "ssoDenied": "You signed in, but you are not a member of this wiki. Ask an administrator to invite you.",
+    "ssoFailed": "Single sign-on did not complete. Try again, or sign in with a password."
   },
   "join": {
     "title": "Join",
@@ -800,6 +804,7 @@
       "editor": "<strong>Editor</strong> — read, create, edit and delete pages, work with anchors, see presence, search. Editors cannot issue tokens; ask an administrator for one.",
       "p2": "The first account, created during setup, is the administrator.",
       "p3": "Roles apply to the whole workspace: an editor can edit pages in every space. Permissions per space are planned for a later version.",
+      "pSso": "Sign-in can also go through your organisation's identity provider, when the operator has set one up: the button is under the password form. Who is let in stays with the administrator — somebody the provider vouches for still needs an invitation, unless the operator chose otherwise.",
       "pRestricted": "<strong>A space can be restricted to its members.</strong> An administrator switches it on under <strong>Settings → Access</strong> and ticks the people who may see the space. To everybody else it then does not exist: it is not in the list of spaces, search does not find its pages, and a link to one answers “not found”. Members can do there what their role lets them do anywhere; administrators see every space. Agent tokens are separate: a token with no space list reaches restricted spaces too, so give an agent a list on the Agent tokens page."
     },
     "more": {
