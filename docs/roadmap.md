@@ -913,11 +913,11 @@ complete.
       created GHCR package defaults to private, and `docker compose pull`
       against a private package fails for anyone without registry access.
 - [x] Tag `v0.1.0`.
-- [ ] Verify `docker compose pull && docker compose up -d` and `npx -y
+- [x] Verify `docker compose pull && docker compose up -d` and `npx -y
       @clewwiki/mcp-server` both work from a clean machine, against the
       just-published image and package — not a local build. The `Install
       check` workflow does exactly this on a clean runner, on every release and
-      weekly; the box is ticked by its first green run.
+      weekly. First green run: 2026-09-20, image and package 0.5.0.
 - [x] A README that opens with what people look for — a self-hosted wiki with
       MCP built in, one edition, PostgreSQL only — and a comparison page and a
       Confluence migration page to link to.
