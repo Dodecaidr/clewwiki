@@ -7,7 +7,7 @@ import { listInvitations, listMembers } from '@/lib/members/service';
 import { getSessionContext } from '@/lib/session';
 import { formatDateTime } from '@/lib/utils';
 
-import { InviteForm, RemoveMemberButton, RevokeInvitationButton, RoleForm } from './member-forms';
+import { InviteForm, RemoveMemberButton, ResetLinkButton, RevokeInvitationButton, RoleForm } from './member-forms';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,7 +101,10 @@ export default async function MembersPage() {
                     <>
                       <RoleForm userId={member.userId} name={member.name} role={member.role} />
                       {member.userId === session.userId ? null : (
-                        <RemoveMemberButton userId={member.userId} name={member.name} />
+                        <>
+                          <ResetLinkButton userId={member.userId} name={member.name} />
+                          <RemoveMemberButton userId={member.userId} name={member.name} />
+                        </>
                       )}
                     </>
                   ) : (

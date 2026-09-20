@@ -9,6 +9,19 @@ tagged.
 
 ## [Unreleased]
 
+### Added
+
+- **Your account.** Behind your name in the header: change your name, and your
+  password by giving the current one. Changing the password signs every other
+  session out. Attempts are limited to five per quarter of an hour.
+- **Reset links.** An administrator can make a reset link for a member who has
+  forgotten their password — **Members** → **Reset link**. Shown once, stored as
+  a hash, good once, for 24 hours; using it sets the password and ends every
+  session of that account. Until now the only remedy was removing the person and
+  inviting them again, which made a new account. Migration
+  `0017_password_resets`. `docs/deploy.md` gains a section on recovering a
+  workspace's last administrator.
+
 ## [0.5.0] - 2026-09-20
 
 A team can join. Upgrading runs migration `0016_invitations`; nothing changes for

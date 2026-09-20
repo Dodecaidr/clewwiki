@@ -50,6 +50,10 @@ export type MemberErrorCode =
   | 'invalidInvitation'
   | 'emailTaken'
   | 'password'
+  | 'name'
+  | 'currentPassword'
+  | 'rateLimited'
+  | 'invalidReset'
   | 'generic';
 
 export class MemberError extends Error {

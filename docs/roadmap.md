@@ -790,9 +790,21 @@ changed and members removed, and a workspace can never be left without an
 administrator. `invitations`, migration `0016_invitations`; the security notes
 say what the link is and is not.
 
-**Deliberately not built**: password reset (no mail transport — remove and
-re-invite), self-registration, SSO. **Next, if it is wanted**: a read-only role;
-an administrator-made reset link, by the same mechanism as an invitation.
+**Accounts — built.** Members left two things open, and both were found by
+using it: nobody could change their own name or password, and a lost password
+meant removing the person and inviting them again — a new account, so their
+space memberships, their inbox and every mention of them went with the old one.
+**Your account** (behind your name in the header) changes the name, and the
+password against the current one, signing every other session out. A forgotten
+password is an administrator's **Reset link** on Members: the invitation
+mechanism again — shown once, hashed, good once — for 24 hours, setting the
+password and ending the account's sessions. `password_resets`, migration
+`0017_password_resets`. The last administrator's own lost password is the
+operator's to recover from the database; `docs/deploy.md` says how.
+
+**Deliberately not built**: self-service "forgot password" (there is nowhere to
+send the proof), self-registration, SSO. **Next, if it is wanted**: a read-only
+role; a supported way back in for an instance whose only account is locked out.
 
 ## Inbox — **built**
 

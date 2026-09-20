@@ -3,7 +3,13 @@
 import { useActionState, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
-import { changeRoleAction, inviteMemberAction, removeMemberAction, revokeInvitationAction } from './actions';
+import {
+  changeRoleAction,
+  createResetLinkAction,
+  inviteMemberAction,
+  removeMemberAction,
+  revokeInvitationAction,
+} from './actions';
 import type { MembersFormState } from './actions';
 import { CopyBlock } from '@/components/copy-block';
 import { Alert } from '@/components/ui/card';
@@ -84,6 +90,29 @@ export function RoleForm({ userId, name, role }: { userId: string; name: string;
           {t('saveRole')}
         </Button>
       </div>
+      <ErrorLine state={state} />
+    </form>
+  );
+}
+
+/** For somebody who lost their password: a link, shown once, that lets them choose a new one. */
+export function ResetLinkButton({ userId, name }: { userId: string; name: string }) {
+  const t = useTranslations('members');
+  const [state, action, pending] = useActionState(createResetLinkAction, initialState);
+  return (
+    <form action={action} className="grid gap-2">
+      <input type="hidden" name="userId" value={userId} />
+      <div>
+        <Button type="submit" variant="outline" size="sm" disabled={pending} aria-label={`${t('resetLink')} — ${name}`}>
+          {t('resetLink')}
+        </Button>
+      </div>
+      {state.resetLink ? (
+        <div className="grid max-w-md gap-1">
+          <CopyBlock code={state.resetLink} wrap />
+          <p className="text-xs text-muted-foreground">{t('resetLinkHint')}</p>
+        </div>
+      ) : null}
       <ErrorLine state={state} />
     </form>
   );

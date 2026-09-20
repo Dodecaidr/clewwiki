@@ -100,6 +100,11 @@ export async function SiteHeader() {
           {session ? <SearchBox /> : null}
           <LanguageSwitcher />
           {session ? (
+            <Link href="/settings/account" className={`${linkClass} text-sm`} title={t('account')}>
+              {session.name}
+            </Link>
+          ) : null}
+          {session ? (
             <form action={signOutAction}>
               <Button type="submit" variant="outline" size="sm">
                 {tc('signOut')}

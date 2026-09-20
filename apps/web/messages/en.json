@@ -21,7 +21,8 @@
     "connect": "Connect an agent",
     "inbox": "Inbox",
     "inboxUnread": "{count, plural, one {# unread} other {# unread}}",
-    "members": "Members"
+    "members": "Members",
+    "account": "Your account"
   },
   "home": {
     "title": "clewwiki",
@@ -482,7 +483,8 @@
     "email": "Email",
     "password": "Password",
     "submit": "Sign in",
-    "error": "Email or password is incorrect, or there have been too many attempts. Wait a few minutes and try again."
+    "error": "Email or password is incorrect, or there have been too many attempts. Wait a few minutes and try again.",
+    "resetDone": "Your password is set. Sign in with it."
   },
   "join": {
     "title": "Join",
@@ -501,6 +503,19 @@
     "error_emailTaken": "An account with this address already exists. Sign in instead.",
     "error_password": "The password must be 12 to 256 characters.",
     "error_generic": "The account could not be created. Ask an administrator to look at the server log."
+  },
+  "reset": {
+    "title": "Choose a new password",
+    "heading": "Choose a new password",
+    "intro": "An administrator made this link for your account. It works once. Afterwards you sign in with the new password, and every other session of the account is signed out.",
+    "email": "Account",
+    "password": "New password",
+    "passwordHint": "At least 12 characters. Keep it in a password manager.",
+    "submit": "Set password",
+    "invalid": "This link does not work: it was used, replaced, or has expired. Ask an administrator of the workspace for a new one.",
+    "error_invalidReset": "This link no longer works. Ask an administrator for a new one.",
+    "error_password": "The password must be 12 to 256 characters.",
+    "error_generic": "The password could not be set. Ask an administrator to look at the server log."
   },
   "tokens": {
     "title": "Agent tokens",
@@ -579,7 +594,28 @@
     "error_invalidInvitation": "That invitation no longer works.",
     "error_emailTaken": "An account with that address already exists.",
     "error_password": "The password must be 12 to 256 characters.",
-    "error_generic": "That did not work. Details are in the server log."
+    "error_generic": "That did not work. Details are in the server log.",
+    "resetLink": "Reset link",
+    "resetLinkHint": "Shown once and good once, for 24 hours. Whoever opens it chooses a new password for this account, and every session of the account ends. Send it over a channel you trust.",
+    "error_name": "A name is 1 to 100 characters.",
+    "error_currentPassword": "The current password is not right.",
+    "error_rateLimited": "Too many attempts. Wait a quarter of an hour.",
+    "error_invalidReset": "That reset link no longer works."
+  },
+  "account": {
+    "title": "Your account",
+    "nameHeading": "Name",
+    "name": "Your name",
+    "nameHint": "Shown next to what you write from now on, and what others type to mention you. What you wrote earlier keeps the name it was written under.",
+    "saveName": "Save name",
+    "nameSaved": "Saved.",
+    "passwordHeading": "Password",
+    "passwordIntro": "Changing it signs you out everywhere else. If you have forgotten the current one, an administrator can make you a reset link on the Members page — no e-mail is sent from here.",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "newPasswordHint": "At least 12 characters.",
+    "savePassword": "Change password",
+    "passwordSaved": "Password changed. Every other session was signed out."
   },
   "about": {
     "title": "About clewwiki",

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { getAuthBaseUrl } from '@/lib/env';
+import { createPasswordReset } from '@/lib/members/account';
 import { MemberError, changeMemberRole, createInvitation, removeMember, revokeInvitation } from '@/lib/members/service';
 import type { MemberErrorCode } from '@/lib/members/service';
 import { getSessionContext } from '@/lib/session';
@@ -13,6 +14,8 @@ export interface MembersFormState {
   /** Present exactly once, right after an invitation is made. */
   inviteLink?: string;
   invitedEmail?: string;
+  /** Present exactly once, right after a reset link is made. */
+  resetLink?: string;
 }
 
 const inviteSchema = z.object({ email: z.string().trim().min(3).max(254), role: z.enum(['admin', 'editor']) });
@@ -99,6 +102,24 @@ export async function removeMemberAction(_previous: MembersFormState, formData: 
     await removeMember({ workspaceId: session.workspace.id, admin: { id: session.userId }, userId: userId.data });
     revalidatePath('/', 'layout');
     return {};
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function createResetLinkAction(_previous: MembersFormState, formData: FormData): Promise<MembersFormState> {
+  const session = await requireAdmin();
+  if (!session) return { error: 'forbidden' };
+
+  const userId = z.string().min(1).max(200).safeParse(formData.get('userId'));
+  if (!userId.success) return { error: 'notFound' };
+  try {
+    const { token } = await createPasswordReset({
+      workspaceId: session.workspace.id,
+      admin: { id: session.userId },
+      userId: userId.data,
+    });
+    return { resetLink: `${getAuthBaseUrl().replace(/\/+$/, '')}/reset/${token}` };
   } catch (error) {
     return failure(error);
   }

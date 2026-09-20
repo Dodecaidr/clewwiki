@@ -1227,6 +1227,37 @@ export const invitations = pgTable(
 );
 
 /**
+ * A link that lets one member choose a new password.
+ *
+ * No mail is sent from here, so "forgot my password" cannot be self-service:
+ * there is nowhere to send the proof. An administrator makes the link and hands
+ * it over, exactly as they do an invitation, and it is built the same way — the
+ * link is shown once, only the hash of its secret is kept, it works once. It
+ * lives for a day rather than a week, because it opens an account that already
+ * holds something.
+ */
+export const passwordResets = pgTable(
+  'password_resets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    prefix: text('prefix').notNull().unique(),
+    tokenHash: text('token_hash').notNull(),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [index('password_resets_user_idx').on(table.userId, table.createdAt)],
+);
+
+/**
  * Who a message or a comment was addressed to.
  *
  * Writing `@[Name]` or `@name` in a discussion message or a comment brings that
