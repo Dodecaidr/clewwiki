@@ -167,18 +167,35 @@ from the person making it. Every page it creates is audited as `page.imported`.
 
 | Source | Converts | Does not |
 |---|---|---|
-| **Confluence** (Cloud REST API v2) | The page hierarchy of one space; headings, lists, tables, task lists, blockquotes, rules; the `code` macro with its language and `noformat`; `info`, `note`, `tip`, `warning` and `panel` panels as GitHub alerts; `expand` as a heading and its content; links between imported pages, rewritten to the new pages. PNG, JPEG, GIF and WebP images attached to a page and shown on it are downloaded and become the page's own images | Other attachments, SVG images, and an image attached to a *different* page are not downloaded — they are rewritten to their absolute Confluence URL and warned about, so they keep working only while that site does. The same happens to an image that could not be fetched, with the reason. A macro with no Markdown equivalent (Jira lists, page trees, includes, charts) becomes a visible `> [!NOTE]` naming it, never a silent omission. Comments, labels, restrictions and page history are not read. Server and Data Center are **untested**: their API is v1 and shaped differently. |
+| **Confluence** (Cloud over REST API v2; Server and Data Center over v1) | The page hierarchy of one space; headings, lists, tables, task lists, blockquotes, rules; the `code` macro with its language and `noformat`; `info`, `note`, `tip`, `warning` and `panel` panels as GitHub alerts; `expand` as a heading and its content; links between imported pages, rewritten to the new pages. PNG, JPEG, GIF and WebP images attached to a page and shown on it are downloaded and become the page's own images | Other attachments, SVG images, and an image attached to a *different* page are not downloaded — they are rewritten to their absolute Confluence URL and warned about, so they keep working only while that site does. The same happens to an image that could not be fetched, with the reason. A macro with no Markdown equivalent (Jira lists, page trees, includes, charts) becomes a visible `> [!NOTE]` naming it, never a silent omission. Comments, labels, restrictions and page history are not read. The same converter runs for both deployments, because a page body is stored the same way on each. |
 | **Notion export** | The ZIP from "Export as Markdown & CSV", with or without subpages. The folder structure becomes the tree, and Notion's hash suffixes are stripped from every name and path. Emoji callouts become GitHub alerts, with the emoji choosing the kind. A database's CSV becomes a GFM table on its own page when it is small, and the row pages land below it. Links between exported pages are rewritten. PNG, JPEG, GIF and WebP images a page shows are carried across and become the page's own images | A toggle becomes a bold summary followed by its content, always open, with a warning — page bodies render Markdown and drop raw HTML, so a real `<details>` would vanish. A database past 100 rows or 12 columns is described rather than inlined. Files other than images are not uploaded, and neither is an image no page shows. |
 | **Markdown folder** | A ZIP of `.md`, `.mdx` or `.markdown` files. Directories become the tree; `README.md`, `index.md` and `_index.md` become the page for the directory they sit in; front matter `title` wins over the file name, and the first `#` heading wins over that only when there is no front matter. Relative links between documents are rewritten to the pages they become. PNG, JPEG, GIF and WebP images referenced by a relative path are carried across, from anywhere in the archive | An image that is not in the archive, or is another format (SVG included), stays as it was written and gets a warning. MDX components are not rendered — a file containing them is imported with a warning that the raw HTML will not survive. Anything that is not Markdown is ignored. |
 | **PDF** | Text, with structure inferred: headings from font-size clustering where the file has one, otherwise from the shape of the line (short, no sentence punctuation, followed by body text, or opening with a section number); paragraphs from vertical gaps, with words rejoined across a hyphenated line break; tables from columns that agree on their x positions; monospaced runs kept in a fence. A long document can be split into one page per top-level heading | Everything about a PDF import is an approximation and it says so: every page carries a warning, the preview shows the reconstructed Markdown, and it always lands in review. A block that looks like a table but whose columns do not agree is kept as preformatted text with a warning rather than guessed at. A scanned PDF has no text to read and is refused — optical character recognition is out of scope. Images are not extracted. |
 
-**Confluence credentials are used once and never stored.** The form asks for the
-site address, the space key, your Atlassian account e-mail and an API token; the
-last two are held in memory for that one run, sent as a single `Authorization`
-header, and written nowhere — not to the database, not to the audit log, not to
-a log line. What the import row records is the site address and the space key.
-Use a token belonging to an account that can read the space and nothing more,
-and revoke it afterwards if it was made for the migration.
+**Cloud or your own server.** The first field of the Confluence form is which
+one. **Confluence Cloud** is an `atlassian.net` site, read over the REST API v2,
+and it always needs an account e-mail and an API token. **Confluence Server or
+Data Center** is one you host: give the address up to its context path, such as
+`https://wiki.example.com/confluence`, and then either a personal access token
+on its own, or a username and its password, or neither — a space that is
+readable without signing in is imported without a credential. Atlassian ends
+Data Center on 28 March 2029, which is why this route exists.
+
+**A Confluence of your own is usually on a private network, and an import will
+not go there unless the operator says so.** An import connects to an address
+somebody typed into a form, so by default it connects only to public addresses.
+The operator of this instance lists the host names that may be reached in
+`IMPORT_CONFLUENCE_PRIVATE_HOSTS` (see [Deploy and operate](deploy.md)); only
+private ranges open up that way, and the loopback and link-local addresses stay
+refused whatever is listed.
+
+**Confluence credentials are used once and never stored.** Whatever credential
+the form was given is held in memory for that one run, sent as a single
+`Authorization` header, and written nowhere — not to the database, not to the
+audit log, not to a log line. What the import row records is the site address,
+which deployment it was, and the space key. Use a credential that can read the
+space and nothing more, and revoke it afterwards if it was made for the
+migration.
 
 Limits: 200 MB per upload (`IMPORT_MAX_UPLOAD_MB`), 5 000 pages per import, 10 MB
 per page, and 10 imports waiting for review in one space at a time. An archive

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { importFromConfluence } from '../src/confluence/index';
+import { NON_PUBLIC_MESSAGE } from '../src/confluence/transport';
 import { imagePlaceholderFor, referencedImageKeys } from '../src/images';
 import { DEFAULT_IMPORT_LIMITS } from '../src/limits';
 import type { ImportLimits } from '../src/limits';
@@ -109,8 +110,8 @@ describe('confluence images', () => {
     expect(result.nodes[0]?.warnings).toEqual([
       {
         code: 'external-attachment',
-        detail:
-          'flow.png: The Confluence address must be a public host. Addresses on a private network, the loopback and link-local ranges are not imported from.',
+        // The same refusal a connection gets, so the wording stays in one place.
+        detail: `flow.png: ${NON_PUBLIC_MESSAGE}`,
       },
     ]);
   });

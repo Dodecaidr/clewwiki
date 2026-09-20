@@ -34,15 +34,35 @@ type RouteContext = { params: Promise<{ key: string }> };
  * result is rows in `import_items` and an import in `needs_review`.
  */
 
+/**
+ * `deployment` says which API the address speaks: v2 on Cloud, v1 on Server and
+ * Data Center. It defaults to `cloud`, so a caller written before this existed
+ * keeps working.
+ *
+ * The credential is required on Cloud and optional on a Data Center, where a
+ * space may be open to anonymous reading and where a personal access token
+ * comes without a username. Empty strings are normalised away so that "sent but
+ * blank" and "not sent" mean the same thing.
+ */
 const confluenceSchema = z
   .object({
     source: z.literal('confluence'),
+    deployment: z.enum(['cloud', 'datacenter']).default('cloud'),
     base_url: z.string().min(1).max(2_000),
     space_key: z.string().min(1).max(255),
-    email: z.string().min(3).max(320),
-    api_token: z.string().min(1).max(4_000),
+    email: z.string().max(320).optional().default(''),
+    api_token: z.string().max(4_000).optional().default(''),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.deployment !== 'cloud') return;
+    if (value.email.trim().length < 3) {
+      ctx.addIssue({ code: 'custom', path: ['email'], message: 'An Atlassian account e-mail is required' });
+    }
+    if (value.api_token === '') {
+      ctx.addIssue({ code: 'custom', path: ['api_token'], message: 'An Atlassian API token is required' });
+    }
+  });
 
 const PDF_SPLITS = ['single', 'h1'] as const;
 
@@ -115,6 +135,7 @@ async function readJson(request: Request): Promise<ReadResult> {
   return {
     request: {
       source: 'confluence',
+      deployment: parsed.data.deployment,
       baseUrl: parsed.data.base_url,
       spaceKey: parsed.data.space_key,
       // Held for this request and handed straight to the adapter. Nothing on

@@ -11,7 +11,13 @@ import { Field, Input, Select } from '@/components/ui/field';
 /**
  * Choosing a source and handing it over.
  *
- * Confluence is a form of fields; the other three are a file. The credential
+ * Confluence is a form of fields; the other three are a file. Within Confluence
+ * there are two shapes: a Cloud site, which always needs an account e-mail and
+ * an API token, and a Server or Data Center, where the credential is a personal
+ * access token, or a username and password, or nothing at all for a space that
+ * is open to anonymous reading — so both fields are optional there.
+ *
+ * The credential
  * fields are `type="password"` and `autoComplete="off"`, and they are sent once
  * — the component never puts them in component state that outlives the submit,
  * and the server never writes them down. The hint under them says so, because a
@@ -19,6 +25,11 @@ import { Field, Input, Select } from '@/components/ui/field';
  */
 
 export type ImportSource = 'confluence' | 'notion' | 'markdown' | 'pdf';
+
+/** Which Confluence: Atlassian's cloud, or a Server or Data Center of your own. */
+export type ConfluenceDeployment = 'cloud' | 'datacenter';
+
+const DEPLOYMENTS: ConfluenceDeployment[] = ['cloud', 'datacenter'];
 
 const SOURCES: ImportSource[] = ['confluence', 'notion', 'markdown', 'pdf'];
 
@@ -40,6 +51,7 @@ export function ImportForm({ spaceKey, reviewBase, uploadLimitMb }: ImportFormPr
   const t = useTranslations('imports');
   const router = useRouter();
   const [source, setSource] = useState<ImportSource>('confluence');
+  const [deployment, setDeployment] = useState<ConfluenceDeployment>('cloud');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,6 +70,7 @@ export function ImportForm({ spaceKey, reviewBase, uploadLimitMb }: ImportFormPr
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 source: 'confluence',
+                deployment,
                 base_url: valueOf(form, 'base_url'),
                 space_key: valueOf(form, 'space_key'),
                 email: valueOf(form, 'email'),
@@ -87,6 +100,8 @@ export function ImportForm({ spaceKey, reviewBase, uploadLimitMb }: ImportFormPr
     }
   }
 
+  const cloud = deployment === 'cloud';
+
   return (
     <form onSubmit={submit} className="grid gap-5">
       <Field label={t('sourceLabel')} htmlFor="import-source" hint={t(`source_${source}_hint`)}>
@@ -106,19 +121,61 @@ export function ImportForm({ spaceKey, reviewBase, uploadLimitMb }: ImportFormPr
 
       {source === 'confluence' ? (
         <>
-          <Field label={t('baseUrl')} htmlFor="base_url" hint={t('baseUrlHint')}>
-            <Input id="base_url" name="base_url" required placeholder="https://example.atlassian.net" />
+          <Field
+            label={t('deploymentLabel')}
+            htmlFor="deployment"
+            hint={t(`deployment_${deployment}_hint`)}
+          >
+            <Select
+              id="deployment"
+              name="deployment"
+              value={deployment}
+              onChange={(event) => setDeployment(event.target.value as ConfluenceDeployment)}
+            >
+              {DEPLOYMENTS.map((value) => (
+                <option key={value} value={value}>
+                  {t(`deployment_${value}`)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label={t('baseUrl')}
+            htmlFor="base_url"
+            hint={cloud ? t('baseUrlHint') : t('baseUrlHintDataCenter')}
+          >
+            <Input
+              id="base_url"
+              name="base_url"
+              required
+              placeholder={cloud ? 'https://example.atlassian.net' : 'https://wiki.example.com/confluence'}
+            />
           </Field>
           <Field label={t('confluenceSpaceKey')} htmlFor="space_key" hint={t('confluenceSpaceKeyHint')}>
             <Input id="space_key" name="space_key" required placeholder="ENG" />
           </Field>
-          <Field label={t('email')} htmlFor="email" hint={t('emailHint')}>
-            <Input id="email" name="email" type="email" required autoComplete="off" />
+          <Field
+            label={cloud ? t('email') : t('username')}
+            htmlFor="email"
+            hint={cloud ? t('emailHint') : t('usernameHint')}
+          >
+            <Input
+              id="email"
+              name="email"
+              type={cloud ? 'email' : 'text'}
+              required={cloud}
+              autoComplete="off"
+            />
           </Field>
-          <Field label={t('apiToken')} htmlFor="api_token" hint={t('apiTokenHint')}>
-            <Input id="api_token" name="api_token" type="password" required autoComplete="off" />
+          <Field
+            label={cloud ? t('apiToken') : t('accessToken')}
+            htmlFor="api_token"
+            hint={cloud ? t('apiTokenHint') : t('accessTokenHint')}
+          >
+            <Input id="api_token" name="api_token" type="password" required={cloud} autoComplete="off" />
           </Field>
           <Alert tone="info">{t('credentialsNotice')}</Alert>
+          {cloud ? null : <Alert tone="info">{t('dataCenterNotice')}</Alert>}
         </>
       ) : (
         <>

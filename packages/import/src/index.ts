@@ -23,7 +23,11 @@ export * from './types';
 export * from './zip';
 
 export { importFromConfluence } from './confluence/index';
-export type { ConfluenceCredentials, ConfluenceImportInput } from './confluence/index';
+export type {
+  ConfluenceCredentials,
+  ConfluenceDeployment,
+  ConfluenceImportInput,
+} from './confluence/index';
 export { convertStorageToMarkdown } from './confluence/index';
 
 export { importFromMarkdownZip } from './markdown/index';

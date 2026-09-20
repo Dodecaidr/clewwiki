@@ -184,6 +184,7 @@ describe('confluence import', () => {
     expect(recorded).not.toContain(credentials.email);
     expect(result.params).toEqual({
       base_url: 'https://example.atlassian.net',
+      deployment: 'cloud',
       space_key: 'API',
       space_name: 'API platform',
       page_count: 1,

@@ -671,9 +671,27 @@ other request — follow redirects: three at most, `https` and public hosts only
 and the credential goes to the origin that was typed and to no other host. That
 path is tested against a simulated site and **not yet against a live one**.
 
-**Next, if it is wanted**: Confluence Server/Data Center, whose API is v1 and is
-untested here; images inside a PDF, which are not extracted; and optical
-character recognition for scanned PDFs, which today are refused outright.
+**Confluence Server and Data Center — built.** Their API is v1, and it differs
+from Cloud's in four ways the adapter now covers: `/rest/api/content` instead of
+`/api/v2`, a page naming its `ancestors` rather than one parent, a listing paged
+by counting rather than by a cursor, and a site that usually sits under a context
+path. The credential differs too — a personal access token as `Bearer`, or a
+username and password, or none at all for a space open to anonymous reading —
+and so does the network: a Confluence of one's own is normally on a private
+address, which an import refuses to connect to unless the operator has listed
+that host name in `IMPORT_CONFLUENCE_PRIVATE_HOSTS`. Only private ranges open up
+that way; the loopback and link-local stay refused, and the name is checked again
+inside the socket's own resolution. The storage format of a page is identical on
+both deployments, so nothing downstream of the listing changed. The v1 fixtures
+in the tests were taken from a live public site.
+
+Why this one before other roadmap items: Atlassian stops Data Center on 28 March
+2029 and its own MCP server reaches Cloud only, so these are the teams with a
+wiki, a deadline and no first-party way to put agents on it.
+
+**Next, if it is wanted**: images inside a PDF, which are not extracted; and
+optical character recognition for scanned PDFs, which today are refused
+outright.
 
 ## Agent discussions and durable decisions — **complete**
 

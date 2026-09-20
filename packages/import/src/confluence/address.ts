@@ -13,6 +13,68 @@ function ipv4Octets(address: string): number[] | null {
 }
 
 /**
+ * What an operator may open up, and what nobody may.
+ *
+ * A Confluence on Server or Data Center usually lives on a private network, so
+ * "public addresses only" would make it unreachable by design. The answer is
+ * not to drop the rule but to split it. `private` is the ranges a company
+ * network is built from — RFC 1918, carrier-grade NAT, IPv6 unique local — and
+ * a host name resolving there is reachable when, and only when, the operator of
+ * this instance has listed that host name. `forbidden` is everything that is
+ * never a wiki: the loopback (this container), link-local (where cloud metadata
+ * lives), unspecified, multicast and reserved space. No setting reaches those.
+ */
+export type AddressClass = 'public' | 'private' | 'forbidden';
+
+export function classifyAddress(address: string): AddressClass {
+  if (!isNonPublicAddress(address)) return 'public';
+  const version = isIP(address);
+  if (version === 4) {
+    const octets = ipv4Octets(address);
+    if (!octets) return 'forbidden';
+    const [a, b] = octets as [number, number, number, number];
+    const isPrivate =
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127);
+    return isPrivate ? 'private' : 'forbidden';
+  }
+  if (version === 6) {
+    const lower = address.toLowerCase().split('%')[0] ?? '';
+    const mapped = /^(?:::ffff:|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
+    if (mapped?.[1]) return classifyAddress(mapped[1]);
+    return /^f[cd]/.test(lower) ? 'private' : 'forbidden';
+  }
+  return 'forbidden';
+}
+
+/** Host names an operator has opened to imports, compared without case. */
+export type PrivateHosts = ReadonlySet<string>;
+
+export const NO_PRIVATE_HOSTS: PrivateHosts = new Set<string>();
+
+export function toPrivateHosts(names: Iterable<string> | undefined): PrivateHosts {
+  const hosts = new Set<string>();
+  for (const name of names ?? []) {
+    const bare = name.trim().toLowerCase().replace(/^\[|\]$/g, '');
+    if (bare !== '') hosts.add(bare);
+  }
+  return hosts;
+}
+
+/**
+ * Whether a connection to `address`, reached through `hostname`, may be made.
+ * Public always; private only for a listed host name; forbidden never.
+ */
+export function isAddressAllowed(hostname: string, address: string, privateHosts: PrivateHosts): boolean {
+  const kind = classifyAddress(address);
+  if (kind === 'public') return true;
+  if (kind === 'forbidden') return false;
+  return privateHosts.has(hostname.trim().toLowerCase().replace(/^\[|\]$/g, ''));
+}
+
+/**
  * True for an address a request from this process has no business reaching on
  * behalf of something a person typed: unspecified, loopback, private,
  * carrier-grade NAT, link-local (which is where cloud metadata lives),

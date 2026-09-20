@@ -83,6 +83,30 @@ export function getImportMaxExpandedMb(): number {
 }
 
 /**
+ * Host names of Confluence sites on a private network that imports may reach.
+ *
+ * An import connects to an address somebody typed, so by default it connects
+ * only to public addresses: without that rule the form is a way to make this
+ * server fetch from its own network. A Confluence Server or Data Center is
+ * normally *on* that network, which is why this exists — but it is the
+ * operator's decision, made once, by host name, not the importing person's.
+ *
+ * Only the private ranges open up (RFC 1918, carrier-grade NAT, IPv6 unique
+ * local). The loopback, link-local — where cloud metadata lives — multicast
+ * and reserved space stay refused whatever is listed here, so this cannot be
+ * turned into a way to read the container's own ports.
+ *
+ * Comma-separated host names, never addresses: the name is what is checked, and
+ * what it resolves to is checked again as the socket connects.
+ */
+export function getImportConfluencePrivateHosts(): string[] {
+  return (process.env.IMPORT_CONFLUENCE_PRIVATE_HOSTS ?? '')
+    .split(',')
+    .map((host) => host.trim())
+    .filter((host) => host !== '');
+}
+
+/**
  * Whether the streamable HTTP MCP transport is mounted at `/mcp`.
  *
  * Off unless the operator says otherwise, and the route answers 404 rather

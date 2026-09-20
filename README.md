@@ -29,8 +29,8 @@ to unlock them and none is planned.
 third-party login to register an application with. Colleagues join by a one-time
 invitation link, so an instance with no SMTP is a complete instance.
 
-**Your content comes in and goes out.** Import a Confluence Cloud space, a
-Notion export, a folder of Markdown or a PDF, images included. Export a page as
+**Your content comes in and goes out.** Import a Confluence space — Cloud, Server or Data
+Center — a Notion export, a folder of Markdown or a PDF, images included. Export a page as
 Markdown or HTML, or a whole space as a ZIP. Pages are stored as Markdown, so
 leaving is a download. [Moving from Confluence](docs/from-confluence.md) walks
 through it.
@@ -90,9 +90,9 @@ several people in one page at once.
 
 - **Single sign-on.** Login is e-mail and password. There is no OIDC, SAML or
   LDAP.
-- **Confluence Server and Data Center.** The importer speaks the Cloud REST API.
-  Server and Data Center use an older API and are untested. Until that lands,
-  [the guide](docs/from-confluence.md) shows the route through a Markdown export.
+- **A track record for the Data Center importer.** Confluence Cloud, Server and
+  Data Center all import, the last two over the v1 API, but that route is new
+  and has been tested against fixtures rather than years of use.
 - **A mobile application.** The web interface works on a phone. There is no
   native client.
 

@@ -17,6 +17,9 @@
  * and the socket destroyed past it, so the size of an answer is not the remote
  * server's to choose.
  *
+ * A host name the operator has listed (`privateHosts`) may resolve to a private
+ * range; nothing makes the loopback or link-local reachable. See `address.ts`.
+ *
  * Literal IP addresses never reach `lookup` — there is nothing to resolve — and
  * are refused before a request is made, by `assertPublicHost`.
  */
@@ -27,12 +30,17 @@ import { request as httpsRequest } from 'node:https';
 import type { LookupFunction } from 'node:net';
 
 import { ImportError } from '../limits';
-import { isNonPublicAddress } from './address';
+import { isAddressAllowed, NO_PRIVATE_HOSTS } from './address';
+import type { PrivateHosts } from './address';
 
 /** Resolves a name to every address it has. Replaced in tests. */
 export type ResolveAll = (hostname: string) => Promise<LookupAddress[]>;
 
 const NON_PUBLIC = 'ENONPUBLIC';
+
+/** One wording for the refusal, wherever it is made. */
+export const NON_PUBLIC_MESSAGE =
+  'The Confluence address must be a public host. Addresses on a private network, the loopback and link-local ranges are not imported from. A Confluence on your own network can be opened by the operator of this wiki, by host name, with IMPORT_CONFLUENCE_PRIVATE_HOSTS.';
 
 function systemResolve(hostname: string): Promise<LookupAddress[]> {
   return new Promise((resolve, reject) => {
@@ -50,11 +58,17 @@ function systemResolve(hostname: string): Promise<LookupAddress[]> {
  * for when it races address families — all of them. Either way the socket is
  * given exactly the addresses that were checked.
  */
-export function createGuardedLookup(resolve: ResolveAll = systemResolve): LookupFunction {
+export function createGuardedLookup(
+  resolve: ResolveAll = systemResolve,
+  privateHosts: PrivateHosts = NO_PRIVATE_HOSTS,
+): LookupFunction {
   return (hostname, options, callback) => {
     resolve(hostname).then(
       (addresses) => {
-        if (addresses.length === 0 || addresses.some((entry) => isNonPublicAddress(entry.address))) {
+        if (
+          addresses.length === 0 ||
+          addresses.some((entry) => !isAddressAllowed(hostname, entry.address, privateHosts))
+        ) {
           const error = Object.assign(new Error(`${hostname} does not resolve to a public address`), {
             code: NON_PUBLIC,
           });
@@ -75,6 +89,8 @@ export function createGuardedLookup(resolve: ResolveAll = systemResolve): Lookup
 
 export interface GuardedFetchOptions {
   resolve?: ResolveAll;
+  /** Host names the operator has opened on a private network. Empty by default. */
+  privateHosts?: PrivateHosts;
   /** Largest response body read, in bytes. */
   maxResponseBytes: number;
   /** How long one request may take end to end, in ms. */
@@ -88,7 +104,7 @@ const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
  * no redirect, and reads no more than `maxResponseBytes`.
  */
 export function createGuardedFetch(options: GuardedFetchOptions): typeof fetch {
-  const lookup = createGuardedLookup(options.resolve);
+  const lookup = createGuardedLookup(options.resolve, options.privateHosts);
   const timeoutMs = options.timeoutMs ?? 60_000;
 
   const guarded = (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
@@ -150,7 +166,7 @@ export function createGuardedFetch(options: GuardedFetchOptions): typeof fetch {
           reject(
             new ImportError(
               'validation',
-              'The Confluence address must be a public host. Addresses on a private network, the loopback and link-local ranges are not imported from.',
+              NON_PUBLIC_MESSAGE,
             ),
           );
           return;

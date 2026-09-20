@@ -62,6 +62,9 @@ services:
       # within the limits can still get the container killed.
       IMPORT_MAX_UPLOAD_MB: ${IMPORT_MAX_UPLOAD_MB:-200}
       IMPORT_MAX_EXPANDED_MB: ${IMPORT_MAX_EXPANDED_MB:-256}
+      # Host names of Confluence sites on a private network that imports may
+      # reach. Empty keeps every import to public addresses; see .env.example.
+      IMPORT_CONFLUENCE_PRIVATE_HOSTS: ${IMPORT_CONFLUENCE_PRIVATE_HOSTS:-}
       # Images uploaded into pages live in the database. 0 switches uploads off.
       IMAGE_MAX_UPLOAD_MB: ${IMAGE_MAX_UPLOAD_MB:-5}
       IMAGE_STORE_MAX_MB: ${IMAGE_STORE_MAX_MB:-2048}
