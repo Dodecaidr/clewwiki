@@ -110,8 +110,8 @@ These matter once an agent has write access, and nothing above has them:
 
 - You need single sign-on now.
 - You are moving a large Confluence Data Center site and need an importer with a
-  track record. The Data Center route is written against the v1 API and tested
-  against fixtures taken from a live site, but it is new.
+  track record. The Data Center route was checked against a live public Data
+  Center, but it is new, and a site behind single sign-on has not been tried.
 - You need a vendor to call. This is a one-maintainer project.
 - Agents are not going to write to your wiki. The mature tools above are then
   the safer choice.

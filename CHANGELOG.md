@@ -42,7 +42,8 @@ tagged.
   offers, and the credential is a personal access token, a username and
   password, or nothing at all for a space that is readable without signing in.
   Atlassian makes Data Center read-only on 28 March 2029 and its own MCP server
-  reaches Cloud only.
+  reaches Cloud only. Checked against a live public Data Center as well as
+  against fixtures; a site behind single sign-on has not been tried.
 - **`IMPORT_CONFLUENCE_PRIVATE_HOSTS`.** An import connects to an address
   somebody typed, so it connects to public addresses only. A Confluence on a
   private network is reached when the operator lists its host name here, and

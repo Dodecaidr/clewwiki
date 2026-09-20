@@ -682,8 +682,16 @@ address, which an import refuses to connect to unless the operator has listed
 that host name in `IMPORT_CONFLUENCE_PRIVATE_HOSTS`. Only private ranges open up
 that way; the loopback and link-local stay refused, and the name is checked again
 inside the socket's own resolution. The storage format of a page is identical on
-both deployments, so nothing downstream of the listing changed. The v1 fixtures
-in the tests were taken from a live public site.
+both deployments, so nothing downstream of the listing changed.
+
+Verified against a live site as well as against fixtures: the adapter read the
+Apache Kafka space of `cwiki.apache.org` — a public Confluence Data Center —
+anonymously on 2026-09-20, finding the space by key, listing five pages, taking
+the hierarchy from their ancestors, the dates from `version.when`, and the page
+addresses under the site's `/confluence` context path, then converting a body to
+Markdown with its links rewritten. The fixtures in the tests are the shapes that
+site answered with. What has *not* been exercised: a site behind single sign-on,
+a personal access token, and an import large enough to page many times.
 
 Why this one before other roadmap items: Atlassian stops Data Center on 28 March
 2029 and its own MCP server reaches Cloud only, so these are the teams with a
