@@ -12,7 +12,7 @@ import {
 } from '@/lib/comments/service';
 import { consumeMessageBudget } from '@/lib/discussions/rate-limit';
 import { isPageServiceError } from '@/lib/pages/errors';
-import { getSessionContext } from '@/lib/session';
+import { getWriterSession } from '@/lib/session';
 import type { SessionContext } from '@/lib/session';
 import { canViewComment, canViewPage } from '@/lib/spaces/guards';
 
@@ -62,7 +62,7 @@ export async function openCommentAction(
   _previous: CommentFormState,
   formData: FormData,
 ): Promise<CommentFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = openSchema.safeParse({
@@ -98,7 +98,7 @@ export async function replyCommentAction(
   _previous: CommentFormState,
   formData: FormData,
 ): Promise<CommentFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = z
@@ -127,7 +127,7 @@ export async function resolveCommentAction(
   _previous: CommentFormState,
   formData: FormData,
 ): Promise<CommentFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = z
@@ -157,7 +157,7 @@ export async function deleteCommentAction(
   _previous: CommentFormState,
   formData: FormData,
 ): Promise<CommentFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
 
   const parsed = z.object({ commentId: z.uuid() }).safeParse({

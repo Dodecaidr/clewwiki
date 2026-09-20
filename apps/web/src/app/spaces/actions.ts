@@ -10,7 +10,7 @@ import { isPageServiceError } from '@/lib/pages/errors';
 import { createPage } from '@/lib/pages/service';
 import { probeRepository } from '@/lib/repository/git';
 import { repositorySettingsSchema } from '@/lib/repository/settings';
-import { getSessionContext } from '@/lib/session';
+import { getWriterSession } from '@/lib/session';
 import {
   spaceDescriptionSchema,
   spaceIconSchema,
@@ -47,7 +47,7 @@ function formText(formData: FormData, key: string): string {
 }
 
 async function requireAdmin() {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session || session.role !== 'admin') return null;
   return session;
 }
@@ -399,7 +399,7 @@ export async function saveSpaceAccessAction(
   _previous: SpaceFormState,
   formData: FormData,
 ): Promise<SpaceFormState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session || session.role !== 'admin') return { error: 'forbidden' };
 
   const parsed = accessSchema.safeParse({

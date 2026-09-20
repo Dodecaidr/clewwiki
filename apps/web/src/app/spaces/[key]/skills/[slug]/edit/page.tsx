@@ -3,9 +3,10 @@ import { getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { SkillForm } from '../../skill-form';
+import { canWrite } from '@/lib/roles';
 import { getSessionContext } from '@/lib/session';
 import { getSkillBySlug } from '@/lib/skills/service';
-import { spaceSkillHref } from '@/lib/spaces/urls';
+import { spaceHref, spaceSkillHref } from '@/lib/spaces/urls';
 import { findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +28,12 @@ export default async function EditSkillPage({ params }: Props) {
   const space = await findSpaceByKey(session, key);
   if (!space) {
     notFound();
+  }
+
+  // A viewer has no business on a screen that writes. The action behind it
+  // would refuse them anyway; this saves them filling in a form to find out.
+  if (!canWrite(session.role)) {
+    redirect(spaceHref(space.key));
   }
   const skill = await getSkillBySlug(session.workspace.id, space.id, slug);
   if (!skill) {

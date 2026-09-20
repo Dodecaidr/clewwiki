@@ -13,7 +13,7 @@ import { isPageServiceError } from '@/lib/pages/errors';
 import { renderMarkdown } from '@/lib/pages/markdown';
 import { renderLabels } from '@/lib/pages/render-labels';
 import { createPage, deletePage, linkPages, movePageToSpace, updatePage } from '@/lib/pages/service';
-import { getSessionContext } from '@/lib/session';
+import { getWriterSession } from '@/lib/session';
 import { spaceHref, spacePageHref } from '@/lib/spaces/urls';
 import { findPage, findSpaceById, findSpaceByKey } from '@/lib/spaces/visibility';
 import { canViewPage } from '@/lib/spaces/guards';
@@ -104,7 +104,7 @@ function bodyFrom(formData: FormData): unknown {
 }
 
 async function requireWriter() {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return null;
   // Both roles may write, in every space. Per-space permissions are a later
   // step; today the distinctions are token issuance and space administration,
@@ -460,7 +460,7 @@ export async function linkPageAction(
  * by rendering a different way.
  */
 export async function renderPreviewAction(markdown: string): Promise<string> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return '';
   if (typeof markdown !== 'string' || markdown.length > PAGE_BODY_MAX_LENGTH) return '';
   return renderMarkdown(markdown, await renderLabels());

@@ -20,7 +20,7 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core';
  * Account roles inside a workspace. Agent tokens are not users and carry
  * their own scope list instead of a membership role.
  */
-export const membershipRole = pgEnum('membership_role', ['admin', 'editor']);
+export const membershipRole = pgEnum('membership_role', ['admin', 'editor', 'viewer']);
 
 /** Who performed an audited action. */
 export const actorType = pgEnum('actor_type', ['user', 'agent']);

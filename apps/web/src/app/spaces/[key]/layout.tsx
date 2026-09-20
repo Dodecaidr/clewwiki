@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { PageTree } from '@/components/page-tree';
 import type { PageTreeItem } from '@/components/page-tree';
 import { buttonVariants } from '@/components/ui/button';
+import { canWrite } from '@/lib/roles';
 import { getStaleAnchorCounts } from '@/lib/anchors/service';
 import { getActiveClaimsByPage } from '@/lib/claims/service';
 import { countOpenDiscussions } from '@/lib/discussions/service';
@@ -216,7 +217,7 @@ export default async function SpaceLayout({
             >
               {t('treeHeading')}
             </Link>
-            {space.archivedAt ? null : (
+            {space.archivedAt || !canWrite(session.role) ? null : (
               <Link
                 href={newSpacePageHref(space.key)}
                 className={buttonVariants({ variant: 'outline', size: 'sm' })}

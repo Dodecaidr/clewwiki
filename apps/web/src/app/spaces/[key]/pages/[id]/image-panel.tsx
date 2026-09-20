@@ -33,7 +33,16 @@ export interface ImagePanelLabels {
  * to do about them without an API client: take down the screenshot that should
  * not have been uploaded. Collapsed by default — it is housekeeping, not content.
  */
-export function ImagePanel({ images, labels }: { images: ImagePanelItem[]; labels: ImagePanelLabels }) {
+export function ImagePanel({
+  images,
+  labels,
+  readOnly = false,
+}: {
+  images: ImagePanelItem[];
+  labels: ImagePanelLabels;
+  /** True for a viewer: the images are listed, and none can be removed. */
+  readOnly?: boolean;
+}) {
   if (images.length === 0) return null;
 
   return (
@@ -48,7 +57,7 @@ export function ImagePanel({ images, labels }: { images: ImagePanelItem[]; label
           <p className="text-sm text-muted-foreground">{labels.intro}</p>
           <ul className="grid gap-3">
             {images.map((image) => (
-              <ImageRow key={image.imageId} image={image} labels={labels} />
+              <ImageRow key={image.imageId} image={image} labels={labels} readOnly={readOnly} />
             ))}
           </ul>
         </CardBody>
@@ -57,7 +66,15 @@ export function ImagePanel({ images, labels }: { images: ImagePanelItem[]; label
   );
 }
 
-function ImageRow({ image, labels }: { image: ImagePanelItem; labels: ImagePanelLabels }) {
+function ImageRow({
+  image,
+  labels,
+  readOnly,
+}: {
+  image: ImagePanelItem;
+  labels: ImagePanelLabels;
+  readOnly: boolean;
+}) {
   const [state, action, pending] = useActionState(deleteImageAction, initialState);
 
   return (
@@ -81,6 +98,7 @@ function ImageRow({ image, labels }: { image: ImagePanelItem; labels: ImagePanel
         ) : null}
       </div>
       <form
+        hidden={readOnly}
         action={action}
         onSubmit={(event) => {
           if (!window.confirm(labels.removeConfirm)) event.preventDefault();

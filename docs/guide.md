@@ -43,10 +43,17 @@ address, for seven days; inviting the same address again replaces the earlier
 link, and **Revoke** cancels one that has not been used. The person who opens
 it chooses their own name and password and lands in the wiki, signed in.
 
-Two roles. An **editor** reads and writes pages, takes part in discussions and
-reviews what agents change. An **administrator** can also manage members, agent
-tokens, spaces and their settings. A workspace always has at least one
-administrator: the last one cannot be demoted or removed.
+Three roles. A **viewer** reads: pages, discussions, comments, history, search
+and exports, in every space they can see, plus their own inbox and account. A
+viewer changes nothing — no pages, no comments, no discussions — which is what
+makes it the role for the people a wiki is written *for*: a product manager, a
+tester, a customer's engineer. An **editor** also writes pages, takes part in
+discussions and reviews what agents change. An **administrator** can also manage
+members, agent tokens, spaces and their settings. A workspace always has at
+least one administrator: the last one cannot be demoted or removed.
+
+A viewer can be mentioned, and hears about it in their inbox, but cannot answer
+in the thread. If somebody needs to answer, make them an editor.
 
 **Remove** deletes the account and signs the person out everywhere. What they
 wrote stays, under their name.

@@ -607,8 +607,9 @@ chart blocks, and REST) and re-encoding to strip metadata. Images in imports
 came later; see Documentation import.
 
 **Deliberately not yet: roles inside a space** (viewer, editor, admin). Membership
-is visibility only. Read-only membership has to be enforced on every write path,
-and is the next step if it is wanted.
+of a space is visibility only. A read-only role exists for the *workspace* — see
+Members — and a role that differs from space to space is the step after it, if
+it is wanted.
 
 ## Documentation import — **complete**
 
@@ -802,9 +803,24 @@ password and ending the account's sessions. `password_resets`, migration
 `0017_password_resets`. The last administrator's own lost password is the
 operator's to recover from the database; `docs/deploy.md` says how.
 
+**A read-only role — built.** A team is not only the people who write. A
+**viewer** reads everything they can see — pages, discussions, comments,
+history, search, exports — and has an inbox and an account, and changes nothing.
+It is enforced where a read-only token already was: a person's role stands in
+for a scope list in `requireScopes`, so a viewer has `identity:read` and
+`pages:read` and no list of "write endpoints" exists to fall out of date; server
+actions ask for the session through `getWriterSession`. Two tests keep it true:
+one finds every writing REST route on disk and calls it as a viewer, the other
+fails on a server action that takes the plain session. Migration
+`0018_viewer_role` adds the enum value. The known cost: a viewer can be
+mentioned and cannot answer. That is what read-only means, and the way out is
+the editor role — a "may comment" role in between is the next step if it is
+wanted.
+
 **Deliberately not built**: self-service "forgot password" (there is nowhere to
-send the proof), self-registration, SSO. **Next, if it is wanted**: a read-only
-role; a supported way back in for an instance whose only account is locked out.
+send the proof), self-registration, SSO. **Next, if it is wanted**: a role that
+reads and comments; a supported way back in for an instance whose only account
+is locked out.
 
 ## Inbox — **built**
 

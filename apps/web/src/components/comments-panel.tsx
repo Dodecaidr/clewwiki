@@ -15,6 +15,8 @@ import { formatDateTime } from '@/lib/utils';
 interface Viewer {
   userId: string;
   isAdmin: boolean;
+  /** False for a viewer, who reads threads and cannot answer, resolve or delete. */
+  canWrite: boolean;
 }
 
 async function Message({ comment, viewer }: { comment: CommentRecord; viewer: Viewer }) {
@@ -30,7 +32,7 @@ async function Message({ comment, viewer }: { comment: CommentRecord; viewer: Vi
           <span className="rounded-(--radius-base) border border-border px-1">{t('agentBadge')}</span>
         ) : null}
         <span>{formatDateTime(format, comment.createdAt)}</span>
-        {own || viewer.isAdmin ? <DeleteCommentButton commentId={comment.id} /> : null}
+        {viewer.canWrite && (own || viewer.isAdmin) ? <DeleteCommentButton commentId={comment.id} /> : null}
       </div>
       {/* The words of a person or an agent, shown as typed: never rendered as
           Markdown and never treated as part of the page. */}
@@ -89,10 +91,10 @@ async function Thread({ thread, viewer }: { thread: CommentThread; viewer: Viewe
         <p className="text-xs text-muted-foreground">
           {t('resolvedBy', { name: root.resolvedByLabel ?? '—' })}
         </p>
-      ) : (
+      ) : viewer.canWrite ? (
         <ReplyForm threadId={root.id} />
-      )}
-      <ResolveButton threadId={root.id} resolved={resolved} />
+      ) : null}
+      {viewer.canWrite ? <ResolveButton threadId={root.id} resolved={resolved} /> : null}
     </li>
   );
 }

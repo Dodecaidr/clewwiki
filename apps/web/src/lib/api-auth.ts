@@ -1,3 +1,4 @@
+import { scopesOfRole } from './roles';
 import 'server-only';
 
 import { NextResponse } from 'next/server';
@@ -257,7 +258,13 @@ export function requireScopes(
   identity: ApiIdentity,
   required: readonly string[],
 ): NextResponse | null {
-  if (identity.type === 'user') return null;
+  if (identity.type === 'user') {
+    // A person's role stands in for a scope list: everything, except for a
+    // viewer, who is held to what a read-only token is held to.
+    const granted = scopesOfRole(identity.role);
+    if (granted === null || hasAllScopes([...granted], required)) return null;
+    return errorResponse(403, 'forbidden', 'Your role in this workspace is read-only');
+  }
   if (hasAllScopes(identity.scopes, required)) return null;
   return errorResponse(403, 'insufficient_scope', `Token is missing scope: ${required.join(', ')}`);
 }

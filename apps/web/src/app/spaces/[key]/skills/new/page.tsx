@@ -4,8 +4,9 @@ import type { Metadata } from 'next';
 
 import { SkillForm } from '../skill-form';
 import { Alert } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { getSessionContext } from '@/lib/session';
-import { spaceSkillsHref } from '@/lib/spaces/urls';
+import { spaceHref, spaceSkillsHref } from '@/lib/spaces/urls';
 import { findSpaceByKey } from '@/lib/spaces/visibility';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,12 @@ export default async function NewSkillPage({ params }: { params: Promise<{ key: 
   const space = await findSpaceByKey(session, (await params).key);
   if (!space) {
     notFound();
+  }
+
+  // A viewer has no business on a screen that writes. The action behind it
+  // would refuse them anyway; this saves them filling in a form to find out.
+  if (!canWrite(session.role)) {
+    redirect(spaceHref(space.key));
   }
 
   const t = await getTranslations('skills');

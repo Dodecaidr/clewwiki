@@ -41,12 +41,14 @@ export function InviteForm() {
       ) : null}
       <ErrorLine state={state} />
 
+      <p className="text-xs text-muted-foreground">{t('rolesHint')}</p>
       <form action={action} className="grid gap-4 sm:grid-cols-[1fr_12rem_auto] sm:items-end">
         <Field label={t('email')} htmlFor="invite-email">
           <Input id="invite-email" name="email" type="email" required maxLength={254} autoComplete="off" />
         </Field>
         <Field label={t('role')} htmlFor="invite-role">
           <Select id="invite-role" name="role" defaultValue="editor">
+            <option value="viewer">{t('role_viewer')}</option>
             <option value="editor">{t('role_editor')}</option>
             <option value="admin">{t('role_admin')}</option>
           </Select>
@@ -75,7 +77,7 @@ export function RevokeInvitationButton({ invitationId, email }: { invitationId: 
   );
 }
 
-export function RoleForm({ userId, name, role }: { userId: string; name: string; role: 'admin' | 'editor' }) {
+export function RoleForm({ userId, name, role }: { userId: string; name: string; role: 'admin' | 'editor' | 'viewer' }) {
   const t = useTranslations('members');
   const [state, action, pending] = useActionState(changeRoleAction, initialState);
   return (
@@ -83,6 +85,7 @@ export function RoleForm({ userId, name, role }: { userId: string; name: string;
       <input type="hidden" name="userId" value={userId} />
       <div className="flex items-center gap-2">
         <Select name="role" defaultValue={role} aria-label={`${t('role')} — ${name}`} className="h-8 w-36 text-sm">
+          <option value="viewer">{t('role_viewer')}</option>
           <option value="editor">{t('role_editor')}</option>
           <option value="admin">{t('role_admin')}</option>
         </Select>

@@ -10,6 +10,7 @@ import { isLocale } from '@/i18n/locale';
 import type { Locale } from '@/i18n/locale';
 import { buttonVariants } from '@/components/ui/button';
 import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { decisionsParentTemplate } from '@/lib/discussions/decision-page';
 import { readDiscussionPolicy } from '@/lib/discussions/retention';
 import { wasClosedForInactivity } from '@/lib/discussions/service';
@@ -88,7 +89,7 @@ export default async function DiscussionThreadPage({ params }: Props) {
   const isOpener =
     thread.discussion.openedByType === 'user' &&
     thread.discussion.openedById === session.userId;
-  const mayDelete = session.role === 'admin' || isOpener;
+  const mayDelete = session.role === 'admin' || (isOpener && canWrite(session.role));
   const closedIdle = wasClosedForInactivity(thread.discussion);
 
   return (
@@ -190,7 +191,7 @@ export default async function DiscussionThreadPage({ params }: Props) {
         ))}
       </ul>
 
-      {thread.discussion.status === 'open' && space.archivedAt === null ? (
+      {thread.discussion.status === 'open' && space.archivedAt === null && canWrite(session.role) ? (
         <>
           <Card>
             <CardHeader>

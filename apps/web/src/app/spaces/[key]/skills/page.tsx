@@ -6,6 +6,7 @@ import type { Metadata } from 'next';
 import { CopyBlock } from '@/components/copy-block';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { getAuthBaseUrl } from '@/lib/env';
 import { getSessionContext } from '@/lib/session';
 import { buildSkillsInstallCommand } from '@/lib/skills/install';
@@ -59,7 +60,7 @@ export default async function SpaceSkillsPage({ params, searchParams }: Props) {
           <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">{t('intro')}</p>
         </div>
-        {space.archivedAt ? null : (
+        {space.archivedAt || !canWrite(session.role) ? null : (
           <Link href={newSpaceSkillHref(space.key)} className={buttonVariants({ size: 'sm' })}>
             {t('new')}
           </Link>
@@ -110,7 +111,7 @@ export default async function SpaceSkillsPage({ params, searchParams }: Props) {
           <CardBody className="grid justify-items-start gap-4 text-sm">
             <p className="text-muted-foreground">{tag ? t('emptyForTag', { tag }) : t('empty')}</p>
             <div className="flex flex-wrap items-center gap-4">
-              {space.archivedAt ? null : (
+              {space.archivedAt || !canWrite(session.role) ? null : (
                 <Link href={newSpaceSkillHref(space.key)} className={buttonVariants({ size: 'sm' })}>
                   {t('new')}
                 </Link>

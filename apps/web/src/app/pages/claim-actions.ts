@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { acquireClaim, releaseClaim, renewClaim } from '@/lib/claims/service';
 import { heartbeatIntervalMs, remainingSeconds, resolveTtlSeconds } from '@/lib/claims/ttl';
 import { isPageServiceError } from '@/lib/pages/errors';
-import { getSessionContext } from '@/lib/session';
+import { getWriterSession } from '@/lib/session';
 import type { SessionContext } from '@/lib/session';
 import { canViewClaim, canViewPage } from '@/lib/spaces/guards';
 
@@ -59,7 +59,7 @@ const pageIdSchema = z.uuid();
 
 /** Takes the lease the editor writes under. */
 export async function acquireClaimAction(pageId: string): Promise<LeaseResult> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { ok: false, error: 'forbidden' };
   if (!pageIdSchema.safeParse(pageId).success) return { ok: false, error: 'validation' };
   // A page in a space this person cannot see is, to them, a page that is not there.
@@ -91,7 +91,7 @@ export async function acquireClaimAction(pageId: string): Promise<LeaseResult> {
 
 /** The heartbeat an open editor sends while the form is on screen. */
 export async function renewClaimAction(claimId: string): Promise<LeaseResult> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { ok: false, error: 'forbidden' };
   if (!pageIdSchema.safeParse(claimId).success) return { ok: false, error: 'validation' };
   if (!(await canViewClaim(session, claimId))) return { ok: false, error: 'not_found' };
@@ -111,7 +111,7 @@ export async function renewClaimAction(claimId: string): Promise<LeaseResult> {
 
 /** Gives the lease back on save or on leaving the editor. */
 export async function releaseClaimAction(claimId: string): Promise<LeaseResult> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { ok: false, error: 'forbidden' };
   if (!pageIdSchema.safeParse(claimId).success) return { ok: false, error: 'validation' };
   if (!(await canViewClaim(session, claimId))) return { ok: false, error: 'not_found' };
@@ -145,7 +145,7 @@ export async function forceReleaseClaimAction(
   _prevState: ForceReleaseState,
   formData: FormData,
 ): Promise<ForceReleaseState> {
-  const session = await getSessionContext();
+  const session = await getWriterSession();
   if (!session) return { error: 'forbidden' };
   if (session.role !== 'admin') return { error: 'forbidden' };
 

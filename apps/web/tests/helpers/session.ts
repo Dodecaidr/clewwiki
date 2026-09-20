@@ -20,7 +20,7 @@ export async function createTestAccount(options: {
   db: Database;
   schema: typeof ClewwikiDb;
   workspaceId: string;
-  role: 'admin' | 'editor';
+  role: 'admin' | 'editor' | 'viewer';
   tag: string;
 }): Promise<TestAccount> {
   const { auth } = await import('@/lib/auth');

@@ -6,6 +6,7 @@ import type { Metadata } from 'next';
 import { ReviewForm } from './review-form';
 import { DiffView } from '@/components/diff-view';
 import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
+import { canWrite } from '@/lib/roles';
 import { isPageServiceError } from '@/lib/pages/errors';
 import { diffPageVersions, getPageReviewState } from '@/lib/reviews/service';
 import type { VersionDiff } from '@/lib/reviews/service';
@@ -166,7 +167,7 @@ export default async function PageChangesPage({ params, searchParams }: Props) {
         }}
       />
 
-      {isPendingRange ? (
+      {isPendingRange && canWrite(session.role) ? (
         <Card>
           <CardHeader>
             <CardTitle>{t('decideHeading')}</CardTitle>

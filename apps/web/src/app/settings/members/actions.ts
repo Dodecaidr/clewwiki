@@ -18,8 +18,8 @@ export interface MembersFormState {
   resetLink?: string;
 }
 
-const inviteSchema = z.object({ email: z.string().trim().min(3).max(254), role: z.enum(['admin', 'editor']) });
-const roleSchema = z.object({ userId: z.string().min(1).max(200), role: z.enum(['admin', 'editor']) });
+const inviteSchema = z.object({ email: z.string().trim().min(3).max(254), role: z.enum(['admin', 'editor', 'viewer']) });
+const roleSchema = z.object({ userId: z.string().min(1).max(200), role: z.enum(['admin', 'editor', 'viewer']) });
 
 /**
  * Authorisation is re-checked in every action. The page hides these forms from

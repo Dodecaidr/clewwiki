@@ -6,12 +6,13 @@ import type { Metadata } from 'next';
 import { buttonVariants } from '@/components/ui/button';
 import { Alert, Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field, Select } from '@/components/ui/field';
+import { canWrite } from '@/lib/roles';
 import { lastSegment } from '@/lib/pages/paths';
 import { getPageTree } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import { normalizeSpaceKey } from '@/lib/spaces/keys';
 import { flattenTree, subtreeIds } from '@/lib/spaces/tree';
-import { spacePageHref, spacePageMoveHref } from '@/lib/spaces/urls';
+import { spaceHref, spacePageHref, spacePageMoveHref } from '@/lib/spaces/urls';
 import { findPage, findSpaceById, findSpaces } from '@/lib/spaces/visibility';
 import { assertSameWorkspace } from '@/lib/workspace';
 
@@ -48,6 +49,12 @@ export default async function MovePage({ params, searchParams }: Props) {
   assertSameWorkspace(session.workspace.id, page.workspaceId);
   const space = await findSpaceById(session, page.spaceId);
   if (!space) notFound();
+
+  // A viewer has no business on a screen that writes. The action behind it
+  // would refuse them anyway; this saves them filling in a form to find out.
+  if (!canWrite(session.role)) {
+    redirect(spaceHref(space.key));
+  }
 
   const { to } = await searchParams;
   const wanted = typeof to === 'string' ? normalizeSpaceKey(to) : '';
