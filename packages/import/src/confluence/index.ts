@@ -1,15 +1,16 @@
 /**
  * The Confluence source adapter.
  *
- * Reads one space of a Confluence Cloud site over the REST API v2 and turns it
- * into the tree the rest of the pipeline works on. The credential is passed in,
+ * Reads one space of a Confluence site — Cloud over the REST API v2, Server and
+ * Data Center over v1 — and turns it into the tree the rest of the pipeline
+ * works on. The storage format of a page body is the same on both, so
+ * everything after the listing is shared. The credential is passed in,
  * used for the length of this call, and never returned, stored or recorded: the
  * `params` the import row keeps carry the site address and the space key and
  * nothing else.
  *
- * Server and Data Center are untested. Their API is v1 and shaped differently
- * enough that this adapter would not merely need a different base path; saying
- * so is more honest than shipping a version check that pretends to cover them.
+ * What differs between the two lives in `client.ts`: the API, the context path,
+ * the credential, and the rule that lets a site on a private network be reached.
  */
 
 import { archivePathHref, imagePlaceholderFor, referencedImageKeys, rewriteImages } from '../images';
@@ -63,7 +64,7 @@ export async function importFromConfluence(input: ConfluenceImportInput): Promis
 
   const converted = pages.map((page, index) =>
     toNode(page, index, {
-      baseUrl: client.describe().base_url,
+      baseUrl: client.contentBase(),
       pageIdByTitle,
       known,
       limits: input.limits,
@@ -122,6 +123,7 @@ export async function importFromConfluence(input: ConfluenceImportInput): Promis
     // reader of the imports table must never be able to recover.
     params: {
       base_url: client.describe().base_url,
+      deployment: client.describe().deployment,
       space_key: input.spaceKey,
       space_name: space.name,
       page_count: pages.length,
@@ -145,8 +147,9 @@ interface ConvertedPage {
 
 function toNode(page: ConfluencePage, index: number, context: NodeContext): ConvertedPage {
   const converted = convertStorageToMarkdown(page.storage, {
-    // Attachments are served under `/wiki`, like everything else on a Cloud site.
-    baseUrl: `${context.baseUrl}/wiki`,
+    // Attachments are served under `/wiki` on a Cloud site and under the
+    // context path on a Data Center; the client knows which.
+    baseUrl: context.baseUrl,
     pageId: page.id,
     pageIdByTitle: context.pageIdByTitle,
     carryImages: context.limits.imageBytes > 0,

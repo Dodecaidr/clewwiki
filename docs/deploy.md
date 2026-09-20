@@ -613,6 +613,7 @@ container.
 | `DISCUSSION_MESSAGE_RATE_LIMIT_WINDOW` | no | `60` | Window length in seconds for the message budget. |
 | `IMPORT_MAX_UPLOAD_MB` | no | `200` | Largest import upload. Refused from the declared `Content-Length`, before the body is read. |
 | `IMPORT_MAX_EXPANDED_MB` | no | `256` | Most an uploaded ZIP may expand to. The upload and what it expands to are held in memory together until the import is staged, so on a host with little memory lower both: a container that runs out is killed, not refused. |
+| `IMPORT_CONFLUENCE_PRIVATE_HOSTS` | no | empty | Host names of Confluence Server or Data Center sites on a private network that imports may connect to, comma-separated. Empty keeps imports to public addresses. Only private ranges open up; the loopback, link-local, multicast and reserved space stay refused whatever is listed. Names, not addresses: what a name resolves to is checked again as the socket connects. |
 | `CLEWWIKI_VERSION` | no | `latest` | Which published tag of `ghcr.io/dodecaidr/clewwiki` to run. Pin a version in production. Ignored when building from source. |
 | `WEB_BIND_ADDRESS` | no | `127.0.0.1` | Host interface compose publishes the app on. Change it only for a proxy on another machine, and then to a private address. |
 | `WEB_PORT` | no | `3000` | Host port compose publishes the app on. |

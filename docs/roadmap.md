@@ -671,9 +671,35 @@ other request — follow redirects: three at most, `https` and public hosts only
 and the credential goes to the origin that was typed and to no other host. That
 path is tested against a simulated site and **not yet against a live one**.
 
-**Next, if it is wanted**: Confluence Server/Data Center, whose API is v1 and is
-untested here; images inside a PDF, which are not extracted; and optical
-character recognition for scanned PDFs, which today are refused outright.
+**Confluence Server and Data Center — built.** Their API is v1, and it differs
+from Cloud's in four ways the adapter now covers: `/rest/api/content` instead of
+`/api/v2`, a page naming its `ancestors` rather than one parent, a listing paged
+by counting rather than by a cursor, and a site that usually sits under a context
+path. The credential differs too — a personal access token as `Bearer`, or a
+username and password, or none at all for a space open to anonymous reading —
+and so does the network: a Confluence of one's own is normally on a private
+address, which an import refuses to connect to unless the operator has listed
+that host name in `IMPORT_CONFLUENCE_PRIVATE_HOSTS`. Only private ranges open up
+that way; the loopback and link-local stay refused, and the name is checked again
+inside the socket's own resolution. The storage format of a page is identical on
+both deployments, so nothing downstream of the listing changed.
+
+Verified against a live site as well as against fixtures: the adapter read the
+Apache Kafka space of `cwiki.apache.org` — a public Confluence Data Center —
+anonymously on 2026-09-20, finding the space by key, listing five pages, taking
+the hierarchy from their ancestors, the dates from `version.when`, and the page
+addresses under the site's `/confluence` context path, then converting a body to
+Markdown with its links rewritten. The fixtures in the tests are the shapes that
+site answered with. What has *not* been exercised: a site behind single sign-on,
+a personal access token, and an import large enough to page many times.
+
+Why this one before other roadmap items: Atlassian stops Data Center on 28 March
+2029 and its own MCP server reaches Cloud only, so these are the teams with a
+wiki, a deadline and no first-party way to put agents on it.
+
+**Next, if it is wanted**: images inside a PDF, which are not extracted; and
+optical character recognition for scanned PDFs, which today are refused
+outright.
 
 ## Agent discussions and durable decisions — **complete**
 

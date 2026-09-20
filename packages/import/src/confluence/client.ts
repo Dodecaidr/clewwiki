@@ -1,5 +1,6 @@
 /**
- * The slice of the Confluence Cloud REST API v2 an import needs.
+ * The slice of the Confluence REST API an import needs: v2 on a Cloud site, v1
+ * on Server and Data Center.
  *
  * Four calls: find the space by its key, list its pages with their `storage`
  * representation, follow the cursor until there are none left, and download an
@@ -40,6 +41,20 @@
  * clean refusal for a literal address and what still holds when a test injects
  * its own `fetchImpl`.
  *
+ * **Server and Data Center** differ in four ways, and `deployment` selects
+ * them. The API is v1 (`/rest/api/content`), where a page names its ancestors
+ * instead of a parent and a listing is paged by `start`. The site may sit under
+ * a context path (`https://wiki.example.com/confluence`), so the path a person
+ * typed is kept. The credential is a personal access token sent as `Bearer`, a
+ * username and password sent as `Basic`, or nothing at all for a space that is
+ * open to anonymous reading. And the site is usually on a private network: it
+ * is reachable only when the operator has listed its host name
+ * (`privateHosts`), and then only on private ranges — see `address.ts`.
+ *
+ * A v1 listing is paged by counting, never by following the `next` link the
+ * server offers: the position of the next request is then this client's
+ * arithmetic, not the server's say-so.
+ *
  * `fetchImpl` and `lookup` are injectable so the whole client is testable
  * without a network, which is how the suite exercises pagination, rate
  * limiting, error mapping and every refusal above.
@@ -49,18 +64,37 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 import { ImportError } from '../limits';
-import { isNonPublicAddress } from './address';
-import { createGuardedFetch } from './transport';
+import { isAddressAllowed, NO_PRIVATE_HOSTS, toPrivateHosts } from './address';
+import type { PrivateHosts } from './address';
+import { createGuardedFetch, NON_PUBLIC_MESSAGE } from './transport';
 
-export { isNonPublicAddress } from './address';
+export { classifyAddress, isAddressAllowed, isNonPublicAddress, toPrivateHosts } from './address';
+export type { AddressClass, PrivateHosts } from './address';
 export { createGuardedFetch, createGuardedLookup } from './transport';
 
+/** Where the Confluence runs: Atlassian's cloud, or a Server or Data Center of your own. */
+export type ConfluenceDeployment = 'cloud' | 'datacenter';
+
 export interface ConfluenceCredentials {
-  /** `https://example.atlassian.net`, with or without `/wiki`. */
+  /**
+   * Cloud: `https://example.atlassian.net`, with or without `/wiki`.
+   * Data Center: the site up to its context path, such as
+   * `https://wiki.example.com/confluence`.
+   */
   baseUrl: string;
+  /**
+   * Cloud: the Atlassian account e-mail. Data Center: a username, or empty to
+   * send `apiToken` as a personal access token.
+   */
   email: string;
-  /** An Atlassian API token. Held in memory for the run and never stored. */
+  /**
+   * Cloud: an Atlassian API token. Data Center: a personal access token, or the
+   * password of `email`; empty together with `email` reads anonymously. Held in
+   * memory for the run and never stored.
+   */
   apiToken: string;
+  /** Defaults to `cloud`. */
+  deployment?: ConfluenceDeployment;
 }
 
 export interface ConfluencePage {
@@ -91,6 +125,11 @@ export interface ConfluenceClientOptions {
   maxResponseBytes?: number;
   /** Largest image downloaded, in bytes. */
   maxImageBytes?: number;
+  /**
+   * Host names the operator of this instance has opened on a private network.
+   * Empty by default, which keeps every import to public addresses.
+   */
+  privateHosts?: Iterable<string>;
 }
 
 /** A downloaded image, or the reason there is none — never an exception. */
@@ -126,17 +165,15 @@ async function systemLookup(hostname: string): Promise<string[]> {
 export async function assertPublicHost(
   hostname: string,
   lookup: (hostname: string) => Promise<string[]> = systemLookup,
+  privateHosts: PrivateHosts = NO_PRIVATE_HOSTS,
 ): Promise<void> {
-  const refusal = new ImportError(
-    'validation',
-    'The Confluence address must be a public host. Addresses on a private network, the loopback and link-local ranges are not imported from.',
-  );
+  const refusal = new ImportError('validation', NON_PUBLIC_MESSAGE);
   const bare = hostname.replace(/^\[|\]$/g, '');
   if (bare === '' || bare.toLowerCase() === 'localhost' || bare.toLowerCase().endsWith('.localhost')) {
     throw refusal;
   }
   if (isIP(bare) !== 0) {
-    if (isNonPublicAddress(bare)) throw refusal;
+    if (!isAddressAllowed(bare, bare, privateHosts)) throw refusal;
     return;
   }
   let addresses: string[];
@@ -145,14 +182,19 @@ export async function assertPublicHost(
   } catch {
     throw new ImportError('validation', 'The Confluence address could not be resolved');
   }
-  if (addresses.length === 0 || addresses.some((address) => isNonPublicAddress(address))) {
+  if (addresses.length === 0 || addresses.some((address) => !isAddressAllowed(bare, address, privateHosts))) {
     throw refusal;
   }
 }
 
 export class ConfluenceClient {
+  private readonly deployment: ConfluenceDeployment;
   private readonly origin: string;
-  private readonly authorization: string;
+  /** Where API paths and downloads hang: `/wiki` on Cloud, the context path elsewhere. */
+  private readonly root: string;
+  /** Null when a Data Center space is read anonymously. */
+  private readonly authorization: string | null;
+  private readonly privateHosts: PrivateHosts;
   private readonly fetchImpl: typeof fetch;
   private readonly retryDelayMs: number;
   private readonly maxRetries: number;
@@ -165,8 +207,16 @@ export class ConfluenceClient {
   private hostChecked = false;
 
   constructor(credentials: ConfluenceCredentials, options: ConfluenceClientOptions = {}) {
-    this.origin = normalizeBaseUrl(credentials.baseUrl);
-    this.authorization = `Basic ${Buffer.from(`${credentials.email}:${credentials.apiToken}`, 'utf8').toString('base64')}`;
+    this.deployment = credentials.deployment ?? 'cloud';
+    if (this.deployment === 'datacenter') {
+      this.root = normalizeDataCenterBaseUrl(credentials.baseUrl);
+      this.origin = new URL(this.root).origin;
+    } else {
+      this.origin = normalizeBaseUrl(credentials.baseUrl);
+      this.root = `${this.origin}/wiki`;
+    }
+    this.authorization = authorizationFor(this.deployment, credentials);
+    this.privateHosts = toPrivateHosts(options.privateHosts);
     this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
     this.maxRetries = options.maxRetries ?? 5;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -174,17 +224,28 @@ export class ConfluenceClient {
     this.lookup = options.lookup;
     this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
     this.fetchImpl =
-      options.fetchImpl ?? createGuardedFetch({ maxResponseBytes: this.maxResponseBytes });
+      options.fetchImpl ??
+      createGuardedFetch({ maxResponseBytes: this.maxResponseBytes, privateHosts: this.privateHosts });
     this.maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
     // Its own transport, so that the cap on an image is enforced on the socket
     // and not after 64 MB of somebody's "screenshot" has been buffered.
     this.imageFetch =
-      options.fetchImpl ?? createGuardedFetch({ maxResponseBytes: this.maxImageBytes });
+      options.fetchImpl ??
+      createGuardedFetch({ maxResponseBytes: this.maxImageBytes, privateHosts: this.privateHosts });
   }
 
   /** What may be written down about this connection: an origin, never a secret. */
-  describe(): { base_url: string } {
-    return { base_url: this.origin };
+  describe(): { base_url: string; deployment: ConfluenceDeployment } {
+    return { base_url: this.deployment === 'datacenter' ? this.root : this.origin, deployment: this.deployment };
+  }
+
+  /** What a link or an attachment of this site is relative to. */
+  contentBase(): string {
+    return this.root;
+  }
+
+  private headers(extra: Record<string, string> = {}): Record<string, string> {
+    return this.authorization === null ? extra : { Authorization: this.authorization, ...extra };
   }
 
   /**
@@ -193,7 +254,7 @@ export class ConfluenceClient {
    * can name another host.
    */
   private url(path: string): string {
-    return `${this.origin}/wiki${path.startsWith('/') ? path : `/${path}`}`;
+    return `${this.root}${path.startsWith('/') ? path : `/${path}`}`;
   }
 
   /** Reads a body up to the cap and no further, whatever `Content-Length` claimed. */
@@ -242,7 +303,7 @@ export class ConfluenceClient {
   async downloadAttachment(pageId: string, filename: string): Promise<AttachmentDownload> {
     try {
       if (!this.hostChecked) {
-        await assertPublicHost(new URL(this.origin).hostname, this.lookup);
+        await assertPublicHost(new URL(this.origin).hostname, this.lookup, this.privateHosts);
         this.hostChecked = true;
       }
       let target = new URL(
@@ -251,10 +312,10 @@ export class ConfluenceClient {
 
       for (let hop = 0, attempt = 0; hop <= MAX_DOWNLOAD_HOPS; ) {
         const sameOrigin = target.origin === this.origin;
-        if (!sameOrigin) await assertPublicHost(target.hostname, this.lookup);
+        if (!sameOrigin) await assertPublicHost(target.hostname, this.lookup, this.privateHosts);
 
         const response = await this.imageFetch(target, {
-          headers: sameOrigin ? { Authorization: this.authorization } : {},
+          headers: sameOrigin ? this.headers() : {},
           redirect: 'manual',
         });
 
@@ -293,13 +354,13 @@ export class ConfluenceClient {
 
   private async request(path: string): Promise<unknown> {
     if (!this.hostChecked) {
-      await assertPublicHost(new URL(this.origin).hostname, this.lookup);
+      await assertPublicHost(new URL(this.origin).hostname, this.lookup, this.privateHosts);
       this.hostChecked = true;
     }
     const target = this.url(path);
     for (let attempt = 0; ; attempt += 1) {
       const response = await this.fetchImpl(target, {
-        headers: { Authorization: this.authorization, Accept: 'application/json' },
+        headers: this.headers({ Accept: 'application/json' }),
         // Never followed: a redirect is the server choosing where the next
         // request, and the credential on it, goes.
         redirect: 'manual',
@@ -308,7 +369,9 @@ export class ConfluenceClient {
       if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
         throw new ImportError(
           'validation',
-          'Confluence answered with a redirect. Give the address of the site itself, such as https://example.atlassian.net',
+          this.deployment === 'datacenter'
+            ? 'Confluence answered with a redirect. Give the address of the site up to its context path, such as https://wiki.example.com/confluence'
+            : 'Confluence answered with a redirect. Give the address of the site itself, such as https://example.atlassian.net',
         );
       }
 
@@ -322,7 +385,14 @@ export class ConfluenceClient {
       if (response.status === 401 || response.status === 403) {
         // The message names neither the address nor the account: the caller
         // already knows both, and an error body is a place a credential leaks.
-        throw new ImportError('validation', 'Confluence refused the e-mail and API token');
+        throw new ImportError(
+          'validation',
+          this.deployment === 'cloud'
+            ? 'Confluence refused the e-mail and API token'
+            : this.authorization === null
+              ? 'Confluence does not let this space be read anonymously. Give a personal access token.'
+              : 'Confluence refused the token, or the username and password',
+        );
       }
       if (response.status === 404) {
         throw new ImportError('validation', 'Confluence has no such space, or the account cannot see it');
@@ -342,6 +412,17 @@ export class ConfluenceClient {
 
   /** The numeric id of a space, found by the key a person types. */
   async findSpaceId(spaceKey: string): Promise<{ id: string; name: string }> {
+    if (this.deployment === 'datacenter') {
+      // v1 lists content by the key itself, so the key is the id.
+      const space = record(await this.request(`/rest/api/space/${encodeURIComponent(spaceKey)}`));
+      const key = asString(space?.['key']);
+      if (key === null) {
+        throw new ImportError('validation', 'Confluence has no such space, or the account cannot see it', {
+          space_key: spaceKey,
+        });
+      }
+      return { id: key, name: asString(space?.['name']) ?? spaceKey };
+    }
     const body = await this.request(`/api/v2/spaces?keys=${encodeURIComponent(spaceKey)}&limit=1`);
     const results = asArray(record(body)?.['results']);
     const first = record(results[0]);
@@ -361,6 +442,7 @@ export class ConfluenceClient {
    * thousand pages stops costing requests the moment the answer is known.
    */
   async listPages(spaceId: string, limit: number): Promise<ConfluencePage[]> {
+    if (this.deployment === 'datacenter') return this.listPagesV1(spaceId, limit);
     const pages: ConfluencePage[] = [];
     let next: string | null =
       `/api/v2/spaces/${encodeURIComponent(spaceId)}/pages?body-format=storage&status=current&limit=${this.pageSize}`;
@@ -376,7 +458,50 @@ export class ConfluenceClient {
     }
     return pages;
   }
+
+  /**
+   * The same listing over API v1.
+   *
+   * Paged by counting. The answer says how many entries it holds (`size`) and
+   * how many it was willing to hold (`limit`, which a server may set lower than
+   * what was asked); fewer than that is the last page. The `next` link is
+   * ignored on purpose. A server that keeps answering full pages is stopped by
+   * the import's own page cap, and one that answers full pages of nothing by
+   * the bound on requests.
+   */
+  private async listPagesV1(spaceKey: string, limit: number): Promise<ConfluencePage[]> {
+    const pages: ConfluencePage[] = [];
+    const size = Math.min(this.pageSize, V1_PAGE_SIZE);
+    const maxRequests = Math.ceil(limit / size) + 2;
+    let start = 0;
+
+    for (let requests = 0; requests < maxRequests && pages.length < limit; requests += 1) {
+      const body = record(
+        await this.request(
+          `/rest/api/content?spaceKey=${encodeURIComponent(spaceKey)}&type=page&status=current` +
+            `&expand=body.storage,ancestors,version,extensions.position&limit=${size}&start=${start}`,
+        ),
+      );
+      const results = asArray(body?.['results']);
+      for (const entry of results) {
+        const page = toPageV1(entry, this.root);
+        if (page !== null) pages.push(page);
+        if (pages.length >= limit) break;
+      }
+      const answered = body?.['limit'];
+      const pageLimit = typeof answered === 'number' && answered > 0 ? Math.min(answered, size) : size;
+      if (results.length === 0 || results.length < pageLimit) break;
+      start += results.length;
+    }
+    return pages;
+  }
 }
+
+/**
+ * A Data Center answers with at most this many pages when their bodies are
+ * expanded, whatever is asked for; asking for it outright saves a guess.
+ */
+const V1_PAGE_SIZE = 50;
 
 /** `https://example.atlassian.net` from anything a person might paste. */
 export function normalizeBaseUrl(value: string): string {
@@ -392,6 +517,40 @@ export function normalizeBaseUrl(value: string): string {
     throw new ImportError('validation', 'The Confluence address must use https');
   }
   return `${parsed.protocol}//${parsed.host}`;
+}
+
+/**
+ * The site up to its context path, from what a person pasted. The path is kept
+ * because a Data Center is often served under one (`/confluence`, `/wiki`); a
+ * query or a fragment is never part of it.
+ */
+export function normalizeDataCenterBaseUrl(value: string): string {
+  const trimmed = value.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+  } catch {
+    throw new ImportError('validation', 'The Confluence address is not a URL');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new ImportError('validation', 'The Confluence address must use https');
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    throw new ImportError('validation', 'The Confluence address must not carry a username or a password');
+  }
+  const path = parsed.pathname.replace(/\/+$/, '');
+  return `${parsed.protocol}//${parsed.host}${path}`;
+}
+
+function authorizationFor(deployment: ConfluenceDeployment, credentials: ConfluenceCredentials): string | null {
+  const basic = (user: string, secret: string) =>
+    `Basic ${Buffer.from(`${user}:${secret}`, 'utf8').toString('base64')}`;
+  if (deployment === 'cloud') return basic(credentials.email, credentials.apiToken);
+
+  const user = credentials.email.trim();
+  if (user === '' && credentials.apiToken === '') return null;
+  if (user === '') return `Bearer ${credentials.apiToken}`;
+  return basic(user, credentials.apiToken);
 }
 
 /**
@@ -485,5 +644,37 @@ function toPage(value: unknown, origin: string): ConfluencePage | null {
     storage,
     updatedAt: updated !== null && Number.isFinite(Date.parse(updated)) ? new Date(updated) : null,
     webUrl: webui === null ? null : `${origin}/wiki${webui}`,
+  };
+}
+
+/** A page as API v1 describes it: ancestors instead of a parent, `version.when` for the date. */
+function toPageV1(value: unknown, root: string): ConfluencePage | null {
+  const page = record(value);
+  const id = asString(page?.['id']);
+  const title = asString(page?.['title']);
+  if (id === null || title === null) return null;
+
+  // Ancestors run from the root of the space down; the last one is the parent.
+  const ancestors = asArray(page?.['ancestors']);
+  const parentId = ancestors.length === 0 ? null : asString(record(ancestors[ancestors.length - 1])?.['id']);
+
+  // `extensions.position` is a number, or the string "none" for a page nobody
+  // has ordered by hand; the top-level `position` says the same with -1.
+  const ordered = [record(page?.['extensions'])?.['position'], page?.['position']].find(
+    (candidate): candidate is number => typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0,
+  );
+
+  const updated = asString(record(page?.['version'])?.['when']);
+  const webui = asString(record(page?.['_links'])?.['webui']);
+
+  return {
+    id,
+    title,
+    parentId,
+    position: ordered ?? null,
+    status: asString(page?.['status']) ?? 'current',
+    storage: asString(record(record(page?.['body'])?.['storage'])?.['value']) ?? '',
+    updatedAt: updated !== null && Number.isFinite(Date.parse(updated)) ? new Date(updated) : null,
+    webUrl: webui === null ? null : `${root}${webui.startsWith('/') ? webui : `/${webui}`}`,
   };
 }

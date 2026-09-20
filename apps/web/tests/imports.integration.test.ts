@@ -778,6 +778,61 @@ describe.skipIf(!probe.reachable)('documentation import', () => {
       expect((await startMarkdownImport(admin, spaceKey)).status).toBe(201);
     });
 
+    it('needs a credential for a Cloud site and says which field is missing', async () => {
+      const { status, body } = await json(
+        await importsRoute.POST(
+          cookie(admin, `/api/v1/spaces/${spaceKey}/imports`, {
+            method: 'POST',
+            body: JSON.stringify({
+              source: 'confluence',
+              deployment: 'cloud',
+              base_url: 'https://example.atlassian.net',
+              space_key: 'ENG',
+            }),
+          }),
+          keyParams(spaceKey),
+        ),
+      );
+      expect(status).toBe(400);
+      expect(JSON.stringify(body)).toMatch(/api_token|email/);
+    });
+
+    it('takes a Data Center request with no credential, and refuses it on the address instead', async () => {
+      // No credential is a valid request for a Server or Data Center: a space
+      // may be readable without signing in. So this one gets past the schema
+      // and is stopped by the address instead — the loopback is refused before
+      // any connection is made, whatever the operator has listed. Which is why
+      // the answer is the adapter's refusal, naming the setting that opens a
+      // private site up, and not a complaint about a missing field.
+      const { status, body } = await json(
+        await importsRoute.POST(
+          cookie(admin, `/api/v1/spaces/${spaceKey}/imports`, {
+            method: 'POST',
+            body: JSON.stringify({
+              source: 'confluence',
+              deployment: 'datacenter',
+              base_url: 'https://localhost/confluence',
+              space_key: 'ENG',
+            }),
+          }),
+          keyParams(spaceKey),
+        ),
+      );
+      expect(status).toBe(400);
+      expect(String(body['error']?.message)).toMatch(/public host/);
+      expect(String(body['error']?.message)).toMatch(/IMPORT_CONFLUENCE_PRIVATE_HOSTS/);
+
+      // And the attempt is kept rather than lost, the way every other failed
+      // import is.
+      const listed = await json(
+        await importsRoute.GET(cookie(admin, `/api/v1/spaces/${spaceKey}/imports`), keyParams(spaceKey)),
+      );
+      const failed = (listed.body['imports'] as JsonRecord[]).find(
+        (record) => record['status'] === 'failed' && String(record['error']).includes('public host'),
+      );
+      expect(failed).toBeDefined();
+    });
+
     it('refuses an unknown source', async () => {
       const form = new FormData();
       form.set('source', 'evernote');

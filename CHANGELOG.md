@@ -35,6 +35,22 @@ tagged.
   release, weekly, and on demand. `scripts/mcp-stdio-check.mjs` is the second
   half and runs against any instance.
 
+- **Import from Confluence Server and Data Center.** The Confluence form now
+  asks where the site runs. A Server or Data Center is read over the REST API
+  v1: the address may carry a context path, the hierarchy comes from each page's
+  ancestors, a listing is paged by counting rather than by the link the server
+  offers, and the credential is a personal access token, a username and
+  password, or nothing at all for a space that is readable without signing in.
+  Atlassian makes Data Center read-only on 28 March 2029 and its own MCP server
+  reaches Cloud only. Checked against a live public Data Center as well as
+  against fixtures; a site behind single sign-on has not been tried.
+- **`IMPORT_CONFLUENCE_PRIVATE_HOSTS`.** An import connects to an address
+  somebody typed, so it connects to public addresses only. A Confluence on a
+  private network is reached when the operator lists its host name here, and
+  then only on private ranges: the loopback, link-local, multicast and reserved
+  space stay refused whatever is listed, and a name is checked again inside the
+  socket's own resolution.
+
 ### Documentation
 
 - **How it compares** (`docs/compare.md`): clewwiki next to Confluence, Docmost,
@@ -43,6 +59,9 @@ tagged.
 - **Moving from Confluence** (`docs/from-confluence.md`): the Cloud importer step
   by step, and the route through an HTML export and Markdown for Server and Data
   Center, which the importer does not cover.
+- **Moving from Confluence** gains the Server and Data Center route, what the
+  operator opens up first, and keeps the HTML export as the way round for a site
+  whose API is closed.
 - The README opens with what the wiki is and what it takes to run, and says
   plainly what is not there yet.
 

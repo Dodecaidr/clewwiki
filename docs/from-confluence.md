@@ -1,9 +1,15 @@
 # Moving from Confluence
 
-Two routes, depending on where your Confluence runs. Both end the same way: an
-import in clewwiki is staged, so you see every page it would create, with its
-path, its Markdown and a note about anything that did not convert, and nothing
-exists until you press the button.
+clewwiki imports a space from Confluence Cloud and from a Confluence Server or
+Data Center of your own. Either way the import is staged: you see every page it
+would create, with its path, its Markdown and a note about anything that did not
+convert, and nothing exists until you press the button.
+
+Atlassian ends Data Center on 28 March 2029, when environments become read-only,
+and stopped selling it to new customers on 30 March 2026
+([Atlassian](https://www.atlassian.com/licensing/data-center-end-of-life)). The
+official Atlassian MCP server connects to Cloud sites only, so a team that stays
+on its own server has no first-party way to put agents on its wiki.
 
 ## From Confluence Cloud
 
@@ -35,13 +41,58 @@ full table and the limits.
 
 ## From Confluence Server or Data Center
 
-The importer has not been tested against Server or Data Center: their REST API
-is an older version with a different shape. Until that changes, the route is
-through Markdown, which clewwiki imports as a ZIP of files.
+Read over the REST API v1. A page body is stored the same way as on Cloud, so
+everything about the conversion above holds here too.
 
-1. In Confluence, export the space as HTML: **Space tools**, **Content tools**,
-   **Export**, **HTML**. You get a ZIP with one HTML file per page and an
-   `attachments` directory.
+**First, the operator opens the site up.** A Confluence you host is usually on a
+private network, and an import connects to an address somebody typed into a
+form — so by default it connects only to public addresses. Whoever runs this
+wiki lists the host names that may be reached:
+
+```sh
+IMPORT_CONFLUENCE_PRIVATE_HOSTS=wiki.corp.example
+```
+
+Only private ranges open up that way (10.x, 172.16–31.x, 192.168.x, IPv6 unique
+local). The loopback, link-local — 169.254.169.254, where cloud metadata lives —
+multicast and reserved space stay refused whatever is listed, and a name is
+checked again as the socket connects, so a name server that answers differently
+the second time changes nothing. A site already on a public address needs none
+of this.
+
+**Then the import itself.**
+
+1. In clewwiki, open the target space, then **Import**, then **Confluence**, and
+   choose **Confluence Server or Data Center**.
+2. Give the address up to its context path — `https://wiki.example.com/confluence`,
+   or just `https://wiki.example.com` when the site is at the root. It must be
+   `https`.
+3. Give the space key, and a credential:
+   - a **personal access token** from your Confluence profile, with the username
+     left empty (sent as `Bearer`); or
+   - a **username and password** (sent as `Basic`); or
+   - **neither**, for a space that is readable without signing in.
+4. Review the staged tree, then import.
+
+**What to expect.** The hierarchy comes from each page's ancestors and the order
+from the position a person set in the page tree. Images attached to a page and
+shown on it are downloaded, as on Cloud; the credential goes to your site and to
+nowhere it redirects to. The listing is paged by counting rather than by
+following the link the server offers, so an import reads a large space in runs of
+fifty pages.
+
+**If it does not work.** A site behind single sign-on where the REST API is not
+reachable with a token, or a version older than the v1 API's `expand` of
+`body.storage`, will not import. The route below is the way round it, and an
+issue saying which version refused you is the most useful thing you can send.
+
+## The way round: an HTML export
+
+Any Confluence, however old or however locked down, can export a space as HTML,
+and clewwiki imports a ZIP of Markdown.
+
+1. In Confluence: **Space tools**, **Content tools**, **Export**, **HTML**. You
+   get a ZIP with one HTML file per page and an `attachments` directory.
 2. Convert the HTML files to Markdown. [pandoc](https://pandoc.org) does it:
 
    ```sh
@@ -52,17 +103,11 @@ through Markdown, which clewwiki imports as a ZIP of files.
    zip -r ../space-markdown.zip . -i '*.md' 'attachments/*'
    ```
 
-3. In clewwiki, open the target space, then **Import**, then **Markdown
-   folder**, and upload `space-markdown.zip`.
-4. Review the staged tree as above.
+3. In clewwiki: **Import**, then **Markdown folder**, and upload the ZIP.
 
-Be ready for what this route loses. An HTML export is flat, so the page
-hierarchy has to be rebuilt by changing paths in the staged tree. Every page
-carries Confluence's breadcrumb and footer, which you will want to strip before
-or after. Macros arrive as whatever HTML they rendered to. We have run the
-Markdown importer at length; we have not run this whole route against a live
-Data Center site, so try it on one small space first. If you do, an issue saying
-what broke is the most useful thing you can send.
+What this route loses: an HTML export is flat, so the hierarchy has to be rebuilt
+by changing paths in the staged tree, and every page carries Confluence's
+breadcrumb and footer. Prefer the API route when it is open to you.
 
 ## Getting out again
 

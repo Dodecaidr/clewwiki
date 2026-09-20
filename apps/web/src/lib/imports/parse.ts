@@ -6,8 +6,14 @@ import {
   importFromNotionZip,
   importFromPdf,
 } from '@clewwiki/import';
-import type { ImportLimits, ImportParseResult, PdfSplitMode } from '@clewwiki/import';
+import type {
+  ConfluenceDeployment,
+  ImportLimits,
+  ImportParseResult,
+  PdfSplitMode,
+} from '@clewwiki/import';
 
+import { getImportConfluencePrivateHosts } from '../env';
 import { PageServiceError } from '../pages/errors';
 
 /**
@@ -30,9 +36,15 @@ export type ImportRequest =
 
 export interface ConfluenceRequest {
   source: 'confluence';
+  /** `cloud` for an atlassian.net site, `datacenter` for a Server or Data Center. */
+  deployment: ConfluenceDeployment;
   baseUrl: string;
   spaceKey: string;
-  /** Used for this run and then dropped. Never stored. */
+  /**
+   * The Atlassian account e-mail, or a Data Center username. Empty with an
+   * empty token means a Data Center space read anonymously. Used for this run
+   * and then dropped. Never stored.
+   */
   email: string;
   /** Used for this run and then dropped. Never stored. */
   apiToken: string;
@@ -49,9 +61,13 @@ export function parseImport(
             baseUrl: request.baseUrl,
             email: request.email,
             apiToken: request.apiToken,
+            deployment: request.deployment,
           },
           spaceKey: request.spaceKey,
           limits,
+          // Read here rather than passed in: which hosts on a private network
+          // may be reached is the operator's setting, not the caller's.
+          client: { privateHosts: getImportConfluencePrivateHosts() },
         });
       case 'notion':
         return importFromNotionZip({ zip: request.zip, limits });
