@@ -9,6 +9,19 @@ tagged.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-21
+
+Single sign-on, a Confluence of your own to import from, and the rest of what a
+team needs: accounts people manage themselves, a way back in from a lost
+password, and a role for the people a wiki is written for. Upgrading runs
+migrations `0017_password_resets`, `0018_viewer_role` and
+`0019_email_verified_by_invitation`. The last of those records the address of
+every existing account as verified — an administrator asserted it, which is the
+only way an account exists here — because that is what lets an identity from an
+OpenID Connect provider land on an invited member's account instead of making a
+second one. Nothing else changes for an instance that does not configure a
+provider.
+
 ### Added
 
 - **Your account.** Behind your name in the header: change your name, and your
@@ -670,7 +683,8 @@ image are published from this tag; earlier commits were development on
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.2.1...v0.3.0
