@@ -1,6 +1,6 @@
 {
   "name": "@clewwiki/mcp-server",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "MCP server for clewwiki: the wiki tools an AI coding agent calls, wrapping the clewwiki REST API.",
   "license": "AGPL-3.0-or-later",
   "homepage": "https://github.com/Dodecaidr/clewwiki#readme",
