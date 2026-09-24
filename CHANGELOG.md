@@ -9,9 +9,12 @@ tagged.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-24
+
 Files attached to pages, in versions, with watching. Upgrading runs migration
 `0020_files`. `docker-compose.yml` gains the `files-data` volume and
-`FILES_DRIVER=local`, and `.env.example` the three `FILES_` settings: take both
+`FILES_DRIVER=local`, and `.env.example` the `FILES_` settings, including the
+optional `FILES_S3_*` ones for a bucket: take both
 over to switch files on. An instance that keeps its older compose file keeps
 running with files off — an unset `FILES_DRIVER` means off — and back up the new
 volume along with the database once it is on.
@@ -746,7 +749,8 @@ image are published from this tag; earlier commits were development on
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.3.0...v0.4.0

@@ -7,7 +7,7 @@
  * ship a server that cannot state its own version. `tests/version.test.ts`
  * asserts the constant and the manifest agree, so the duplication cannot drift.
  */
-export const MCP_SERVER_VERSION = '0.6.0';
+export const MCP_SERVER_VERSION = '0.7.0';
 
 /** Sent on every REST call so an operator can tell tool traffic from the UI. */
 export const USER_AGENT = `clewwiki-mcp/${MCP_SERVER_VERSION}`;
