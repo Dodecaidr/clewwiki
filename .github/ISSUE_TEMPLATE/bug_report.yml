@@ -17,7 +17,7 @@ body:
       description: >
         The clewwiki release tag, or the commit SHA if you are running from
         a checkout (`git rev-parse HEAD`).
-      placeholder: v0.6.0, or a commit SHA
+      placeholder: v0.7.0, or a commit SHA
     validations:
       required: true
 

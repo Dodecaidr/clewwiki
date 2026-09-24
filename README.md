@@ -12,7 +12,7 @@ Cursor, Codex, Copilot, or anything else that speaks MCP.
 
 ![A page with a diagram and a chart](docs/images/page.png)
 
-Status: v0.6.0, early and under active development.
+Status: v0.7.0, early and under active development.
 
 ## Why this one
 
