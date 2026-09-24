@@ -133,7 +133,7 @@ describe.skipIf(!probe.reachable)('/mcp with a real agent token', () => {
     await schema.getDatabaseHandle().sql.end({ timeout: 5 });
   });
 
-  it('initialises and lists the thirty tools for a valid token', async () => {
+  it('initialises and lists the thirty-four tools for a valid token', async () => {
     process.env.MCP_HTTP_ENABLED = 'true';
     const { POST } = await loadRoute();
     const auth = { authorization: `Bearer ${token}` };
@@ -144,7 +144,7 @@ describe.skipIf(!probe.reachable)('/mcp with a real agent token', () => {
     const listed = await POST(mcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }, auth));
     expect(listed.status).toBe(200);
     const payload = (await listed.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(payload.result.tools).toHaveLength(30);
+    expect(payload.result.tools).toHaveLength(34);
     expect(payload.result.tools.map((tool) => tool.name)).toContain('wiki.format_guide');
     expect(payload.result.tools.map((tool) => tool.name)).toContain('wiki.claim');
     expect(payload.result.tools.map((tool) => tool.name)).toContain('wiki.create_page');

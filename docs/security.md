@@ -373,9 +373,9 @@ partly in place, the gap is named rather than implied away.
   all of it is stripped. Chart JSON is parsed as data — no expressions, no
   functions — and every label is escaped as text. Mermaid still runs only in
   the reader's browser with `securityLevel: 'strict'`.
-- **Uploaded images.** A page takes PNG, JPEG, GIF and WebP uploads, and
-  nothing else: no SVG, which is a document that can carry script, and no other
-  attachment. Serving bytes a user supplied from the application's own origin
+- **Uploaded images.** A page takes PNG, JPEG, GIF and WebP uploads as images,
+  and nothing else: no SVG, which is a document that can carry script. Any
+  other file is an attachment (below), which is never rendered. Serving bytes a user supplied from the application's own origin
   is the risk, and it is fenced in on both ends. On the way in, the type is
   detected from the file's signature — the declared type and the file name are
   never used — so an upload is one of four formats or it is refused; the size
@@ -396,6 +396,41 @@ partly in place, the gap is named rather than implied away.
   until that same actor's new page claims it. Known limits: images are not
   re-encoded, so metadata inside a file (a photograph's location, for one)
   stays in it, and pixel dimensions are not bounded separately from bytes.
+- **Attached files.** A page takes files of any type, kept in versions, and
+  since any type includes HTML and SVG, a file is never rendered — only
+  downloaded. Every response is `Content-Disposition: attachment`, with
+  `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and
+  `Cross-Origin-Resource-Policy: same-origin`; the type served is a label taken
+  from the extension or the declared type and cannot turn a download into a
+  page. The name is only a label too: the bytes are stored under their SHA-256
+  in the file store, and a name with a slash, a control character or a
+  text-direction override is refused, so no name reaches the file system and
+  none reads as something it is not in a list — a right-to-left override can make `invoice<RLO>fdp.exe` display as `invoiceexe.pdf`. An upload is
+  streamed to a staging directory and hashed on the way, never held in memory;
+  it is refused past the declared size and again while reading past
+  `FILES_MAX_UPLOAD_MB`, and refused rather than stored when it ends short of
+  its declared size, so a body cut off on the way never becomes a version. A
+  workspace's files are capped together (`FILES_STORE_MAX_MB`), checked
+  under a per-workspace lock so uploads side by side cannot each find room, and
+  `FILES_DRIVER=off` switches the surface off. With `FILES_DRIVER=s3` the
+  bucket's key is read from the environment, used only to sign requests, and
+  never written to a log or an error: a failure names the operation and the
+  status the bucket answered with. Downloads still pass through the
+  application rather than a presigned URL, so the bucket never needs to be
+  reachable by readers and visibility is decided in one place. A cookie-authenticated upload is
+  a `PUT` with a matching `Origin` required outright: no HTML form can send a
+  `PUT`, and a cross-origin script cannot without a preflight this application
+  never answers. The upload routes are left out of the per-request proxy,
+  because a request that passes through it has its body buffered in memory and
+  cut at 10 MB without an error. A file is visible to whoever can see its
+  page, in whichever space the page is now, and is gone with the page; versions
+  are only ever added, so a restore cannot rewrite what somebody already
+  downloaded; removing a file is final, needs `pages:delete`, and its bytes are
+  removed by the hourly sweep once no version anywhere in the workspace — and no
+  import waiting for review — refers to them. The sweep also removes bytes the
+  database has no row for at all, which a transaction that rolled back after
+  writing them leaves behind; it claims each by inserting its row first, so an
+  upload of the same bytes in flight makes it wait and back off.
 - **Images carried by an import.** A Notion export and a Markdown archive bring
   the pictures their documents show, a Confluence import downloads the ones
   attached to the pages it reads (at most 1 000 per import, under the redirect
@@ -554,14 +589,18 @@ partly in place, the gap is named rather than implied away.
   A name that is not listed is refused with a message that names the setting,
   because an operator reading their own logs should not have to guess.
 
-  **One kind of request does follow redirects: an image
-  download.** Confluence Cloud serves every attachment by redirecting to its
-  media host, so there is no fetching a picture without it. Those requests are
+  **One kind of request does follow redirects: a download** — of an image, or of
+  an attachment carried across as a file. Confluence Cloud serves every
+  attachment by redirecting to its media host, so there is no fetching one
+  without it. Those requests are
   held to their own rules: at most three hops; every hop `https`; every host
   other than the origin checked, before it is dialled and again inside the
   socket's lookup, against the same rule — public, or a private address behind a
   host name the operator listed; an image read up to `IMAGE_MAX_UPLOAD_MB`
-  and no further; and **the `Authorization` header is sent to the origin that was
+  and a file streamed to the file store up to `FILES_MAX_UPLOAD_MB`, the socket
+  destroyed past either; the download link an attachment listing gives used
+  only when it is a download path on the typed origin, with no `..` in it, and
+  rebuilt from the page and the file name otherwise; and **the `Authorization` header is sent to the origin that was
   typed and to no other host** — a server that redirects the import somewhere
   gets a request there, never a credential. A download that breaks any of these
   costs the import that picture, which stays a link to Confluence with a
@@ -636,12 +675,12 @@ partly in place, the gap is named rather than implied away.
   cover this threat model.
 - SSO/OIDC — a scope decision, not a security gap; credential-based login
   already satisfies the self-hosted-without-a-cloud-provider requirement.
-- Attachments other than images. Pages take raster images — uploaded, or
-  carried in by an import — under the controls described
-  above; any other file type is a wider surface (content sniffing, active
-  documents served from this origin) and stays closed. A Confluence attachment
-  that is not a raster image keeps pointing at the site it came from, and is
-  reported as a warning. Images inside a PDF are not extracted.
+- Rendering attachments. A page shows raster images — uploaded, or carried in
+  by an import — under the controls described above; every other file,
+  uploaded or carried in from Confluence, is served only as a download and
+  never rendered, because rendering an arbitrary type from this origin is the
+  wider surface (content sniffing, active documents). Images inside a PDF are
+  not extracted.
 - Optical character recognition for scanned PDFs — a PDF with no extractable
   text is refused rather than passed to an external service.
 

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -27,6 +28,10 @@ if (!probe.reachable) {
 process.env.DATABASE_URL = databaseUrl;
 process.env.BETTER_AUTH_SECRET ??= 'integration-test-secret-value-not-used-in-production';
 process.env.BETTER_AUTH_URL ??= 'http://localhost:3000';
+// Switched on, so that a refused file upload is refused for the role and not
+// because the instance takes no files.
+process.env.FILES_DRIVER = 'local';
+process.env.FILES_DIR = path.join(os.tmpdir(), `clewwiki-viewer-files-${process.pid}`);
 
 vi.mock('next/cache', () => ({ revalidatePath: () => undefined }));
 
@@ -59,8 +64,11 @@ const writeRoutes: WriteRoute[] = routeFiles(apiRoot)
   .filter((route) => route.methods.length > 0)
   .sort((a, b) => a.pattern.localeCompare(b.pattern));
 
-/** The one write a viewer is meant to make: their own read mark. */
-const OPEN_TO_VIEWERS = new Set(['inbox/read']);
+/**
+ * The writes a viewer is meant to make: their own read mark, and what they
+ * watch — both change nothing anybody else sees.
+ */
+const OPEN_TO_VIEWERS = new Set(['inbox/read', 'watches']);
 
 describe.skipIf(!probe.reachable)('the viewer role over REST', () => {
   let db: Database;
@@ -148,6 +156,7 @@ describe.skipIf(!probe.reachable)('the viewer role over REST', () => {
     const ids = [viewer?.userId, editor?.userId].filter((id): id is string => typeof id === 'string');
     if (ids.length > 0) await db.delete(schema.users).where(drizzle.inArray(schema.users.id, ids));
     await schema.getDatabaseHandle().sql.end({ timeout: 5 });
+    rmSync(process.env.FILES_DIR!, { recursive: true, force: true });
   });
 
   it('finds the routes that write', () => {

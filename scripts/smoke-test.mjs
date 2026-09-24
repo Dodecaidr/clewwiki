@@ -15,8 +15,11 @@
  *   4. with that token: /api/v1/me, the space list, create a page in the space,
  *      claim it, write it under the claim, release the claim, export it as
  *      Markdown and as HTML, and export the whole space as a ZIP;
- *   5. MCP over streamable HTTP: initialize, then tools/list must name thirty
- *      tools (requires MCP_HTTP_ENABLED=true on the instance).
+ *   5. attach a 12 MB file to that page — past the 10 MB a request passing
+ *      through the proxy would be cut at — download it back byte for byte,
+ *      and upload a second version under the same name;
+ *   6. MCP over streamable HTTP: initialize, then tools/list must name
+ *      thirty-four tools (requires MCP_HTTP_ENABLED=true on the instance).
  *
  * The forms are submitted the way a browser without JavaScript submits them:
  * the page is fetched, every hidden field React rendered into the form is sent
@@ -42,12 +45,12 @@
  */
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 const BASE_URL = (process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const ORIGIN = new URL(BASE_URL).origin;
 const HEALTH_TIMEOUT_MS = Number.parseInt(process.env.SMOKE_HEALTH_TIMEOUT_SECONDS ?? '180', 10) * 1000;
-const EXPECTED_MCP_TOOLS = 30;
+const EXPECTED_MCP_TOOLS = 34;
 const SPACE_KEY = 'SMOKE';
 
 const admin = {
@@ -391,6 +394,39 @@ async function wikiRoundTrip(token) {
     'space export is not a ZIP holding the page',
   );
   pass('exported the space as a ZIP of Markdown');
+  return pageId;
+}
+
+async function fileRoundTrip(token, pageId) {
+  const name = 'build-1.0.bin';
+  const target = `${BASE_URL}/api/v1/pages/${pageId}/files/${name}`;
+  const put = async (bytes, note) => {
+    const response = await fetch(`${target}?note=${encodeURIComponent(note)}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' },
+      body: bytes,
+    });
+    return { status: response.status, text: await response.text() };
+  };
+  const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
+
+  const first = randomBytes(12 * 1024 * 1024);
+  const uploaded = await put(first, 'first build');
+  expect(uploaded.status === 201, `upload a 12 MB file: ${uploaded.status} ${uploaded.text.slice(0, 300)}`);
+  expect(JSON.parse(uploaded.text).sha256 === sha(first), 'the stored file is not the bytes that were sent');
+  pass('uploaded a 12 MB file to the page');
+
+  const downloaded = await fetch(target, { headers: { authorization: `Bearer ${token}` } });
+  const body = Buffer.from(await downloaded.arrayBuffer());
+  expect(downloaded.status === 200, `download the file: ${downloaded.status}`);
+  expect(sha(body) === sha(first), 'the downloaded file differs from the uploaded one');
+  expect((downloaded.headers.get('content-disposition') ?? '').startsWith('attachment;'), 'a file is not served as a download');
+  pass('downloaded the file back byte for byte');
+
+  const second = await put(randomBytes(1024), 'second build');
+  expect(second.status === 201, `upload a second version: ${second.status} ${second.text.slice(0, 300)}`);
+  expect(JSON.parse(second.text).latest_version === 2, `the same name did not become version 2: ${second.text}`);
+  pass('uploading the same name added version 2');
 }
 
 async function mcp(token, id, method, params) {
@@ -452,7 +488,8 @@ async function main() {
   const token = await issueToken();
   const tokenFile = (process.env.SMOKE_TOKEN_FILE ?? '').trim();
   if (tokenFile !== '') writeFileSync(tokenFile, token, { mode: 0o600 });
-  await wikiRoundTrip(token);
+  const pageId = await wikiRoundTrip(token);
+  await fileRoundTrip(token, pageId);
   await mcpOverHttp(token);
   log(`all ${step} checks passed`);
 }

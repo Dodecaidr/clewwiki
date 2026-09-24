@@ -15,6 +15,8 @@ import type {
 
 import { getImportConfluencePrivateHosts } from '../env';
 import { PageServiceError } from '../pages/errors';
+import { createImportFileSink } from './files';
+import type { ImportContext } from './service';
 
 /**
  * Turning what arrived on the request into a call on one of the four adapters.
@@ -52,8 +54,8 @@ export interface ConfluenceRequest {
 
 export function parseImport(
   request: ImportRequest,
-): (limits: ImportLimits) => Promise<ImportParseResult> {
-  return async (limits) => {
+): (limits: ImportLimits, context: ImportContext) => Promise<ImportParseResult> {
+  return async (limits, context) => {
     switch (request.source) {
       case 'confluence':
         return importFromConfluence({
@@ -68,6 +70,9 @@ export function parseImport(
           // Read here rather than passed in: which hosts on a private network
           // may be reached is the operator's setting, not the caller's.
           client: { privateHosts: getImportConfluencePrivateHosts() },
+          // The page's other attachments, with their history, when this
+          // instance takes files at all.
+          files: createImportFileSink({ workspaceId: context.workspaceId, importId: context.importId }),
         });
       case 'notion':
         return importFromNotionZip({ zip: request.zip, limits });

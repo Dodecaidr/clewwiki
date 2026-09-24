@@ -22,6 +22,8 @@ import {
 } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
+import { WatchButton } from '@/components/watch-button';
+import { isWatching } from '@/lib/files/watches';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,7 +56,13 @@ export default async function SpaceOverview({ params }: Props) {
   const tsk = await getTranslations('skills');
   const timp = await getTranslations('imports');
   const tdis = await getTranslations('discussions');
+  const tw = await getTranslations('watch');
   const format = await getFormatter();
+  const watchingSpace = await isWatching(
+    session.workspace.id,
+    { type: 'user', id: session.userId },
+    { kind: 'space', id: space.id },
+  );
 
   /**
    * Bringing documentation in is offered where a space starts, because an empty
@@ -107,6 +115,11 @@ export default async function SpaceOverview({ params }: Props) {
           {timp('title')}
         </Link>
       ) : null}
+      <WatchButton
+        target={{ space: space.key }}
+        watching={watchingSpace}
+        labels={{ watch: tw('watchSpace'), unwatch: tw('unwatch'), hint: tw('hintSpace'), error: tw('error') }}
+      />
     </div>
   );
 

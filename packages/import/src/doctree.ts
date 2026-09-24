@@ -19,7 +19,7 @@
  * pages survives whatever the reviewer does to the target paths afterwards.
  */
 
-import { imagePlaceholderFor } from './images';
+import { filePlaceholderFor, imagePlaceholderFor } from './images';
 import { placeholderFor } from './links';
 import { escapeInline } from './markdown-out';
 import { warn } from './types';
@@ -186,6 +186,12 @@ export function rewriteRelativeLinks(
    * Notion's suffixes — no longer says.
    */
   resolveImage?: (relativePath: string) => string | null,
+  /**
+   * The same for a link to a file that is neither a document nor an image —
+   * a PDF, a spreadsheet, an archive — which is carried as one of the page's
+   * files. Asked only when no document is behind the path.
+   */
+  resolveFile?: (relativePath: string) => string | null,
 ): { markdown: string; warnings: ImportWarning[] } {
   const warnings: ImportWarning[] = [];
   const seen = new Set<string>();
@@ -227,6 +233,8 @@ export function rewriteRelativeLinks(
 
       const key = resolveTarget(resolved);
       if (key === null) {
+        const file = relative === '' ? null : (resolveFile?.(relative) ?? null);
+        if (file !== null) return `[${text}](${filePlaceholderFor(file)}${title ?? ''})`;
         note('unresolved-link', resolved);
         return text === '' ? '' : escapeInline(text);
       }

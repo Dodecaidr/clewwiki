@@ -62,6 +62,10 @@ export const IMPORT_WARNING_CODES = [
   'empty',
   /** Two source items wanted the same path; the second was numbered. */
   'path-adjusted',
+  /** An attachment, or one version of it, that was not carried across as a file. */
+  'file-skipped',
+  /** An attachment carried across without all of its earlier versions. */
+  'file-history-partial',
 ] as const;
 
 export type ImportWarningCode = (typeof IMPORT_WARNING_CODES)[number];
@@ -109,6 +113,46 @@ export interface ImportAttachment {
   bytes?: number;
 }
 
+/** What the source says about one version of a file, handed to a `FileSink`. */
+export interface ImportFileVersion {
+  /** The `sourceId` of the page the file is attached to. */
+  sourceId: string;
+  name: string;
+  /** Order among all versions of all files of that page. */
+  position: number;
+  mediaType: string | null;
+  /** What the source says this version weighs; a download of another size is refused. */
+  expectedBytes: number | null;
+  note: string | null;
+  sourceVersion: number;
+  author: string | null;
+  createdAt: Date | null;
+  /** The placeholder key a page body links to this file by, for a file from an archive. */
+  sourceKey?: string;
+  /**
+   * Refuse this version if its bytes hash to this: an earlier version whose
+   * size the source does not record is held to not being the current bytes,
+   * which is what a site serves when it ignores `?version=`.
+   */
+  rejectSha256?: string | null;
+}
+
+/**
+ * Where an adapter puts the files it carries across. The bytes are streamed
+ * into it version by version and never pass through the adapter's memory; what
+ * the sink keeps, and why it refuses what it refuses — too large, no room, a
+ * name that cannot be one, a download that is not the version it claims — is
+ * its own decision, reported back so it can become a warning.
+ */
+export interface FileSink {
+  /** The largest file the sink takes, so an adapter can skip one without downloading it. */
+  maxFileBytes: number;
+  store(
+    version: ImportFileVersion,
+    body: ReadableStream<Uint8Array>,
+  ): Promise<{ kept: true; sha256: string } | { refused: string }>;
+}
+
 /** What an adapter hands back. */
 export interface ImportParseResult {
   source: ImportSource;
@@ -119,6 +163,13 @@ export interface ImportParseResult {
    * archive's pictures are not read into the import at all.
    */
   assets?: ImportAsset[];
+  /**
+   * The files other than images the nodes link to through
+   * `clewwiki-import-file:` placeholders, keyed by their path in the archive.
+   * Carried as files of the pages that link to them, when the instance takes
+   * files.
+   */
+  fileAssets?: ImportAsset[];
   /** Warnings about the import as a whole rather than about one page. */
   warnings: ImportWarning[];
   /** Recorded on the import row. Never carries a credential. */

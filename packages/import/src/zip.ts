@@ -75,6 +75,21 @@ export interface ReadZipOptions {
   accept?: (name: string) => boolean;
   /** Told the name of every file `accept` turned down, so a caller can count them. */
   onRejected?: (name: string) => void;
+  /**
+   * Told instead of `onRejected` about a turned-down file this returns true
+   * for, with a way to read it later. Nothing is decompressed until `read` is
+   * called, and what `read` expands does not count here: the caller that reads
+   * it holds it to what is left of the budget.
+   */
+  defer?: (name: string) => boolean;
+  onDeferred?: (entry: DeferredZipFile) => void;
+}
+
+/** An archive entry not read yet: its name, what it expands to, and how to read it. */
+export interface DeferredZipFile {
+  name: string;
+  size: number;
+  read(): Uint8Array;
 }
 
 /**
@@ -129,7 +144,15 @@ export function readZip(bytes: Uint8Array, options: ReadZipOptions): ZipFile[] {
     if (name.endsWith('/')) continue;
     if (!isSafeEntryName(name)) continue;
     if (options.accept && !options.accept(name)) {
-      options.onRejected?.(name);
+      if (options.defer?.(name) === true && options.onDeferred) {
+        options.onDeferred({
+          name,
+          size: uncompressedSize,
+          read: () => readEntryData(bytes, view, localOffset, method, compressedSize, uncompressedSize),
+        });
+      } else {
+        options.onRejected?.(name);
+      }
       continue;
     }
 

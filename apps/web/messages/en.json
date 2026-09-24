@@ -91,6 +91,8 @@
   "spaces": {
     "settings": "Space settings",
     "exportZip": "Export space (.zip)",
+    "exportZipWithFiles": "With files",
+    "exportZipWithFilesHint": "The same archive with the latest version of every attached file beside its page, and a list of anything left out.",
     "archivedBadge": "archived",
     "openHomePage": "Open as a page",
     "noDescription": "This space has no description yet.",
@@ -421,6 +423,41 @@
     "errorNotFound": "The image is no longer there.",
     "errorGeneric": "The image could not be removed. Try again."
   },
+  "pageFiles": {
+    "heading": "Files",
+    "intro": "Files attached to this page, each with every version it has had. Uploading a file with a name that is already here adds its next version; the file's link stays the same and always gives the latest.",
+    "empty": "No files yet. Attach release builds, specifications or exports here: uploading the same name again adds a new version, and whoever watches this page is told.",
+    "choose": "Upload files",
+    "note": "What changed (optional)",
+    "notePlaceholder": "e.g. Signed build for 2.4.1",
+    "upload": "Upload",
+    "uploading": "Uploading…",
+    "history": "Versions",
+    "version": "v",
+    "restoredFrom": "restored from v{version}",
+    "restore": "Restore",
+    "restoreConfirm": "Make version {version} the latest again? It is added as a new version; nothing is deleted.",
+    "remove": "Delete file",
+    "removeConfirm": "Delete this file and every version of it? This cannot be undone.",
+    "copyLink": "Copy link",
+    "copied": "Copied",
+    "caption": "{size} · {who} · {date}",
+    "kilobytes": "{value} KB",
+    "megabytes": "{value} MB",
+    "errorTooLarge": "larger than this instance accepts.",
+    "errorFull": "the file store of this workspace is full.",
+    "errorOff": "file uploads are switched off on this instance.",
+    "errorName": "this name cannot be used, or the file is empty.",
+    "errorGeneric": "could not be uploaded. Try again."
+  },
+  "watch": {
+    "watchPage": "Watch",
+    "watchSpace": "Watch files in this space",
+    "unwatch": "Watching · stop",
+    "hintPage": "Changes to this page and new versions of its files, by others, will show up in your inbox — one line per page however many changes there were.",
+    "hintSpace": "New versions of files on any page of this space, by others, will show up in your inbox.",
+    "error": "Could not change that. Try again."
+  },
   "content": {
     "calloutNote": "Note",
     "calloutTip": "Tip",
@@ -442,7 +479,7 @@
   },
   "inbox": {
     "title": "Inbox",
-    "intro": "What other people and agents said or decided, in the last 30 days, about things you had a hand in — and whatever addresses you by name: mentions, discussions you took part in, comment threads you are in, comments on pages as you left them, and reviews of your changes. It is read from the discussions, comments and reviews themselves, in the spaces you can see now.",
+    "intro": "What other people and agents said or decided, in the last 30 days, about things you had a hand in — and whatever addresses you by name: mentions, discussions you took part in, comment threads you are in, comments on pages as you left them, reviews of your changes, changes to pages you watch, and new versions of files on pages and in spaces you watch. It is read from the discussions, comments, reviews and files themselves, in the spaces you can see now.",
     "markRead": "Mark all read",
     "empty": "Nothing has come back to you yet. When somebody mentions you, answers in a discussion you took part in, replies under your comment, or reviews a change of yours, it shows up here.",
     "unread": "New",
@@ -455,7 +492,9 @@
     "kind_comment_new": "{who} commented on a page as you left it",
     "kind_review_decided_accepted": "{who} accepted changes that include yours",
     "kind_review_decided_reverted": "{who} reverted changes that include yours",
-    "kind_mention": "{who} mentioned you"
+    "kind_mention": "{who} mentioned you",
+    "kind_file_version": "{who} added version {version} of {file}, on a page you watch",
+    "kind_page_updated": "{who} changed a page you watch{count, plural, =1 {} other { — # changes, now version {version}}}"
   },
   "mentions": {
     "hint": "To bring somebody in, mention them — it lands in their inbox:",
@@ -1079,7 +1118,7 @@
     "readingHint": "This can take a while for a large space or a long document.",
     "errorGeneric": "The import could not be started. Check the details and try again.",
     "reviewTitle": "Review this import",
-    "reviewIntro": "{parsed} pages were read, {conflicts} of them land where a page already exists, and {warnings} things need your eye. {images, plural, =0 {} one {One image comes with them. } other {# images come with them. }}Nothing has been written yet.",
+    "reviewIntro": "{parsed} pages were read, {conflicts} of them land where a page already exists, and {warnings} things need your eye. {images, plural, =0 {} one {One image comes with them. } other {# images come with them. }}{files, plural, =0 {} one {One attached file comes with them, in {versions, plural, one {# version} other {# versions}}. } other {# attached files come with them, in {versions, plural, one {# version} other {# versions}} together. }}Nothing has been written yet.",
     "treeHeading": "What will be created",
     "treeIntro": "Untick anything you do not want. A target path can be edited; children follow the parent they were read under.",
     "targetPath": "Target path",
@@ -1119,7 +1158,9 @@
     "warning_html-dropped": "Raw HTML was removed; page bodies are Markdown",
     "warning_truncated": "The page was longer than the limit and was cut",
     "warning_empty": "This page has no content",
-    "warning_path-adjusted": "The path was numbered because something else wanted it"
+    "warning_path-adjusted": "The path was numbered because something else wanted it",
+    "warning_file-skipped": "An attachment, or a version of it, was not carried across as a file",
+    "warning_file-history-partial": "An attachment was carried across without all of its earlier versions"
   },
   "discussions": {
     "title": "Discussions",

@@ -17,7 +17,7 @@
 import { ImportError } from '../limits';
 import type { ImportLimits } from '../limits';
 import { truncateToBytes, utf8Length } from '../limits';
-import { createImageCollector } from '../image-collector';
+import { createFileCollector, createImageCollector } from '../image-collector';
 import { IMPORTABLE_IMAGE_EXTENSIONS } from '../images';
 import { finishBody } from '../markdown-out';
 import { warn } from '../types';
@@ -33,6 +33,7 @@ import {
 } from '../doctree';
 import type { DocumentPage } from '../doctree';
 import { entryText, readZip } from '../zip';
+import type { DeferredZipFile } from '../zip';
 
 export const MARKDOWN_EXTENSIONS = new Set(['md', 'mdx', 'markdown']);
 
@@ -45,6 +46,9 @@ export function importFromMarkdownZip(input: MarkdownImportInput): ImportParseRe
   // Documents and the pictures they might show are the only entries expanded:
   // whatever else the archive holds is counted and never read.
   let unread = 0;
+  // Any other file is noted and left compressed: it is read only if a
+  // document links to it (see `createFileCollector`).
+  const deferred: DeferredZipFile[] = [];
   const entries = readZip(input.zip, {
     limits: input.limits,
     accept: (name) => {
@@ -53,6 +57,11 @@ export function importFromMarkdownZip(input: MarkdownImportInput): ImportParseRe
     },
     onRejected: (name) => {
       if (!isIgnored(name)) unread += 1;
+    },
+    defer: (name) => !isIgnored(name),
+    onDeferred: (entry) => {
+      unread += 1;
+      deferred.push(entry);
     },
   });
   const documents = entries.filter(
@@ -73,6 +82,8 @@ export function importFromMarkdownZip(input: MarkdownImportInput): ImportParseRe
   const known = new Set(paths.map((path) => keyForDocument(path)));
 
   const images = createImageCollector(entries.filter((entry) => !isIgnored(entry.name)));
+  const read = entries.reduce((total, entry) => total + entry.data.byteLength, 0);
+  const files = createFileCollector(deferred, Math.max(input.limits.expandedBytes - read, 0));
 
   const pages: DocumentPage[] = documents.map((entry, index) => {
     const path = paths[index] ?? entry.name;
@@ -87,6 +98,7 @@ export function importFromMarkdownZip(input: MarkdownImportInput): ImportParseRe
         return known.has(key) ? key : null;
       },
       images.resolverFor(entry.name),
+      files.resolverFor(entry.name),
     );
 
     const pageWarnings = [...rewritten.warnings];
@@ -118,17 +130,24 @@ export function importFromMarkdownZip(input: MarkdownImportInput): ImportParseRe
 
   const warnings: ImportWarning[] = [];
   const skipped =
-    unread + entries.filter((entry) => !isIgnored(entry.name)).length - documents.length - images.used;
-  if (skipped > 0) warnings.push(warn('unresolved-image', `${skipped} files that are neither Markdown nor an image a page shows`));
+    unread + entries.filter((entry) => !isIgnored(entry.name)).length - documents.length - images.used - files.used;
+  if (skipped > 0) {
+    warnings.push(warn('unresolved-image', `${skipped} files that are neither Markdown nor an image or a file a page links to`));
+  }
+  for (const name of files.overBudget) {
+    warnings.push(warn('file-skipped', `${name}: the files of this archive are larger together than an import may expand`));
+  }
 
   return {
     source: 'markdown',
     nodes: tree.nodes,
     assets: images.assets(),
+    fileAssets: files.assets(),
     warnings,
     params: {
       file_count: documents.length,
       image_count: images.used,
+      attachment_count: files.used,
       root: prefix.replace(/\/$/, ''),
     },
   };

@@ -85,3 +85,30 @@ export function archivePathHref(key: string): string {
     .replace(/#/g, '%23')
     .replace(/\?/g, '%3F');
 }
+
+/**
+ * Files other than images travel the same way: a link a document makes to a
+ * file in its archive becomes `clewwiki-import-file:<key>`, the file becomes
+ * one of that page's files when the import is applied, and the link is then
+ * rewritten to the file's own address. A file that is not carried falls back,
+ * like an image, to the path the document used.
+ */
+export const FILE_SCHEME = 'clewwiki-import-file:';
+
+export function filePlaceholderFor(key: string): string {
+  return `${FILE_SCHEME}${encodeDestination(key)}`;
+}
+
+const FILE_PLACEHOLDER = /clewwiki-import-file:([^)\s"]*)/g;
+
+/** Every file key a body links to, once each, in the order they appear. */
+export function referencedFileKeys(markdown: string): string[] {
+  const keys = new Set<string>();
+  for (const match of markdown.matchAll(FILE_PLACEHOLDER)) keys.add(decodeKey(match[1] ?? ''));
+  return [...keys];
+}
+
+/** Replaces every file placeholder with the address `resolve` gives its key. */
+export function rewriteFiles(markdown: string, resolve: (key: string) => string): string {
+  return markdown.replace(FILE_PLACEHOLDER, (_match, encoded: string) => resolve(decodeKey(encoded)));
+}

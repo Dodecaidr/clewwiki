@@ -1,5 +1,6 @@
 import { isNull, sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
   check,
   customType,
@@ -1189,6 +1190,188 @@ export const pageImages = pgTable(
 );
 
 /**
+ * A file attached to a page — any kind of file, kept in versions.
+ *
+ * The row is the file as a name on a page; its content is its versions.
+ * Uploading a name the page already has, in any case, makes the next version of
+ * that file rather than a second file, which is what lets a page be the place a
+ * release is published and its artifacts be replaced without their address
+ * changing. `latest_version` is the number the next download of the file gets,
+ * kept here so that listing a page's files is one read.
+ *
+ * Like an image, a file is visible to whoever can see its page, in whichever
+ * space the page is now, and goes with the page.
+ */
+export const pageFiles = pgTable(
+  'page_files',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    pageId: uuid('page_id')
+      .notNull()
+      .references((): AnyPgColumn => pages.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    latestVersion: integer('latest_version').notNull(),
+    createdByType: actorType('created_by_type').notNull(),
+    createdById: text('created_by_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('page_files_page_name_key').on(table.pageId, sql`lower(${table.name})`),
+    index('page_files_workspace_idx').on(table.workspaceId),
+    check('page_files_name_length', sql`char_length(${table.name}) between 1 and 200`),
+    check('page_files_latest_version', sql`${table.latestVersion} >= 1`),
+  ],
+);
+
+/**
+ * One version of a file: which bytes, who put them there, and why.
+ *
+ * Versions are only ever added. Going back to an older one adds a new version
+ * with the old bytes (`restored_from`), so the history of a file is also the
+ * history of what it was at every moment, and nobody who downloaded version 3
+ * finds that version 3 has changed. The bytes are the blob `sha256` names in
+ * `file_blobs`; the label is kept with the version because a download should
+ * look the same whenever it is made.
+ */
+export const pageFileVersions = pgTable(
+  'page_file_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id')
+      .notNull()
+      .references((): AnyPgColumn => pageFiles.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    sha256: text('sha256').notNull(),
+    byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+    contentType: text('content_type').notNull(),
+    note: text('note'),
+    restoredFrom: integer('restored_from'),
+    createdByType: actorType('created_by_type').notNull(),
+    createdById: text('created_by_id').notNull(),
+    createdByLabel: text('created_by_label').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('page_file_versions_file_version_key').on(table.fileId, table.version),
+    index('page_file_versions_workspace_created_idx').on(table.workspaceId, table.createdAt),
+    index('page_file_versions_blob_idx').on(table.workspaceId, table.sha256),
+    check('page_file_versions_version', sql`${table.version} >= 1`),
+    check('page_file_versions_note_length', sql`char_length(${table.note}) <= 1000`),
+  ],
+);
+
+/**
+ * The blobs a workspace's files are stored as, one row per distinct content.
+ *
+ * The bytes are in the file store under `<workspace>/<sha256>`; this row is how
+ * the database knows they are there, what they weigh against the workspace's
+ * quota, and when they stop being needed. A blob no version refers to is not
+ * removed at once: the sweep removes it once it has been unreferenced and
+ * untouched for a while, and takes the row's lock to do it, so an upload of the
+ * same bytes at that moment either keeps it or waits and writes it again.
+ */
+export const fileBlobs = pgTable(
+  'file_blobs',
+  {
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    sha256: text('sha256').notNull(),
+    byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+    touchedAt: timestamp('touched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workspaceId, table.sha256] }),
+    index('file_blobs_touched_idx').on(table.touchedAt),
+  ],
+);
+
+/**
+ * The versions of files an import brought with it, held until it is applied.
+ *
+ * Unlike an image, the bytes are not here: an attachment can be hundreds of
+ * megabytes, so each version is put in the file store as it is downloaded, and
+ * this row is what holds on to it — the blob sweep leaves alone any blob a row
+ * here names. Applying turns the rows of a page into that page's files, in
+ * `position` order, and empties the table for the import; cancelling or
+ * deleting the import drops the rows, and the sweep then takes the bytes.
+ *
+ * `source_id` is the page the file was attached to at the source (an import
+ * item's `source_id`); `source_version`, `source_author` and `source_created_at`
+ * are what the source said about the version, kept so the history reads as it
+ * did there.
+ */
+export const importFileVersions = pgTable(
+  'import_file_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    importId: uuid('import_id')
+      .notNull()
+      .references((): AnyPgColumn => imports.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    sourceId: text('source_id').notNull(),
+    name: text('name').notNull(),
+    position: integer('position').notNull(),
+    sha256: text('sha256').notNull(),
+    byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+    contentType: text('content_type').notNull(),
+    note: text('note'),
+    sourceVersion: integer('source_version'),
+    sourceAuthor: text('source_author'),
+    sourceCreatedAt: timestamp('source_created_at', { withTimezone: true }),
+    /** For a file from an archive: the placeholder key its page links to it by. */
+    sourceKey: text('source_key'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('import_file_versions_import_idx').on(table.importId, table.sourceId, table.position),
+    index('import_file_versions_blob_idx').on(table.workspaceId, table.sha256),
+  ],
+);
+
+/**
+ * Somebody watching a page or a whole space for new versions of its files.
+ *
+ * Nothing is sent: a watch is what makes the inbox include a new version of a
+ * file there, by somebody else. Like every other inbox item it is read under
+ * the watcher's visibility at the moment the inbox is opened, so a watch on a
+ * space the watcher can no longer see simply stops producing anything.
+ */
+export const watches = pgTable(
+  'watches',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    actorType: actorType('actor_type').notNull(),
+    actorId: text('actor_id').notNull(),
+    spaceId: uuid('space_id').references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    pageId: uuid('page_id').references((): AnyPgColumn => pages.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('watches_actor_space_key')
+      .on(table.actorType, table.actorId, table.spaceId)
+      .where(sql`${table.spaceId} is not null`),
+    uniqueIndex('watches_actor_page_key')
+      .on(table.actorType, table.actorId, table.pageId)
+      .where(sql`${table.pageId} is not null`),
+    index('watches_actor_idx').on(table.workspaceId, table.actorType, table.actorId),
+    check('watches_one_target', sql`(${table.spaceId} is not null) <> (${table.pageId} is not null)`),
+  ],
+);
+
+/**
  * An invitation to join the workspace.
  *
  * There is no self-registration and no mail transport, so a person joins the
@@ -1356,6 +1539,9 @@ export const spaceMembers = pgTable(
 );
 
 export type PageImage = typeof pageImages.$inferSelect;
+export type PageFileRow = typeof pageFiles.$inferSelect;
+export type PageFileVersionRow = typeof pageFileVersions.$inferSelect;
+export type WatchRow = typeof watches.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type Space = typeof spaces.$inferSelect;
 export type NewSpace = typeof spaces.$inferInsert;

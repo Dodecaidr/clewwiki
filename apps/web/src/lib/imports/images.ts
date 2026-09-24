@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, eq, sql } from 'drizzle-orm';
 import { importImages, pageImages } from '@clewwiki/db';
-import { archivePathHref, referencedImageKeys, rewriteImages, warn } from '@clewwiki/import';
+import { archivePathHref, referencedImageKeys, rewriteFiles, rewriteImages, warn } from '@clewwiki/import';
 import type { ImportAsset, ImportNode, ImportWarning } from '@clewwiki/import';
 
 import { getDatabase } from '../db';
@@ -101,7 +101,7 @@ export async function dropStagedImages(importId: string): Promise<void> {
 
 /** The body as a reviewer reads it: every image under the path the archive had it at. */
 export function previewImages(markdown: string): string {
-  return rewriteImages(markdown, archivePathHref);
+  return rewriteFiles(rewriteImages(markdown, archivePathHref), archivePathHref);
 }
 
 export interface CarryImagesInput {

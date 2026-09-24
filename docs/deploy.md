@@ -257,7 +257,7 @@ is unchanged; only where the image comes from differs.
 
 ## Connecting an AI coding agent (MCP)
 
-Agents talk to clewwiki through the Model Context Protocol with thirty
+Agents talk to clewwiki through the Model Context Protocol with thirty-four
 tools — `wiki.list_spaces`, `wiki.format_guide`, `wiki.get_rules`,
 `wiki.list_skills`, `wiki.get_skill`, `wiki.search`,
 `wiki.get_page`, `wiki.create_page`, `wiki.claim`, `wiki.write_page`,
@@ -641,8 +641,9 @@ Each line is pass or fail, not a matter of judgement.
       is normally quiet is the signal that a token has leaked. Failed sign-ins
       are `auth.login_failed`, throttled ones `auth.login_rate_limited`.
 - [ ] **Backups run and have been restored once.** The `postgres-data` volume
-      holds every account, page, token digest and audit row, and
-      `docker compose down -v` deletes it permanently. See [Backups](#backups).
+      holds every account, page, token digest and audit row, the `files-data`
+      volume the bytes of attached files, and `docker compose down -v` deletes
+      both permanently. See [Backups](#backups).
 - [ ] **Image and dependencies are current.** `docker compose pull` then
       `docker compose up -d` picks up base-image and dependency security
       updates from the published image (`docker compose build --pull` instead,
@@ -695,6 +696,15 @@ container.
 | `ALLOW_FILE_REPOSITORIES` | no | `false` | Allows `file://` repository URLs (a repository on the host or mounted into the container). |
 | `IMAGE_MAX_UPLOAD_MB` | no | `5` | Largest image a page accepts, at most `10`. `0` switches image uploads off; pages then take images by address only. |
 | `IMAGE_STORE_MAX_MB` | no | `2048` | Most the images of one workspace may occupy together. They are stored in the database, so this is also how much they can add to a backup. |
+| `FILES_DRIVER` | no | `off`; `local` in the compose file | Where files attached to pages are kept: `local` for `FILES_DIR`, `s3` for a bucket (`FILES_S3_*`), `off` for no attached files. Unset is off, so an instance only takes files once somebody has decided where they go. With `off`, files attached earlier are still listed but no new ones are accepted. |
+| `FILES_DIR` | no | `/data/files` | The directory of the `local` store. Compose backs it with the `files-data` volume; a directory that is not a volume loses every file on the next image update. |
+| `FILES_S3_ENDPOINT`, `FILES_S3_BUCKET` | with `s3` | empty | The S3-compatible endpoint and the bucket. Amazon S3, Cloudflare R2, Backblaze B2, Hetzner Object Storage, Garage and SeaweedFS all work; MinIO's open-source edition is no longer maintained and is not recommended. |
+| `FILES_S3_ACCESS_KEY_ID`, `FILES_S3_SECRET_ACCESS_KEY` | **yes**, with `s3` | empty | A key that may read, write, list and delete in that bucket and nothing else. Requests are signed with SigV4; the key never appears in a log line or an error. |
+| `FILES_S3_REGION` | no | `us-east-1` | The region the key signs for (`auto` on R2, the store's own name on Garage). |
+| `FILES_S3_FORCE_PATH_STYLE` | no | `true` | `endpoint/bucket/key`, which self-hosted stores want. `false` for `bucket.endpoint/key`. |
+| `FILES_S3_PREFIX` | no | empty | A prefix for every key, for a bucket shared with something else. |
+| `FILES_MAX_UPLOAD_MB` | no | `512` | Largest single file. Uploads are streamed to disk, never held in memory, so this is about disk and patience rather than memory. |
+| `FILES_STORE_MAX_MB` | no | `20480` | Most the files of one workspace may occupy together, counting each distinct content once: a re-upload, or a restored version, costs nothing. |
 | `ALLOW_EXTERNAL_IMAGES` | no | `false` | Shows images that pages reference on other `https://` sites. Off, the browser loads images from this instance only, so a page cannot make readers' browsers contact a third-party server. |
 | `CLEWWIKI_MIGRATIONS_DIR` | no | set by the image | Where the app looks for migration SQL. Outside a container only. |
 | `CLEWWIKI_GRAMMARS_DIR` | no | set by the image | Where the app looks for the tree-sitter grammar `.wasm` files. Outside a container only. |
@@ -721,7 +731,7 @@ The stdio MCP server, on the developer's machine, also reads
 
 ## Backups
 
-The instance keeps its state in two named volumes. Run these from the
+The instance keeps its state in three named volumes. Run these from the
 `clewwiki` directory.
 
 **`postgres-data` — everything that matters.** Accounts, pages and their
@@ -744,6 +754,36 @@ docker compose exec -T postgres sh -c \
 docker compose start web
 ```
 
+**`files-data` — the bytes of attached files.** The database says which file
+and version is which; this volume holds the bytes, one file per distinct
+content, named by its SHA-256. The two belong together: back this up whenever
+you dump the database, and restore both from the same moment. A file whose
+bytes are missing answers `500` on download and says so in the log; bytes no
+version refers to are removed by the hourly sweep.
+
+```sh
+docker compose run --rm --no-deps --user root -v "$PWD:/backup" \
+  --entrypoint tar web czf "/backup/clewwiki-files-$(date +%F).tar.gz" -C /data/files blobs
+```
+
+```sh
+docker compose stop web
+docker compose run --rm --no-deps --user root -v "$PWD:/backup:ro" \
+  --entrypoint sh web -c \
+  'tar xzf /backup/clewwiki-files-2026-01-31.tar.gz -C /data/files && chown -R 1001:1001 /data/files'
+docker compose start web
+```
+
+With `FILES_DRIVER=s3` the bytes are in the bucket and the volume only stages
+uploads; back the bucket up with the provider's own tools — versioning or
+replication — and take the database dump as usual. The keys are
+`<workspace id>/<first two hex digits>/<sha256>`, under `FILES_S3_PREFIX` when
+one is set.
+
+Take the files archive right after the database dump. A file uploaded in
+between is in the archive but not in the dump, which costs nothing: its bytes
+are unreferenced after a restore and the sweep removes them.
+
 **`repos-data` — a cache.** Bare mirrors of the repositories anchors are checked
 against. Losing it costs a fresh clone on the next check, nothing more; back it
 up only if cloning is slow or expensive for you:
@@ -761,7 +801,7 @@ docker compose run --rm --no-deps --user root -v "$PWD:/backup:ro" \
 docker compose start web
 ```
 
-`.env` is in neither backup. Without `BETTER_AUTH_SECRET` a restored instance
+`.env` is in none of these backups. Without `BETTER_AUTH_SECRET` a restored instance
 still works, but every session has to sign in again; without
 `POSTGRES_PASSWORD` the application cannot reach a restored volume.
 
@@ -823,18 +863,26 @@ address (`/spaces/MAIN/pages/{id}`). The first anchor check afterwards clones th
 repository again, because mirrors are now kept per space. REST and MCP callers
 must now name a space when they create a page or look one up by path.
 
+**Upgrading to attached files.** The release that introduces files adds the
+`files-data` volume and `FILES_DRIVER=local` to `docker-compose.yml` and
+`.env.example`. An instance that keeps an older compose file keeps working with
+files switched off — the application treats an unset `FILES_DRIVER` as `off` —
+until both lines are taken over. Add the volume before switching the driver on,
+never after: files written to the container's own filesystem are lost on the
+next update.
+
 The compose file pins PostgreSQL to major version 16. Moving to another major
 version is a dump and restore into a fresh volume, not a tag change.
 
 ## Uninstalling
 
 ```sh
-docker compose down                         # stop and remove the containers; keep both volumes
-docker compose down --volumes --rmi all     # also delete both volumes and both images
+docker compose down                         # stop and remove the containers; keep the volumes
+docker compose down --volumes --rmi all     # also delete the volumes and both images
 docker builder prune                        # reclaim the image build cache
 cd .. && rm -rf clewwiki
 ```
 
 The second command is irreversible: accounts, pages, history and the audit log
-go with the `postgres-data` volume. Take a backup first if there is any chance
+go with the `postgres-data` volume, and attached files with `files-data`. Take a backup first if there is any chance
 you will want them.

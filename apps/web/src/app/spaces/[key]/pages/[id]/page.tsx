@@ -4,6 +4,8 @@ import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
 import { AnchorPanel } from './anchor-panel';
+import { FilesPanel } from './files-panel';
+import type { FilesPanelItem } from './files-panel';
 import { ImagePanel } from './image-panel';
 import type { AnchorPanelItem, AnchorPanelLabels } from './anchor-panel';
 import { DeletePageButton } from './delete-button';
@@ -15,6 +17,10 @@ import { canWrite } from '@/lib/roles';
 import { getFallbackShare, listAnchorsForPage } from '@/lib/anchors/service';
 import { imageHref, referencedImageIds } from '@/lib/images/detect';
 import { listImagesForPage } from '@/lib/images/service';
+import { fileHref, fileVersionHref } from '@/lib/files/api';
+import { listFileVersionsForPage, listPageFiles } from '@/lib/files/service';
+import { filesEnabled } from '@/lib/files/store';
+import { isWatching } from '@/lib/files/watches';
 import type { AnchorRecord } from '@/lib/anchors/service';
 import { getActiveClaimsForPage, getActiveNotesForPage } from '@/lib/claims/service';
 import { listOpenDiscussionsForPage } from '@/lib/discussions/service';
@@ -151,6 +157,9 @@ export default async function PageView({ params }: Props) {
     openDiscussions,
     review,
     pageImages,
+    pageFiles,
+    pageFileVersions,
+    watchingPage,
   ] = await Promise.all([
       listPageComments(session.workspace.id, page.id, 'all'),
       page.linkedPageId
@@ -168,6 +177,9 @@ export default async function PageView({ params }: Props) {
       listOpenDiscussionsForPage(session.workspace.id, page.id),
       getPageReviewState(session.workspace.id, page.id),
       listImagesForPage(session.workspace.id, page.id),
+      listPageFiles(session.workspace.id, page.id),
+      listFileVersionsForPage(session.workspace.id, page.id),
+      isWatching(session.workspace.id, { type: 'user', id: session.userId }, { kind: 'page', id: page.id }),
     ]);
 
   // The body is rendered once the comments are known, so that a paragraph with
@@ -189,6 +201,31 @@ export default async function PageView({ params }: Props) {
 
   const ta = await getTranslations('anchors');
   const ti = await getTranslations('pageImages');
+  const tf = await getTranslations('pageFiles');
+  const tw = await getTranslations('watch');
+  const sizeOf = (bytes: number) =>
+    bytes < 1024 * 1024
+      ? tf('kilobytes', { value: Math.max(1, Math.round(bytes / 1024)) })
+      : tf('megabytes', { value: Math.round((bytes / (1024 * 1024)) * 10) / 10 });
+  const fileItems: FilesPanelItem[] = pageFiles.map((file) => ({
+    fileId: file.id,
+    name: file.name,
+    url: fileHref(page.id, file.name),
+    latestVersion: file.latestVersion,
+    versions: pageFileVersions
+      .filter((version) => version.fileId === file.id)
+      .map((version) => ({
+        version: version.version,
+        url: fileVersionHref(file.id, version.version),
+        caption: tf('caption', {
+          size: sizeOf(version.byteSize),
+          who: version.createdByLabel,
+          date: formatDateTime(format, version.createdAt) ?? '—',
+        }),
+        note: version.note,
+        restoredFrom: version.restoredFrom,
+      })),
+  }));
   const imagesInText = new Set(referencedImageIds(page.body));
   const tdis = await getTranslations('discussions');
   const trev = await getTranslations('reviews');
@@ -461,6 +498,44 @@ export default async function PageView({ params }: Props) {
           threadsByBlock={threadsByBlock}
         />
       )}
+
+      <FilesPanel
+        pageId={page.id}
+        files={fileItems}
+        canUpload={filesEnabled() && !space.archivedAt && canWrite(session.role)}
+        canWrite={!space.archivedAt && canWrite(session.role)}
+        watching={watchingPage}
+        labels={{
+          heading: tf('heading'),
+          intro: tf('intro'),
+          empty: tf('empty'),
+          choose: tf('choose'),
+          note: tf('note'),
+          notePlaceholder: tf('notePlaceholder'),
+          upload: tf('upload'),
+          uploading: tf('uploading'),
+          history: tf('history'),
+          version: tf('version'),
+          restoredFrom: tf('restoredFrom', { version: '{version}' }),
+          restore: tf('restore'),
+          restoreConfirm: tf('restoreConfirm', { version: '{version}' }),
+          remove: tf('remove'),
+          removeConfirm: tf('removeConfirm'),
+          copyLink: tf('copyLink'),
+          copied: tf('copied'),
+          errorTooLarge: tf('errorTooLarge'),
+          errorFull: tf('errorFull'),
+          errorOff: tf('errorOff'),
+          errorName: tf('errorName'),
+          errorGeneric: tf('errorGeneric'),
+          watch: {
+            watch: tw('watchPage'),
+            unwatch: tw('unwatch'),
+            hint: tw('hintPage'),
+            error: tw('error'),
+          },
+        }}
+      />
 
       <CommentsPanel
         pageId={page.id}

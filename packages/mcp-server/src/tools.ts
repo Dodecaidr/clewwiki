@@ -5,8 +5,9 @@ import { ClewwikiToolError } from './errors.ts';
 import type { ClewwikiRestClient } from './rest-client.ts';
 
 /**
- * The thirty tools of `docs/mcp.md`, each one REST call deep — two for
- * `wiki.get_page` by path, which resolves the path first.
+ * The thirty-four tools of `docs/mcp.md`, each one REST call deep — two for
+ * `wiki.get_page` by path, which resolves the path first, and for
+ * `wiki.get_file`, which reads a text file's content after its versions.
  *
  * A tool's job here is to name its inputs, put them where the REST endpoint
  * expects them, and hand back what came out. It does not merge, retry,
@@ -1044,7 +1045,10 @@ const checkInbox = defineTool({
     'is asking you in particular, so answer it), a message in a discussion you opened or spoke in, a discussion you took part ' +
     'in being resolved (with the decision page, when one was written), a reply in a comment thread ' +
     'you started or answered, a new comment on a page as you left it, and a review that accepted ' +
-    'or reverted changes of yours. Each item names its kind, who did it, the title of the ' +
+    'or reverted changes of yours, a new version of a file on a page or in a space you watch ' +
+    '(kind "file.version", see wiki.watch; its file_id is for wiki.get_file), and changes by others to a ' +
+    'page you watch (kind "page.updated", one item per page with changes.count and the latest version; ' +
+    'read it with wiki.get_page or wiki.diff_page). Each item names its kind, who did it, the title of the ' +
     'discussion or page, the opening of what was said, and the ids to follow up with: ' +
     'discussion_id for wiki.get_discussion, page_id for wiki.get_page and wiki.list_comments. ' +
     'A reverted change or a reviewer\'s comment is feedback on your work: read it before writing ' +
@@ -1151,6 +1155,204 @@ const linkDocs = defineTool({
   },
 });
 
+/** Text a tool hands back inline; anything else is described and linked, not dumped. */
+const INLINE_TEXT_LIMIT = 256 * 1024;
+/**
+ * The largest file an agent may pass through a tool call rather than over REST.
+ * Seven megabytes is ten once it is base64 inside a JSON-RPC message, and ten
+ * is what the in-app HTTP endpoint reads of one request.
+ */
+const UPLOAD_THROUGH_TOOL_LIMIT = 7 * 1024 * 1024;
+
+function isText(contentType: string): boolean {
+  return (
+    contentType.startsWith('text/') ||
+    ['application/json', 'application/yaml', 'application/xml'].includes(contentType) ||
+    contentType.endsWith('+json') ||
+    contentType.endsWith('+xml')
+  );
+}
+
+interface FileResource extends Record<string, unknown> {
+  file_id: string;
+  name: string;
+  latest_version: number;
+  latest: { version: number; bytes: number; content_type: string };
+  versions?: Array<{ version: number; bytes: number; content_type: string }>;
+}
+
+const listFiles = defineTool({
+  name: 'wiki.list_files',
+  title: 'List the files attached to a page',
+  description:
+    'List the files attached to a page — release artifacts, specifications, exports, anything ' +
+    'uploaded next to the text — each with its latest version: name, size, type, sha256, who ' +
+    'uploaded it and the note they left. A file keeps every version it ever had; wiki.get_file ' +
+    'shows them. url is the file\'s permanent address on this instance, always its latest version. ' +
+    'uploads_enabled is false when the instance has attached files switched off. ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({ page_id: pageIdSchema.describe('The page whose files to list.') }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({ method: 'GET', path: `/pages/${args.page_id}/files` });
+  },
+});
+
+const getFile = defineTool({
+  name: 'wiki.get_file',
+  title: 'Read a file and its versions',
+  description:
+    'Get one attached file with every version of it, newest first, and — for a text file ' +
+    '(Markdown, plain text, CSV, JSON, YAML, XML) of up to 256 KB — the content of the version ' +
+    'you ask for, the latest by default. A binary or larger file is described, not returned: ' +
+    'content is null and content_omitted says why; it is downloaded over REST at the version\'s url ' +
+    'with the same token. Name the file by file_id (from wiki.list_files or an inbox item), or by ' +
+    'page_id and name — names are matched without regard to case. ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({
+    file_id: z.uuid().optional().describe('The file, as wiki.list_files or wiki.check_inbox gave it.'),
+    page_id: pageIdSchema.optional().describe('With name: the page the file is on.'),
+    name: z.string().min(1).max(200).optional().describe('With page_id: the file name.'),
+    version: z.number().int().positive().optional().describe('Which version to read. Default the latest.'),
+  }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    let fileId = args.file_id;
+    if (fileId === undefined) {
+      if (args.page_id === undefined || args.name === undefined) {
+        throw new ClewwikiToolError('VALIDATION', 'Pass file_id, or page_id with name');
+      }
+      const listing = await client.request<{ files: FileResource[] }>({ method: 'GET', path: `/pages/${args.page_id}/files` });
+      const wanted = args.name.normalize('NFC').trim().toLowerCase();
+      const found = listing.files.find((file) => file.name.toLowerCase() === wanted);
+      if (!found) throw new ClewwikiToolError('NOT_FOUND', `No file called ${args.name} on page ${args.page_id}`);
+      fileId = found.file_id;
+    }
+
+    const file = await client.request<FileResource>({ method: 'GET', path: `/files/${fileId}` });
+    const version =
+      args.version === undefined
+        ? file.latest
+        : (file.versions ?? []).find((candidate) => candidate.version === args.version);
+    if (!version) {
+      throw new ClewwikiToolError('NOT_FOUND', `The file has no version ${args.version}`, {
+        latest_version: file.latest_version,
+      });
+    }
+
+    if (!isText(version.content_type)) {
+      return { ...file, content_version: version.version, content: null, content_omitted: 'binary' };
+    }
+    if (version.bytes > INLINE_TEXT_LIMIT) {
+      return { ...file, content_version: version.version, content: null, content_omitted: 'too_large' };
+    }
+    const downloaded = await client.download({ path: `/files/${fileId}/content`, query: { version: version.version } });
+    return {
+      ...file,
+      content_version: version.version,
+      content: new TextDecoder('utf-8', { fatal: false }).decode(downloaded.bytes),
+      content_omitted: null,
+    };
+  },
+});
+
+const uploadFile = defineTool({
+  name: 'wiki.upload_file',
+  title: 'Attach a file to a page, or add a version of one',
+  description:
+    'Upload a file to a page. If the page already has a file by that name (in any case), this ' +
+    'adds its next version: the file keeps its address, and everybody who watches the page or its ' +
+    'space finds the new version in their inbox. Uploading the bytes the file already has changes ' +
+    'nothing, so a retry is safe. Pass content for text, or content_base64 for anything else, up ' +
+    'to 7 MB through this tool; a larger file — a build, an installer — is uploaded over REST with ' +
+    'the same token: PUT /api/v1/pages/{page_id}/files/{name} with the bytes as the body. note ' +
+    'says what changed and is shown with the version: write it for the person who will read it ' +
+    'in their inbox. Needs pages:write; takes no claim, because no page text changes.',
+  input: z.object({
+    page_id: pageIdSchema.describe('The page to attach the file to.'),
+    name: z
+      .string()
+      .min(1)
+      .max(200)
+      .describe('The file name, for example app-2.4.1.apk or release-notes.md. No slashes.'),
+    content: z.string().optional().describe('The file as text, stored as UTF-8.'),
+    content_base64: z.string().optional().describe('The file as base64, for anything that is not text.'),
+    content_type: z
+      .string()
+      .max(200)
+      .optional()
+      .describe('A media type, used only when the extension is not a known one.'),
+    note: z.string().max(1000).optional().describe('What this version is or what changed.'),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    if ((args.content === undefined) === (args.content_base64 === undefined)) {
+      throw new ClewwikiToolError('VALIDATION', 'Pass exactly one of content and content_base64');
+    }
+    // Checked here as well as on the server: `..` in a path would be folded
+    // away by URL parsing before the server could refuse it as a name.
+    const name = args.name.trim();
+    if (name === '.' || name === '..' || /[/\\]/.test(name)) {
+      throw new ClewwikiToolError('VALIDATION', 'A file name cannot be "." or "..", or contain / or \\');
+    }
+    let bytes: Uint8Array;
+    if (args.content !== undefined) {
+      bytes = new TextEncoder().encode(args.content);
+    } else {
+      const encoded = args.content_base64!.replace(/\s+/g, '');
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded) || encoded.length % 4 !== 0) {
+        throw new ClewwikiToolError('VALIDATION', 'content_base64 is not valid base64');
+      }
+      bytes = Uint8Array.from(Buffer.from(encoded, 'base64'));
+    }
+    if (bytes.byteLength > UPLOAD_THROUGH_TOOL_LIMIT) {
+      throw new ClewwikiToolError(
+        'VALIDATION',
+        'Files over 7 MB are uploaded over REST: PUT /api/v1/pages/{page_id}/files/{name} with the bytes as the body',
+        { bytes: bytes.byteLength },
+      );
+    }
+    return await client.request<Record<string, unknown>>({
+      method: 'PUT',
+      path: `/pages/${args.page_id}/files/${encodeURIComponent(name)}`,
+      query: { note: args.note },
+      raw: {
+        bytes,
+        contentType: args.content_type ?? (args.content !== undefined ? 'text/plain; charset=utf-8' : 'application/octet-stream'),
+      },
+    });
+  },
+});
+
+const watchTool = defineTool({
+  name: 'wiki.watch',
+  title: 'Watch a page or a space',
+  description:
+    'Start, or with stop: true end, watching a page or a whole space. A watched page reports its ' +
+    'changes and new versions of its files; a watched space reports new versions of files on any ' +
+    'of its pages, not every edit in it. Nothing is pushed to you: what somebody else did after you ' +
+    'started watching shows up in wiki.check_inbox — kind "page.updated", one item per page, or ' +
+    '"file.version" with the file_id for wiki.get_file. Watch the page of a dependency whose builds ' +
+    'or contract you rely on, or the space where releases are published. Watching ' +
+    'what you already watch, or stopping a watch you do not have, changes nothing.',
+  input: z.object({
+    page_id: pageIdSchema.optional().describe('The page to watch.'),
+    space: spaceKeySchema.optional(),
+    stop: z.boolean().optional().describe('True to stop watching. Default false.'),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    if ((args.page_id === undefined) === (args.space === undefined)) {
+      throw new ClewwikiToolError('VALIDATION', 'Pass exactly one of page_id and space');
+    }
+    return await client.request<Record<string, unknown>>({
+      method: args.stop === true ? 'DELETE' : 'POST',
+      path: '/watches',
+      body: args.page_id !== undefined ? { page_id: args.page_id } : { space: args.space },
+    });
+  },
+});
+
 export const TOOLS: readonly ToolDefinition[] = [
   listSpaces,
   formatGuide,
@@ -1182,6 +1384,10 @@ export const TOOLS: readonly ToolDefinition[] = [
   markInboxRead,
   checkAnchors,
   linkDocs,
+  listFiles,
+  getFile,
+  uploadFile,
+  watchTool,
 ];
 
 /**
@@ -1208,4 +1414,6 @@ export const CONTENT_RETURNING_TOOLS = [
   'wiki.list_comments',
   'wiki.check_inbox',
   'wiki.check_anchors',
+  'wiki.list_files',
+  'wiki.get_file',
 ] as const;

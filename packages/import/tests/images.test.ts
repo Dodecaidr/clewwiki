@@ -111,7 +111,7 @@ describe('markdown folder images', () => {
 
   it('counts only the files it made no use of', () => {
     expect(result.warnings).toEqual([
-      { code: 'unresolved-image', detail: '2 files that are neither Markdown nor an image a page shows' },
+      { code: 'unresolved-image', detail: '2 files that are neither Markdown nor an image or a file a page links to' },
     ]);
   });
 });
@@ -127,7 +127,7 @@ describe('what an archive is read for', () => {
     const result = importFromMarkdownZip({ zip, limits });
     expect(result.assets).toHaveLength(1);
     expect(result.warnings).toEqual([
-      { code: 'unresolved-image', detail: '1 files that are neither Markdown nor an image a page shows' },
+      { code: 'unresolved-image', detail: '1 files that are neither Markdown nor an image or a file a page links to' },
     ]);
     expect(importFromNotionZip({ zip, limits }).assets).toHaveLength(1);
   });

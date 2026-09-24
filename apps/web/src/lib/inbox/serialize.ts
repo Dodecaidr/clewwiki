@@ -16,6 +16,8 @@ export function inboxItemHref(item: InboxItem): string {
       : spaceDiscussionHref(item.space.key, item.discussionId ?? item.id);
   }
   const page = spacePageHref(item.space.key, item.pageId ?? '');
+  // A file version lands on the file, which the page's files panel anchors.
+  if (item.file !== null) return `${page}#file-${item.file.id}`;
   // A comment lands on its thread, which the page's comments panel anchors.
   return item.threadId === null ? page : `${page}#thread-${item.threadId}`;
 }
@@ -34,6 +36,8 @@ export function toInboxItemResource(item: InboxItem): Record<string, unknown> {
     page_id: item.pageId,
     thread_id: item.threadId,
     decision: item.decision,
+    file: item.file === null ? null : { file_id: item.file.id, name: item.file.name, version: item.file.version },
+    changes: item.changes,
     url: inboxItemHref(item),
   };
 }

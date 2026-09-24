@@ -145,6 +145,13 @@ export default async function SpaceLayout({
           >
             {ts('exportZip')}
           </a>
+          <a
+            href={`/api/v1/spaces/${space.key}/export?format=md&files=latest`}
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            title={ts('exportZipWithFilesHint')}
+          >
+            {ts('exportZipWithFiles')}
+          </a>
           {session.role === 'admin' ? (
             <Link
               href={spaceSettingsHref(space.key)}

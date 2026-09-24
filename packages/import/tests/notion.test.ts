@@ -143,7 +143,7 @@ describe('notion export import', () => {
   });
 
   it('records a parameter summary with no file contents in it', () => {
-    expect(result.params).toEqual({ file_count: 4, page_count: 3, database_count: 1, image_count: 0 });
+    expect(result.params).toEqual({ file_count: 4, page_count: 3, database_count: 1, image_count: 0, attachment_count: 0 });
   });
 
   it('refuses an archive with no Notion files in it', () => {

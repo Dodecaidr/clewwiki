@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { importItems, imports, pages, spaces } from '@clewwiki/db';
 import type { ImportDecisionValue, ImportSourceValue, ImportStatusValue } from '@clewwiki/db';
-import { DEFAULT_IMPORT_LIMITS, isImportError, placeNodes, rewriteLinks } from '@clewwiki/import';
+import { DEFAULT_IMPORT_LIMITS, isImportError, placeNodes, rewriteLinks, rewriteFiles, archivePathHref } from '@clewwiki/import';
 import type { ImportLimits, ImportParseResult, ImportWarning } from '@clewwiki/import';
 import { InvalidPathError, normalizePath } from '@clewwiki/content/paths';
 
@@ -26,6 +26,16 @@ import {
   stageImportImages,
 } from './images';
 import type { CarriedImages } from './images';
+import { carryFiles, countStagedFiles, dropStagedFiles, stageArchiveFiles, stagedFileNames } from './files';
+import { fileHref } from '../files/urls';
+
+/** Who a version carried across from a source is shown as, when the source names nobody. */
+const SOURCE_LABELS: Record<ImportSourceValue, string> = {
+  confluence: 'Confluence',
+  notion: 'Notion',
+  markdown: 'Markdown import',
+  pdf: 'PDF import',
+};
 
 /**
  * The import service.
@@ -193,7 +203,13 @@ export interface CreateImportInput {
    * than a parsed result so that a failure is recorded on the import row the
    * caller can then look at.
    */
-  parse: (limits: ImportLimits) => Promise<ImportParseResult> | ImportParseResult;
+  parse: (limits: ImportLimits, context: ImportContext) => Promise<ImportParseResult> | ImportParseResult;
+}
+
+/** What an adapter may need to know about the import it is reading for. */
+export interface ImportContext {
+  workspaceId: string;
+  importId: string;
 }
 
 export async function createImport(input: CreateImportInput): Promise<ImportRecord> {
@@ -241,7 +257,7 @@ export async function createImport(input: CreateImportInput): Promise<ImportReco
 
   try {
     const limits = importLimits();
-    const parsed = await input.parse(limits);
+    const parsed = await input.parse(limits, { workspaceId: input.workspaceId, importId: created.id });
 
     if (parsed.nodes.length > limits.pages) {
       throw new PageServiceError('validation', `An import may stage at most ${limits.pages} pages`, {
@@ -259,10 +275,22 @@ export async function createImport(input: CreateImportInput): Promise<ImportReco
     // Judged before anything is staged, so that an image which will not be
     // carried is a warning on the pages that show it.
     const images = await judgeImportImages(input.workspaceId, parsed.assets ?? []);
+    // The files an archive's pages link to go into the file store now, like a
+    // Confluence page's attachments do while it is read.
+    const fileWarnings = await stageArchiveFiles({
+      workspaceId: input.workspaceId,
+      importId: created.id,
+      nodes: parsed.nodes,
+      fileAssets: parsed.fileAssets ?? [],
+    });
     const placed = placeNodes(
       parsed.nodes.map((node) => ({
         ...node,
-        warnings: [...node.warnings, ...refusedImageWarnings(node, images.refused)],
+        warnings: [
+          ...node.warnings,
+          ...refusedImageWarnings(node, images.refused),
+          ...(fileWarnings.get(node.sourceId) ?? []),
+        ],
       })),
     );
 
@@ -283,11 +311,14 @@ export async function createImport(input: CreateImportInput): Promise<ImportReco
     }
 
     await stageImportImages(created.id, images.accepted);
+    const stagedFiles = await countStagedFiles(created.id);
 
     const stats = {
       parsed: placed.nodes.length,
       images: images.accepted.length,
       images_skipped: images.refused.size,
+      files: stagedFiles.files,
+      file_versions: stagedFiles.versions,
       warnings: placed.nodes.reduce((total, node) => total + node.warnings.length, 0),
       conflicts: placed.nodes.filter((node) => existing.has(node.targetPath)).length,
       source_warnings: parsed.warnings.length,
@@ -317,6 +348,7 @@ export async function createImport(input: CreateImportInput): Promise<ImportReco
   } catch (error) {
     const message = describeFailure(error);
     await dropStagedImages(created.id).catch(() => undefined);
+    await dropStagedFiles(created.id).catch(() => undefined);
     await db
       .update(imports)
       .set({ status: 'failed', error: message, updatedAt: new Date() })
@@ -485,6 +517,9 @@ export interface AppliedItem {
   /** Images that came with the page, and images that were staged and could not be stored. */
   images?: number;
   imagesFailed?: number;
+  /** Files that came with the page, and staged file versions that could not be stored. */
+  files?: number;
+  filesFailed?: number;
   /** Why nothing was written, when nothing was. */
   skipped?: 'decision' | 'conflict' | 'claimed' | 'failed';
   detail?: string;
@@ -579,7 +614,14 @@ export async function applyImport(input: ApplyImportInput): Promise<ApplyImportR
       continue;
     }
 
-    const body = rewriteLinks(item.markdown, hrefOf).markdown;
+    const planned = plan.get(item.sourceId);
+    // A link to a staged file becomes the file's own address on the page it
+    // is about to be attached to; any other stays the path the source used.
+    const fileNames = planned === undefined ? new Map<string, string>() : await stagedFileNames(record.id, item.sourceId);
+    const body = rewriteFiles(rewriteLinks(item.markdown, hrefOf).markdown, (key) => {
+      const name = fileNames.get(key);
+      return planned !== undefined && name !== undefined ? fileHref(planned.pageId, name) : archivePathHref(key);
+    });
     const parentId = item.parentSourceId === null ? null : (plan.get(item.parentSourceId)?.pageId ?? null);
     const entry = plan.get(item.sourceId);
     if (entry === undefined) {
@@ -618,6 +660,14 @@ export async function applyImport(input: ApplyImportInput): Promise<ApplyImportR
               parentId,
             });
       const pageId = written.pageId;
+      const carriedFiles = await carryFiles({
+        workspaceId: input.workspaceId,
+        importId: record.id,
+        sourceId: item.sourceId,
+        pageId,
+        actor: input.actor,
+        sourceLabel: SOURCE_LABELS[record.source],
+      });
 
       await db.update(importItems).set({ createdPageId: pageId }).where(eq(importItems.id, item.id));
       pathToPageId.set(item.targetPath, pageId);
@@ -636,6 +686,9 @@ export async function applyImport(input: ApplyImportInput): Promise<ApplyImportR
           decision: item.decision,
           images: written.images.carried,
           images_failed: written.images.failed,
+          files: carriedFiles.files,
+          file_versions: carriedFiles.versions,
+          files_failed: carriedFiles.failed,
         },
       });
 
@@ -644,6 +697,8 @@ export async function applyImport(input: ApplyImportInput): Promise<ApplyImportR
         pageId,
         ...(written.images.carried > 0 ? { images: written.images.carried } : {}),
         ...(written.images.failed > 0 ? { imagesFailed: written.images.failed } : {}),
+        ...(carriedFiles.files > 0 ? { files: carriedFiles.files } : {}),
+        ...(carriedFiles.failed > 0 ? { filesFailed: carriedFiles.failed } : {}),
       });
     } catch (error) {
       const claimReason = claimRefusal(error);
@@ -656,9 +711,12 @@ export async function applyImport(input: ApplyImportInput): Promise<ApplyImportR
   }
 
   await dropStagedImages(record.id);
+  await dropStagedFiles(record.id);
 
   const stats = {
     ...record.stats,
+    files_carried: created.reduce((total, item) => total + (item.files ?? 0), 0),
+    files_failed: created.reduce((total, item) => total + (item.filesFailed ?? 0), 0),
     created: created.length,
     skipped: skipped.length,
     images_carried: created.reduce((total, item) => total + (item.images ?? 0), 0),
@@ -801,6 +859,7 @@ export async function cancelImport(
   // The staged Markdown stays until the record is purged; the pictures, which
   // are most of what an import weighs, go now.
   await dropStagedImages(record.id);
+  await dropStagedFiles(record.id);
 
   await recordAudit({
     workspaceId,

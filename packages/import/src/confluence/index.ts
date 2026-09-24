@@ -19,9 +19,9 @@ import { ImportError } from '../limits';
 import type { ImportLimits } from '../limits';
 import { truncateToBytes, utf8Length } from '../limits';
 import { warn } from '../types';
-import type { ImportNode, ImportParseResult, ImportWarning } from '../types';
+import type { FileSink, ImportNode, ImportParseResult, ImportWarning } from '../types';
 import { ConfluenceClient } from './client';
-import type { ConfluenceCredentials, ConfluenceClientOptions, ConfluencePage } from './client';
+import type { ConfluenceAttachment, ConfluenceCredentials, ConfluenceClientOptions, ConfluencePage } from './client';
 import { convertStorageToMarkdown } from './storage';
 
 export * from './client';
@@ -33,11 +33,20 @@ export interface ConfluenceImportInput {
   spaceKey: string;
   limits: ImportLimits;
   client?: ConfluenceClientOptions;
+  /**
+   * Where the page's other attachments go, with their earlier versions. Left
+   * out, attachments that are not images a page shows stay behind, as before.
+   */
+  files?: FileSink;
 }
+
+/** File versions carried in one import, across all pages. */
+export const MAX_IMPORTED_FILE_VERSIONS = 5_000;
 
 export async function importFromConfluence(input: ConfluenceImportInput): Promise<ImportParseResult> {
   const client = new ConfluenceClient(input.credentials, {
     maxImageBytes: input.limits.imageBytes,
+    ...(input.files ? { maxFileBytes: input.files.maxFileBytes } : {}),
     ...input.client,
   });
   const space = await client.findSpaceId(input.spaceKey);
@@ -114,6 +123,21 @@ export async function importFromConfluence(input: ConfluenceImportInput): Promis
     );
   }
 
+  let fileVersions = 0;
+  let files = 0;
+  if (input.files) {
+    const sink = input.files;
+    for (let index = 0; index < nodes.length; index += 1) {
+      const entry = converted[index];
+      const node = nodes[index];
+      if (!entry || !node) continue;
+      const carried = await carryAttachments(client, sink, entry, MAX_IMPORTED_FILE_VERSIONS - fileVersions);
+      fileVersions += carried.versions;
+      files += carried.files;
+      if (carried.warnings.length > 0) nodes[index] = { ...node, warnings: [...node.warnings, ...carried.warnings] };
+    }
+  }
+
   return {
     source: 'confluence',
     nodes,
@@ -128,6 +152,7 @@ export async function importFromConfluence(input: ConfluenceImportInput): Promis
       space_name: space.name,
       page_count: pages.length,
       image_count: assets.length,
+      ...(input.files ? { file_count: files, file_version_count: fileVersions } : {}),
     },
   };
 }
@@ -143,6 +168,126 @@ interface ConvertedPage {
   node: ImportNode;
   pageId: string;
   images: Array<{ filename: string; key: string }>;
+}
+
+/**
+ * The attachments of one page, each with its history, into the sink.
+ *
+ * An image the page shows is already carried as the page's image and is not
+ * carried twice. The rest go oldest version first, so the file's history on
+ * this side reads in the order it happened. An earlier version is refused, not
+ * faked: when the site serves a download of another size than its record of
+ * that version — some answer every `?version=` with the latest; cwiki.apache.org
+ * does — the version is left out with a warning rather than stored as history
+ * it is not.
+ *
+ * Nothing here ends the import. A page whose attachments cannot be listed, a
+ * download that fails, a sink that is full: each is a warning on the page.
+ */
+async function carryAttachments(
+  client: ConfluenceClient,
+  sink: FileSink,
+  page: ConvertedPage,
+  budget: number,
+): Promise<{ files: number; versions: number; warnings: ImportWarning[] }> {
+  const warnings: ImportWarning[] = [];
+  // Past the import's budget there is nothing to ask the site for.
+  if (budget <= 0) return { files: 0, versions: 0, warnings };
+  let attachments: ConfluenceAttachment[];
+  try {
+    attachments = await client.listAttachments(page.pageId);
+  } catch (error) {
+    warnings.push(warn('file-skipped', `attachments of this page could not be listed: ${reasonOf(error)}`));
+    return { files: 0, versions: 0, warnings };
+  }
+
+  const shown = new Set(page.images.map((image) => image.filename));
+  let position = 0;
+  let files = 0;
+  let versions = 0;
+  for (const current of attachments) {
+    if (shown.has(current.title)) continue;
+    if (current.fileSize !== null && current.fileSize > sink.maxFileBytes) {
+      warnings.push(warn('file-skipped', `${current.title}: larger than this instance takes`));
+      continue;
+    }
+
+    const history = await client.listAttachmentHistory(page.pageId, current);
+    if (history === null) {
+      warnings.push(warn('file-history-partial', `${current.title}: earlier versions could not be read`));
+    }
+    let kept = 0;
+    let missed = 0;
+    const earlier = history ?? [];
+    const base = position;
+    position += earlier.length + 1;
+    // The current version first: it is the file, and its bytes are what an
+    // earlier version must not turn out to be. Positions keep the history in
+    // the order it happened whatever the order it was read in.
+    let currentSha: string | null = null;
+    const ordered = [
+      { version: current, at: base + earlier.length },
+      ...earlier.map((version, index) => ({ version, at: base + index })),
+    ];
+    for (const { version, at } of ordered) {
+      if (versions >= budget) {
+        warnings.push(warn('file-skipped', `${current.title}: more than ${MAX_IMPORTED_FILE_VERSIONS} file versions in one import`));
+        return { files, versions, warnings };
+      }
+      const isCurrent = version === current;
+      if (!isCurrent && currentSha === null) break;
+      if (version.fileSize !== null && version.fileSize > sink.maxFileBytes) {
+        if (isCurrent) warnings.push(warn('file-skipped', `${current.title}: larger than this instance takes`));
+        else missed += 1;
+        continue;
+      }
+      const opened = await client.openAttachment(version);
+      if ('failed' in opened) {
+        if (isCurrent) warnings.push(warn('file-skipped', `${current.title}: ${opened.failed}`));
+        else missed += 1;
+        continue;
+      }
+      const stored = await sink.store(
+        {
+          sourceId: page.node.sourceId,
+          name: current.title,
+          position: at,
+          mediaType: version.mediaType,
+          // Only an earlier version is held to its recorded size: that is how a
+          // site answering every `?version=` with the latest is caught. The
+          // current version is what the site serves — some record a size for
+          // it that its own download does not match. An earlier version with no
+          // recorded size is held to not being the current bytes instead.
+          expectedBytes: isCurrent ? null : version.fileSize,
+          rejectSha256: isCurrent || version.fileSize !== null ? null : currentSha,
+          note: version.comment,
+          sourceVersion: version.version,
+          author: version.author,
+          createdAt: version.createdAt,
+        },
+        opened.body,
+      );
+      if ('refused' in stored) {
+        if (isCurrent) warnings.push(warn('file-skipped', `${current.title}: ${stored.refused}`));
+        else missed += 1;
+        continue;
+      }
+      if (isCurrent) currentSha = stored.sha256;
+      kept += 1;
+      versions += 1;
+    }
+    if (kept > 0) files += 1;
+    if (missed > 0) {
+      warnings.push(
+        warn('file-history-partial', `${current.title}: ${missed} earlier version(s) were not served as recorded`),
+      );
+    }
+  }
+  return { files, versions, warnings };
+}
+
+function reasonOf(error: unknown): string {
+  return error instanceof ImportError ? error.message : 'the request failed';
 }
 
 function toNode(page: ConfluencePage, index: number, context: NodeContext): ConvertedPage {

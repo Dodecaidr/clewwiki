@@ -33,6 +33,7 @@ COPY apps/web/package.json ./apps/web/
 COPY packages/db/package.json ./packages/db/
 COPY packages/anchors/package.json ./packages/anchors/
 COPY packages/content/package.json ./packages/content/
+COPY packages/files/package.json ./packages/files/
 COPY packages/import/package.json ./packages/import/
 COPY packages/mcp-server/package.json ./packages/mcp-server/
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -90,6 +91,9 @@ ENV CLEWWIKI_GRAMMARS_DIR=/app/grammars
 # Where the read-only mirrors of workspace repositories live. Mount a volume
 # here, or every check re-clones after a restart.
 ENV REPOS_DIR=/data/repos
+# Where attached files are kept when FILES_DRIVER=local. Mount a volume here:
+# a file written anywhere else in the container is gone after the next update.
+ENV FILES_DIR=/data/files
 
 # git is a runtime dependency of the anchor checker: it clones each workspace's
 # repository as a bare mirror and reads blobs out of it. No working tree is
@@ -112,14 +116,14 @@ RUN apt-get update \
 # because volumes created by earlier images already belong to that id.
 RUN groupadd --system --gid 1001 clewwiki \
  && useradd --system --uid 1001 --gid clewwiki --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin clewwiki \
- && mkdir -p /data/repos \
+ && mkdir -p /data/repos /data/files \
  && chown -R clewwiki:clewwiki /data
 
 WORKDIR /app
 
 # The application files belong to root and are only readable by the service
 # user: a compromised process cannot rewrite the code it is running. The only
-# places it may write are /data/repos and Next's own cache directory.
+# places it may write are /data/repos, /data/files and Next's own cache directory.
 # Next's standalone output already contains the pruned node_modules it needs,
 # including the migrator, which `src/instrumentation.ts` pulls into the trace.
 COPY --from=build /app/apps/web/.next/standalone ./
