@@ -167,9 +167,9 @@ from the person making it. Every page it creates is audited as `page.imported`.
 
 | Source | Converts | Does not |
 |---|---|---|
-| **Confluence** (Cloud over REST API v2; Server and Data Center over v1) | The page hierarchy of one space; headings, lists, tables, task lists, blockquotes, rules; the `code` macro with its language and `noformat`; `info`, `note`, `tip`, `warning` and `panel` panels as GitHub alerts; `expand` as a heading and its content; links between imported pages, rewritten to the new pages. PNG, JPEG, GIF and WebP images attached to a page and shown on it are downloaded and become the page's own images | Other attachments, SVG images, and an image attached to a *different* page are not downloaded — they are rewritten to their absolute Confluence URL and warned about, so they keep working only while that site does. The same happens to an image that could not be fetched, with the reason. A macro with no Markdown equivalent (Jira lists, page trees, includes, charts) becomes a visible `> [!NOTE]` naming it, never a silent omission. Comments, labels, restrictions and page history are not read. The same converter runs for both deployments, because a page body is stored the same way on each. |
-| **Notion export** | The ZIP from "Export as Markdown & CSV", with or without subpages. The folder structure becomes the tree, and Notion's hash suffixes are stripped from every name and path. Emoji callouts become GitHub alerts, with the emoji choosing the kind. A database's CSV becomes a GFM table on its own page when it is small, and the row pages land below it. Links between exported pages are rewritten. PNG, JPEG, GIF and WebP images a page shows are carried across and become the page's own images | A toggle becomes a bold summary followed by its content, always open, with a warning — page bodies render Markdown and drop raw HTML, so a real `<details>` would vanish. A database past 100 rows or 12 columns is described rather than inlined. Files other than images are not uploaded, and neither is an image no page shows. |
-| **Markdown folder** | A ZIP of `.md`, `.mdx` or `.markdown` files. Directories become the tree; `README.md`, `index.md` and `_index.md` become the page for the directory they sit in; front matter `title` wins over the file name, and the first `#` heading wins over that only when there is no front matter. Relative links between documents are rewritten to the pages they become. PNG, JPEG, GIF and WebP images referenced by a relative path are carried across, from anywhere in the archive | An image that is not in the archive, or is another format (SVG included), stays as it was written and gets a warning. MDX components are not rendered — a file containing them is imported with a warning that the raw HTML will not survive. Anything that is not Markdown is ignored. |
+| **Confluence** (Cloud over REST API v2; Server and Data Center over v1) | The page hierarchy of one space; headings, lists, tables, task lists, blockquotes, rules; the `code` macro with its language and `noformat`; `info`, `note`, `tip`, `warning` and `panel` panels as GitHub alerts; `expand` as a heading and its content; links between imported pages, rewritten to the new pages. PNG, JPEG, GIF and WebP images attached to a page and shown on it are downloaded and become the page's own images | Other attachments become the page's [files](#files) when the instance takes files — with their earlier versions, as far as the site serves them as recorded — on Cloud, where no size is recorded per version, an earlier version served as the current bytes is left out; an attachment too large for the instance or its store is left out with a warning. With files off, they, SVG images, and an image attached to a *different* page are not downloaded — they are rewritten to their absolute Confluence URL and warned about, so they keep working only while that site does. The same happens to an image that could not be fetched, with the reason. A macro with no Markdown equivalent (Jira lists, page trees, includes, charts) becomes a visible `> [!NOTE]` naming it, never a silent omission. Comments, labels, restrictions and page history are not read. The same converter runs for both deployments, because a page body is stored the same way on each. |
+| **Notion export** | The ZIP from "Export as Markdown & CSV", with or without subpages. The folder structure becomes the tree, and Notion's hash suffixes are stripped from every name and path. Emoji callouts become GitHub alerts, with the emoji choosing the kind. A database's CSV becomes a GFM table on its own page when it is small, and the row pages land below it. Links between exported pages are rewritten. PNG, JPEG, GIF and WebP images a page shows are carried across and become the page's own images | A toggle becomes a bold summary followed by its content, always open, with a warning — page bodies render Markdown and drop raw HTML, so a real `<details>` would vanish. A database past 100 rows or 12 columns is described rather than inlined. A file a page links to — a PDF, a spreadsheet — becomes one of that page's [files](#files), and the link points at it; files no page links to, and an image no page shows, are not carried. |
+| **Markdown folder** | A ZIP of `.md`, `.mdx` or `.markdown` files. Directories become the tree; `README.md`, `index.md` and `_index.md` become the page for the directory they sit in; front matter `title` wins over the file name, and the first `#` heading wins over that only when there is no front matter. Relative links between documents are rewritten to the pages they become. PNG, JPEG, GIF and WebP images referenced by a relative path are carried across, from anywhere in the archive | An image that is not in the archive, or is another format (SVG included), stays as it was written and gets a warning. A file a document links to that is neither Markdown nor an image becomes one of that page's [files](#files), and the link points at it; two with the same name are told apart as `spec (2).pdf`. MDX components are not rendered — a file containing them is imported with a warning that the raw HTML will not survive. Anything no document links to is ignored, and a linked file is read only while it fits the import's expanded-size limit. |
 | **PDF** | Text, with structure inferred: headings from font-size clustering where the file has one, otherwise from the shape of the line (short, no sentence punctuation, followed by body text, or opening with a section number); paragraphs from vertical gaps, with words rejoined across a hyphenated line break; tables from columns that agree on their x positions; monospaced runs kept in a fence. A long document can be split into one page per top-level heading | Everything about a PDF import is an approximation and it says so: every page carries a warning, the preview shows the reconstructed Markdown, and it always lands in review. A block that looks like a table but whose columns do not agree is kept as preformatted text with a warning rather than guessed at. A scanned PDF has no text to read and is refused — optical character recognition is out of scope. Images are not extracted. |
 
 **Cloud or your own server.** The first field of the Confluence form is which
@@ -362,7 +362,9 @@ you had a hand in:
   resolved — with a link to the decision page when one was written;
 - a reply in a comment thread you started or answered;
 - a new comment on a page *as you left it* — on the version you wrote;
-- a review, accepting or reverting, of changes that include yours.
+- a review, accepting or reverting, of changes that include yours;
+- a new version of a file on a page, or in a space, you watch;
+- changes to a page you watch — one line per page, with how many there were.
 
 **Mentions bring somebody in.** Everything above reaches people who are already
 part of something. To reach somebody who is not, mention them in a discussion
@@ -388,6 +390,55 @@ from the discussions, comments and reviews themselves, in the spaces you can see
 at that moment: a discussion that has been cleaned up is gone from it, and so is
 everything from a restricted space you are no longer a member of. There is no
 e-mail and no push.
+
+## Files
+
+A page can carry files of any kind — release builds, installers,
+specifications, exports — under **Files**, below the text. A file is a name on
+a page, and it keeps every version it has had:
+
+- **Uploading a name the page already has adds its next version.** Names are
+  compared without regard to case, so `App.apk` and `app.apk` are one file. The
+  file's link does not change and always gives the latest version, which is what
+  makes a page the place a release is published: put the link in the release
+  notes once. **Copy link** copies it; `?version=3` pins one version.
+- **What changed** is an optional note kept with the version and shown to
+  whoever watches the page.
+- **Versions** lists them all, each downloadable. **Restore** makes an old one
+  the latest again by adding it as a new version, so nobody who downloaded
+  version 3 finds that version 3 has changed.
+- **Delete file** removes it with every version, for good.
+
+Uploading the bytes the file already has changes nothing, so a script that
+publishes on every build can run twice. A file is visible to whoever can see
+its page, and goes with the page.
+
+**Watch** on a page, and its changes and new versions of its files show up in
+your inbox — the changes as one line per page, however many an agent made.
+**Watch files in this space**, on a space's overview, reports new versions of
+files on any of its pages, and not every edit. Only what happens after you
+start watching is reported. A viewer can watch too: watching changes nothing anybody else sees.
+
+Agents do all of this over MCP — `wiki.list_files`, `wiki.get_file` (which
+returns the content of a text file), `wiki.upload_file` and `wiki.watch` — and a
+build job over REST, with a token that has `pages:write`:
+
+```sh
+curl -fsS -X PUT --data-binary @dist/app-2.4.1.apk \
+  -H "Authorization: Bearer $CLEWWIKI_TOKEN" \
+  "https://wiki.example.com/api/v1/pages/$PAGE_ID/files/app-2.4.1.apk?note=Signed%20build"
+```
+
+**Export space (.zip) · With files** adds the latest version of every file
+beside its page — `KEY/backend/auth.files/spec.pdf` next to
+`KEY/backend/auth.md` — streamed as it is sent, with `KEY/_files.json` listing
+each file's version, checksum and address, and anything left out: the archive
+stops short of the 4 GiB a ZIP file holds, and says what did not fit.
+
+An instance keeps files on a volume of their own; the administrator sets how
+large one file and a workspace's files may be, or switches files off
+(`FILES_DRIVER`, `FILES_MAX_UPLOAD_MB`, `FILES_STORE_MAX_MB` in
+[deploy.md](deploy.md#configuration-reference)).
 
 ## From the UI
 

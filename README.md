@@ -16,7 +16,7 @@ Status: v0.6.0, early and under active development.
 
 ## Why this one
 
-**MCP is part of the wiki, not an add-on.** 30 tools over stdio or streamable
+**MCP is part of the wiki, not an add-on.** 34 tools over stdio or streamable
 HTTP, and a REST API beneath them. Agents create and edit pages as well as read
 them. A token is scoped to the spaces it may touch, it expires, it can be
 revoked, and every write it makes lands in an audit log.
@@ -35,6 +35,12 @@ Center — a Notion export, a folder of Markdown or a PDF, images included. Expo
 Markdown or HTML, or a whole space as a ZIP. Pages are stored as Markdown, so
 leaving is a download. [Moving from Confluence](docs/from-confluence.md) walks
 through it.
+
+**Files next to the docs, in versions.** Attach builds, installers and
+specifications to a page. Uploading the same name again adds a version behind
+the same link, old versions stay downloadable and can be restored, and whoever
+watches the page or the space finds the new version in their inbox. Agents
+publish and read files over MCP, and a build job does it with one `curl`.
 
 [How it compares](docs/compare.md) with Confluence, Docmost, Outline, BookStack
 and Wiki.js, including what they do that clewwiki does not.

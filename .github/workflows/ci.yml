@@ -186,6 +186,7 @@ jobs:
             test -s /app/migrations/meta/_journal.json
             ls /app/migrations/*.sql
             test -w /data/repos
+            test -w /data/files
             test -s /app/LICENSE
             # `set -e` does not act on a negated command, hence the explicit exits.
             if test -w /app/apps/web/server.js; then echo "application code is writable"; exit 1; fi

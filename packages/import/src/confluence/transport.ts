@@ -95,6 +95,13 @@ export interface GuardedFetchOptions {
   maxResponseBytes: number;
   /** How long one request may take end to end, in ms. */
   timeoutMs?: number;
+  /**
+   * Hand the body over as a stream as soon as the headers arrive, instead of
+   * reading it first. For an attachment, which may be far larger than anything
+   * that should be held in memory. The cap still holds: the stream errors, and
+   * the socket is destroyed, the moment the body passes it.
+   */
+  streamBody?: boolean;
 }
 
 const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
@@ -124,6 +131,49 @@ export function createGuardedFetch(options: GuardedFetchOptions): typeof fetch {
           timeout: timeoutMs,
         },
         (incoming) => {
+          if (options.streamBody === true) {
+            const status = incoming.statusCode ?? 502;
+            const headers = new Headers();
+            for (const [name, value] of Object.entries(incoming.headers)) {
+              if (value === undefined) continue;
+              headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+            }
+            headers.delete('transfer-encoding');
+            let total = 0;
+            const body = new ReadableStream<Uint8Array>({
+              start(controller) {
+                incoming.on('data', (chunk: Buffer) => {
+                  total += chunk.byteLength;
+                  if (total > options.maxResponseBytes) {
+                    incoming.destroy();
+                    controller.error(
+                      new ImportError('unavailable', 'Confluence answered with more than this import will read'),
+                    );
+                    return;
+                  }
+                  controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+                  if ((controller.desiredSize ?? 1) <= 0) incoming.pause();
+                });
+                incoming.on('end', () => controller.close());
+                incoming.on('error', () =>
+                  controller.error(new ImportError('unavailable', 'The download from Confluence was cut off')),
+                );
+              },
+              pull() {
+                incoming.resume();
+              },
+              cancel() {
+                incoming.destroy();
+              },
+            });
+            resolve(
+              new Response(NULL_BODY_STATUS.has(status) ? null : body, {
+                status: status >= 200 && status <= 599 ? status : 502,
+                headers,
+              }),
+            );
+            return;
+          }
           const chunks: Buffer[] = [];
           let total = 0;
           incoming.on('data', (chunk: Buffer) => {

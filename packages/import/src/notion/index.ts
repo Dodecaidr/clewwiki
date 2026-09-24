@@ -20,7 +20,7 @@
 import { ImportError } from '../limits';
 import type { ImportLimits } from '../limits';
 import { truncateToBytes, utf8Length } from '../limits';
-import { createImageCollector } from '../image-collector';
+import { createFileCollector, createImageCollector } from '../image-collector';
 import { IMPORTABLE_IMAGE_EXTENSIONS } from '../images';
 import { calloutBlock, finishBody, joinBlocks, tableBlock } from '../markdown-out';
 import { warn } from '../types';
@@ -36,6 +36,7 @@ import {
 import type { DocumentPage } from '../doctree';
 import { commonPrefix, titleFromName } from '../markdown/index';
 import { entryText, readZip } from '../zip';
+import type { DeferredZipFile } from '../zip';
 import { isInlineable, parseCsv } from './csv';
 
 export * from './csv';
@@ -76,12 +77,17 @@ export interface NotionImportInput {
 export function importFromNotionZip(input: NotionImportInput): ImportParseResult {
   // Pages, databases and the pictures they might show: nothing else an export
   // holds — videos, PDFs, attached files — is expanded at all.
+  // Anything else — PDFs, spreadsheets, attached files — is left compressed
+  // and read only if a page links to it (see `createFileCollector`).
+  const deferred: DeferredZipFile[] = [];
   const entries = readZip(input.zip, {
     limits: input.limits,
     accept: (name) => {
       const extension = extensionOf(name);
       return extension === 'md' || extension === 'csv' || IMPORTABLE_IMAGE_EXTENSIONS.has(extension);
     },
+    defer: (name) => !name.includes('__MACOSX/'),
+    onDeferred: (entry) => deferred.push(entry),
   });
   const usable = entries.filter((entry) => {
     const extension = extensionOf(entry.name);
@@ -111,6 +117,8 @@ export function importFromNotionZip(input: NotionImportInput): ImportParseResult
   const known = new Set(files.map(({ path }) => keyForDocument(path)));
   const warnings: ImportWarning[] = [];
   const images = createImageCollector(entries.filter((entry) => !entry.name.includes('__MACOSX/')));
+  const read = entries.reduce((total, entry) => total + entry.data.byteLength, 0);
+  const attachments = createFileCollector(deferred, Math.max(input.limits.expandedBytes - read, 0));
 
   const pages: DocumentPage[] = files.map(({ entry, path }, index) => {
     const pageWarnings: ImportWarning[] = [];
@@ -133,6 +141,7 @@ export function importFromNotionZip(input: NotionImportInput): ImportParseResult
         return known.has(key) ? key : null;
       },
       images.resolverFor(entry.name),
+      attachments.resolverFor(entry.name),
     );
     pageWarnings.push(...rewritten.warnings);
 
@@ -160,9 +169,16 @@ export function importFromNotionZip(input: NotionImportInput): ImportParseResult
     source: 'notion',
     nodes: tree.nodes,
     assets: images.assets(),
-    warnings,
+    fileAssets: attachments.assets(),
+    warnings: [
+      ...warnings,
+      ...attachments.overBudget.map((name) =>
+        warn('file-skipped', `${name}: the files of this export are larger together than an import may expand`),
+      ),
+    ],
     params: {
       file_count: files.length,
+      attachment_count: attachments.used,
       page_count: markdownFiles.length,
       database_count: files.length - markdownFiles.length,
       image_count: images.used,

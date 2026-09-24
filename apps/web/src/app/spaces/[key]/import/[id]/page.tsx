@@ -194,6 +194,8 @@ export default async function ImportRunPage({ params }: Props) {
           conflicts: preview.counts.conflicts,
           warnings: preview.items.reduce((total, item) => total + item.warnings.length, 0),
           images: Number(preview.import.stats['images'] ?? 0),
+          files: Number(preview.import.stats['files'] ?? 0),
+          versions: Number(preview.import.stats['file_versions'] ?? 0),
         })}
       </Alert>
       {preview.import.source === 'pdf' ? <Alert tone="info">{t('pdfNotice')}</Alert> : null}

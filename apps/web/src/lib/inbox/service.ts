@@ -9,6 +9,8 @@ import {
   inboxMarks,
   mentions,
   pageComments,
+  pageFiles,
+  pageFileVersions,
   pageReviews,
   pages,
   spaces,
@@ -29,7 +31,9 @@ import { getDatabase } from '../db';
  * - a discussion you took part in being resolved;
  * - a reply in a comment thread you started or replied in;
  * - a comment on a page as you left it — on the version you wrote;
- * - a review, accepting or reverting, of changes that include yours.
+ * - a review, accepting or reverting, of changes that include yours;
+ * - a new version of a file on a page, or in a space, you watch;
+ * - changes to a page you watch, one item per page however many there were.
  *
  * Always by somebody else: nobody is notified of their own words.
  *
@@ -58,6 +62,8 @@ export const INBOX_KINDS = [
   'comment.reply',
   'comment.new',
   'review.decided',
+  'file.version',
+  'page.updated',
 ] as const;
 export type InboxKind = (typeof INBOX_KINDS)[number];
 
@@ -80,6 +86,10 @@ export interface InboxItem {
   threadId: string | null;
   /** For a review: what was decided. */
   decision: string | null;
+  /** For a file version: which file, under which name, and which version. */
+  file: { id: string; name: string; version: number } | null;
+  /** For changes to a watched page: how many versions there were in the window, and the latest. */
+  changes: { count: number; version: number } | null;
 }
 
 /** Nothing older than this is listed. */
@@ -161,6 +171,8 @@ export async function getInbox(query: InboxQuery): Promise<Inbox> {
     discussionResolvedItems(scope),
     commentItems(scope),
     reviewItems(scope),
+    fileVersionItems(scope),
+    pageChangeItems(scope),
   ]);
 
   // Being addressed in a thread you are already in is one event, not two, and
@@ -263,6 +275,8 @@ async function messageMentionItems(scope: Scope): Promise<Draft[]> {
     pageId: null,
     threadId: null,
     decision: null,
+    file: null,
+    changes: null,
   }));
 }
 
@@ -310,6 +324,8 @@ async function commentMentionItems(scope: Scope): Promise<Draft[]> {
     pageId: row.pageId,
     threadId: row.parentId ?? row.id,
     decision: null,
+    file: null,
+    changes: null,
   }));
 }
 
@@ -355,6 +371,8 @@ async function discussionMessageItems(scope: Scope): Promise<Draft[]> {
     pageId: null,
     threadId: null,
     decision: null,
+    file: null,
+    changes: null,
   }));
 }
 
@@ -398,6 +416,8 @@ async function discussionResolvedItems(scope: Scope): Promise<Draft[]> {
     pageId: row.decisionPageId,
     threadId: null,
     decision: row.resolvedBy === 'system' ? 'inactive' : row.decisionPageId === null ? 'resolved' : 'decided',
+    file: null,
+    changes: null,
   }));
 }
 
@@ -472,6 +492,8 @@ async function commentItems(scope: Scope): Promise<Draft[]> {
     pageId: row.pageId,
     threadId: row.parentId ?? row.id,
     decision: null,
+    file: null,
+    changes: null,
   }));
 }
 
@@ -527,5 +549,150 @@ async function reviewItems(scope: Scope): Promise<Draft[]> {
     pageId: row.pageId,
     threadId: null,
     decision: row.decision,
+    file: null,
+    changes: null,
+  }));
+}
+
+/**
+ * New versions of files on pages the actor watches, or in spaces they watch —
+ * by somebody else. A version that restored an older one is news like any
+ * other: what a download gets has changed.
+ */
+async function fileVersionItems(scope: Scope): Promise<Draft[]> {
+  const { actor } = scope;
+  const watched = sql`exists (
+    select 1 from watches w
+    where w.workspace_id = ${pageFileVersions.workspaceId}
+      and w.actor_type = ${actor.type}
+      and w.actor_id = ${actor.id}
+      and (w.page_id = ${pages.id} or w.space_id = ${pages.spaceId})
+      and w.created_at < ${pageFileVersions.createdAt}
+  )`;
+
+  const rows = await getDatabase()
+    .select({
+      id: pageFileVersions.id,
+      at: pageFileVersions.createdAt,
+      authorType: pageFileVersions.createdByType,
+      authorLabel: pageFileVersions.createdByLabel,
+      note: pageFileVersions.note,
+      version: pageFileVersions.version,
+      fileId: pageFiles.id,
+      fileName: pageFiles.name,
+      pageId: pages.id,
+      title: pages.title,
+      spaceId: spaces.id,
+      spaceKey: spaces.key,
+    })
+    .from(pageFileVersions)
+    .innerJoin(pageFiles, eq(pageFiles.id, pageFileVersions.fileId))
+    .innerJoin(pages, eq(pages.id, pageFiles.pageId))
+    .innerJoin(spaces, eq(spaces.id, pages.spaceId))
+    .where(
+      and(
+        eq(pageFileVersions.workspaceId, scope.workspaceId),
+        gt(pageFileVersions.createdAt, scope.since),
+        isNull(pages.deletedAt),
+        inSpaces(spaces.id, scope),
+        or(ne(pageFileVersions.createdByType, actor.type), ne(pageFileVersions.createdById, actor.id)),
+        watched,
+      ),
+    )
+    .orderBy(desc(pageFileVersions.createdAt))
+    .limit(scope.limit);
+
+  return rows.map((row) => ({
+    kind: 'file.version',
+    id: row.id,
+    at: row.at,
+    space: { id: row.spaceId, key: row.spaceKey },
+    by: { type: row.authorType, label: row.authorLabel },
+    title: row.title,
+    excerpt: excerptOf(row.note),
+    discussionId: null,
+    pageId: row.pageId,
+    threadId: null,
+    decision: null,
+    file: { id: row.fileId, name: row.fileName, version: row.version },
+    changes: null,
+  }));
+}
+
+/**
+ * Changes to pages the actor watches — the page itself, not a whole space:
+ * watching a space is for its files, and every edit in a space an agent works
+ * in would bury everything else. However many versions somebody else wrote,
+ * a page is one item, carrying the latest of them and how many there were
+ * since the window opened, so twenty writes by an agent in a morning are one
+ * line to read.
+ */
+async function pageChangeItems(scope: Scope): Promise<Draft[]> {
+  const { actor } = scope;
+  const visible =
+    scope.spaceIds === null
+      ? sql`true`
+      : scope.spaceIds.length === 0
+        ? sql`false`
+        : sql`p.space_id in (${sql.join(scope.spaceIds.map((id) => sql`${id}`), sql`, `)})`;
+
+  const rows = await getDatabase().execute<{
+    id: string;
+    page_id: string;
+    version: number;
+    at: Date | string;
+    author_type: 'user' | 'agent';
+    label: string | null;
+    title: string;
+    space_id: string;
+    space_key: string;
+    changes: number | string;
+  }>(sql`
+    select * from (
+      select distinct on (r.page_id)
+        r.id, r.page_id, r.version, r.created_at as at, r.author_type,
+        coalesce(u.name, t.name) as label,
+        p.title, s.id as space_id, s.key as space_key,
+        count(*) over (partition by r.page_id) as changes
+      from page_revisions r
+      join pages p on p.id = r.page_id
+      join spaces s on s.id = p.space_id
+      left join "user" u on r.author_type = 'user' and u.id = r.author_id
+      left join agent_tokens t on r.author_type = 'agent' and t.id::text = r.author_id
+      where p.workspace_id = ${scope.workspaceId}
+        and p.deleted_at is null
+        and r.created_at > ${scope.since.toISOString()}::timestamptz
+        and not (r.author_type = ${actor.type} and r.author_id = ${actor.id})
+        and ${visible}
+        and exists (
+          select 1 from watches w
+          where w.workspace_id = p.workspace_id
+            and w.actor_type = ${actor.type}
+            and w.actor_id = ${actor.id}
+            and w.page_id = p.id
+            -- Only what happened after the watch began: watching is not a
+            -- request for the page's history.
+            and w.created_at < r.created_at
+        )
+      order by r.page_id, r.created_at desc, r.version desc
+    ) latest
+    order by at desc
+    limit ${scope.limit}
+  `);
+
+  return rows.map((row) => ({
+    kind: 'page.updated',
+    id: row.id,
+    at: row.at instanceof Date ? row.at : new Date(row.at),
+    space: { id: row.space_id, key: row.space_key },
+    by: { type: row.author_type, label: row.label ?? (row.author_type === 'agent' ? 'an agent' : 'someone') },
+    title: row.title,
+    excerpt: null,
+    discussionId: null,
+    pageId: row.page_id,
+    threadId: null,
+    decision: null,
+    file: null,
+    changes: { count: Number(row.changes), version: row.version },
   }));
 }

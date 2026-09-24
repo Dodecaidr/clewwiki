@@ -105,3 +105,25 @@ export function checkImageUploadMutation(request: RequestLike, baseUrl: string):
   }
   return { ok: true };
 }
+
+/**
+ * The check for a file upload, whose body is the file and may be of any type.
+ *
+ * Nothing about the content type can carry this check, so the method does: an
+ * upload is a `PUT`, which no HTML form can send and a cross-origin `fetch`
+ * cannot send without a preflight this application never answers. On top of
+ * that, as for every other upload, a matching `Origin` is required outright.
+ */
+export function checkFileUploadMutation(request: RequestLike, baseUrl: string): CsrfDecision {
+  if (SAFE_METHODS.has(request.method.toUpperCase())) return { ok: true };
+
+  const expected = originOf(baseUrl);
+  const origin = request.headers.get('origin');
+  if (origin === null || expected === null || origin !== expected) {
+    return { ok: false, message: 'Cross-origin request refused for a cookie-authenticated upload' };
+  }
+  if (request.method.toUpperCase() !== 'PUT') {
+    return { ok: false, message: 'A file is uploaded with PUT' };
+  }
+  return { ok: true };
+}

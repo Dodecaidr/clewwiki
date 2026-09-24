@@ -73,7 +73,12 @@ export default async function InboxPage() {
                   `kind_${item.kind.replace('.', '_')}${
                     item.kind === 'discussion.resolved' || item.kind === 'review.decided' ? `_${item.decision}` : ''
                   }`,
-                  { who: item.by?.label ?? '' },
+                  {
+                    who: item.by?.label ?? '',
+                    file: item.file?.name ?? '',
+                    version: item.file?.version ?? item.changes?.version ?? 0,
+                    count: item.changes?.count ?? 0,
+                  },
                 )}
                 {item.by?.type === 'agent' ? ` · ${t('agent')}` : ''}
               </span>

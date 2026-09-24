@@ -10,7 +10,7 @@
 import { directoryOf, extensionOf, resolvePath } from './doctree';
 import { IMPORTABLE_IMAGE_EXTENSIONS } from './images';
 import type { ImportAsset } from './images';
-import type { ZipFile } from './zip';
+import type { DeferredZipFile, ZipFile } from './zip';
 
 export interface ImageCollector {
   /** A resolver for the images of the document stored at `entryName`. */
@@ -43,6 +43,55 @@ export function createImageCollector(entries: readonly ZipFile[]): ImageCollecto
     assets: () => [...used.values()],
     get used() {
       return used.size;
+    },
+  };
+}
+
+/**
+ * The same for files that are neither documents nor images: whatever a
+ * document links to that is in the archive and is not itself a page. They were
+ * not read with the rest of the archive; one is read when a document first
+ * links to it, and only while it fits in `budget` — the part of the import's
+ * expanded-size limit the documents and images left. A file past it stays a
+ * link, which the page's warnings say.
+ */
+export interface FileCollector extends ImageCollector {
+  /** Files a document linked to that did not fit in the budget. */
+  readonly overBudget: string[];
+}
+
+export function createFileCollector(deferred: readonly DeferredZipFile[], budget: number): FileCollector {
+  const files = new Map<string, DeferredZipFile>();
+  for (const entry of deferred) files.set(entry.name, entry);
+  const used = new Map<string, ImportAsset>();
+  const overBudget = new Set<string>();
+  let left = budget;
+
+  return {
+    resolverFor(entryName) {
+      const from = directoryOf(entryName);
+      return (relativePath) => {
+        const resolved = resolvePath(from, relativePath);
+        if (resolved === null) return null;
+        if (used.has(resolved)) return resolved;
+        const entry = files.get(resolved);
+        if (entry === undefined) return null;
+        if (entry.size > left) {
+          overBudget.add(resolved);
+          return null;
+        }
+        const data = entry.read();
+        left -= data.byteLength;
+        used.set(resolved, { key: resolved, data });
+        return resolved;
+      };
+    },
+    assets: () => [...used.values()],
+    get used() {
+      return used.size;
+    },
+    get overBudget() {
+      return [...overBudget];
     },
   };
 }

@@ -260,3 +260,79 @@ export function getImageUploadRateLimitMax(): number {
 export function getImageUploadRateLimitWindowSeconds(): number {
   return optionalNumber('IMAGE_UPLOAD_RATE_LIMIT_WINDOW', 60);
 }
+
+/**
+ * Where attached files are kept: `local` for a directory on this machine
+ * (`FILES_DIR`), `off` for no attached files at all. Unset is `off`, so an
+ * instance only starts accepting files once somebody has decided where they
+ * go — a directory inside the container that is not a volume would lose every
+ * file on the next image update. The shipped compose file sets `local` and
+ * mounts the volume.
+ */
+export function getFilesDriver(): 'local' | 's3' | 'off' {
+  const raw = process.env.FILES_DRIVER?.trim().toLowerCase();
+  if (raw === undefined || raw === '' || raw === 'off') return 'off';
+  if (raw === 'local' || raw === 's3') return raw;
+  throw new Error('Environment variable FILES_DRIVER must be local, s3 or off');
+}
+
+export interface FilesS3Settings {
+  endpoint: string;
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  forcePathStyle: boolean;
+  prefix: string;
+}
+
+/**
+ * The bucket of `FILES_DRIVER=s3`. Endpoint, bucket and both halves of the key
+ * are required: an instance told to keep files in a bucket it cannot name
+ * refuses to take any, rather than falling back to a directory nobody backs up.
+ */
+export function getFilesS3Settings(): FilesS3Settings {
+  const value = (name: string) => process.env[name]?.trim() ?? '';
+  const settings = {
+    endpoint: value('FILES_S3_ENDPOINT'),
+    bucket: value('FILES_S3_BUCKET'),
+    region: value('FILES_S3_REGION') || 'us-east-1',
+    accessKeyId: value('FILES_S3_ACCESS_KEY_ID'),
+    secretAccessKey: value('FILES_S3_SECRET_ACCESS_KEY'),
+    forcePathStyle: value('FILES_S3_FORCE_PATH_STYLE').toLowerCase() !== 'false',
+    prefix: value('FILES_S3_PREFIX'),
+  };
+  const missing = (['endpoint', 'bucket', 'accessKeyId', 'secretAccessKey'] as const).filter(
+    (key) => settings[key] === '',
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `FILES_DRIVER=s3 needs FILES_S3_ENDPOINT, FILES_S3_BUCKET, FILES_S3_ACCESS_KEY_ID and FILES_S3_SECRET_ACCESS_KEY`,
+    );
+  }
+  return settings;
+}
+
+/** The directory the `local` file store writes under. */
+export function getFilesDir(): string {
+  const configured = process.env.FILES_DIR;
+  return configured && configured.trim() !== '' ? configured : '/data/files';
+}
+
+/**
+ * Largest single file, in megabytes. The upload is streamed to disk as it
+ * arrives and never held in memory, so this is about disk and patience, not
+ * about the size of the container.
+ */
+export function getFilesMaxUploadMb(): number {
+  return optionalNumber('FILES_MAX_UPLOAD_MB', 512);
+}
+
+/**
+ * Most a workspace's files may occupy together, in megabytes, counting each
+ * distinct content once: re-uploading a file, or restoring an old version,
+ * costs nothing.
+ */
+export function getFilesStoreMaxMb(): number {
+  return optionalNumber('FILES_STORE_MAX_MB', 20480);
+}

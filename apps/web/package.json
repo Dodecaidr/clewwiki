@@ -19,6 +19,7 @@
     "@clewwiki/anchors": "workspace:*",
     "@clewwiki/content": "workspace:*",
     "@clewwiki/db": "workspace:*",
+    "@clewwiki/files": "workspace:*",
     "@clewwiki/import": "workspace:*",
     "@clewwiki/mcp-server": "workspace:*",
     "@tiptap/core": "^3.31.3",

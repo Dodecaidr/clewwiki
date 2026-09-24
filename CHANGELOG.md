@@ -9,6 +9,69 @@ tagged.
 
 ## [Unreleased]
 
+Files attached to pages, in versions, with watching. Upgrading runs migration
+`0020_files`. `docker-compose.yml` gains the `files-data` volume and
+`FILES_DRIVER=local`, and `.env.example` the three `FILES_` settings: take both
+over to switch files on. An instance that keeps its older compose file keeps
+running with files off — an unset `FILES_DRIVER` means off — and back up the new
+volume along with the database once it is on.
+
+### Added
+
+- **Files on pages, in versions.** Any type, under **Files** below a page's
+  text. Uploading a name the page already has — in any case — adds its next
+  version behind the same link, which always gives the latest; `?version=N`
+  pins one. The same bytes again add nothing. **Restore** makes an old version
+  the latest by adding it as a new one, so a version never changes once
+  somebody has downloaded it. Served only as a download, visible to whoever can
+  see the page, gone with the page. Uploads are streamed to disk, up to
+  `FILES_MAX_UPLOAD_MB` (512) each and `FILES_STORE_MAX_MB` (20 480) per
+  workspace, each distinct content counted once. Downloads honour a byte range.
+- **Watching.** **Watch** a page and its changes and new file versions by
+  others show up in the inbox — the changes as one `page.updated` item per
+  page, however many there were; watch a space and new file versions on any of
+  its pages do. Only what happens after the watch began. A viewer may watch.
+- **Four MCP tools**, thirty-four in all: `wiki.list_files`, `wiki.get_file`
+  (with the content of a text file up to 256 KB), `wiki.upload_file` (up to
+  7 MB through the tool; larger files over REST with the same token) and
+  `wiki.watch`. `wiki.check_inbox` reports `file.version`.
+- **REST.** `PUT`/`GET /api/v1/pages/{id}/files/{name}`,
+  `GET /api/v1/pages/{id}/files`, `GET`/`DELETE /api/v1/files/{fileId}`,
+  `GET /api/v1/files/{fileId}/content`, `POST /api/v1/files/{fileId}/restore`,
+  and `GET`/`POST`/`DELETE /api/v1/watches`. A build job publishes with one
+  `curl -X PUT --data-binary`.
+- **Confluence attachments come across as files.** With files on, every
+  attachment of a page that is not an image the page shows becomes one of the
+  page's files, with its earlier versions and the date and comment Confluence
+  recorded — and, from a Server or Data Center, the author. An earlier version
+  is carried only when the site serves it as recorded — at the size it records,
+  or on Cloud, which records none, as something other than the current bytes — some answer any old version with the latest bytes,
+  and that is left out with a warning rather than stored as history it is not.
+  The review shows how many files and versions come with the pages; nothing is
+  written to a page until the import is applied. Checked against
+  cwiki.apache.org.
+- **Notion and Markdown archives carry the files their pages link to** — a PDF,
+  a spreadsheet — as those pages' files, with the links pointing at them. An
+  unlinked file in the archive is still never read.
+- **Export a space with its files**: **Export space (.zip) · With files**, or
+  `?files=latest`, puts the latest version of every file beside its page and
+  lists in `_files.json` what is there and what was left out. Streamed, so a
+  large space does not have to fit in memory.
+- **`packages/files`**, the file store as a module of its own: blobs under
+  their SHA-256, streamed and hashed on the way in, in a local directory or in
+  any S3-compatible bucket — `FILES_DRIVER=s3` with the `FILES_S3_*` settings.
+  A large file goes to the bucket as a multipart upload, one part in memory at
+  a time.
+
+### Fixed
+
+- **Imports over 10 MB.** Every request that passed through the per-request
+  proxy had its body buffered and cut at 10 MB without an error, so a Notion or
+  Markdown archive or a PDF over 10 MB — up to 200 MB is allowed — never arrived
+  whole, and the import was refused as an upload that could not be read. The upload routes no longer pass through it, and
+  the container smoke test now sends a 12 MB file through the built
+  application.
+
 ## [0.6.0] - 2026-09-21
 
 Single sign-on, a Confluence of your own to import from, and the rest of what a

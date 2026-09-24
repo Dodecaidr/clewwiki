@@ -25,10 +25,17 @@ export interface ClewwikiClientOptions {
 }
 
 export interface RestRequest {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   path: string;
   query?: Record<string, string | number | undefined>;
   body?: unknown;
+  /** A body sent as it is rather than as JSON: a file upload. */
+  raw?: { bytes: Uint8Array; contentType: string };
+}
+
+export interface RawResponse {
+  bytes: Uint8Array;
+  headers: Headers;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -102,6 +109,44 @@ export class ClewwikiRestClient {
    * the same way.
    */
   async request<T = unknown>(request: RestRequest): Promise<T> {
+    const response = await this.#send(request);
+    const text = await response.text();
+    let parsed: unknown = undefined;
+    if (text.trim() !== '') {
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = undefined;
+      }
+    }
+
+    if (!response.ok) {
+      throw toolErrorFromRest(response.status, parsed);
+    }
+    return parsed as T;
+  }
+
+  /**
+   * Performs one REST call whose answer is bytes rather than JSON — a file
+   * download — and returns them with the headers that describe them. A
+   * refusal is still JSON and becomes the same tool error as anywhere else.
+   */
+  async download(request: Omit<RestRequest, 'method' | 'body' | 'raw'>): Promise<RawResponse> {
+    const response = await this.#send({ ...request, method: 'GET' });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!response.ok) {
+      let parsed: unknown = undefined;
+      try {
+        parsed = JSON.parse(new TextDecoder().decode(bytes));
+      } catch {
+        parsed = undefined;
+      }
+      throw toolErrorFromRest(response.status, parsed);
+    }
+    return { bytes, headers: response.headers };
+  }
+
+  async #send(request: RestRequest): Promise<Response> {
     const url = new URL(`${this.#baseUrl}/api/v1${request.path}`);
     for (const [key, value] of Object.entries(request.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
@@ -113,7 +158,11 @@ export class ClewwikiRestClient {
       'user-agent': USER_AGENT,
     };
     const init: RequestInit = { method: request.method, headers };
-    if (request.body !== undefined) {
+    if (request.raw !== undefined) {
+      headers['content-type'] = request.raw.contentType;
+      // A copy typed onto a plain ArrayBuffer, which is what `fetch` accepts.
+      init.body = new Uint8Array(request.raw.bytes);
+    } else if (request.body !== undefined) {
       headers['content-type'] = 'application/json';
       init.body = JSON.stringify(request.body);
     }
@@ -135,19 +184,6 @@ export class ClewwikiRestClient {
       });
     }
 
-    const text = await response.text();
-    let parsed: unknown = undefined;
-    if (text.trim() !== '') {
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = undefined;
-      }
-    }
-
-    if (!response.ok) {
-      throw toolErrorFromRest(response.status, parsed);
-    }
-    return parsed as T;
+    return response;
   }
 }

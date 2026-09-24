@@ -942,6 +942,91 @@ ordinary form fields, not shared: whoever saves the form sets them.
 **Next, if it is wanted**: carrying updates between processes with
 `LISTEN`/`NOTIFY`; shared form fields; following another person's cursor.
 
+## Files — **built**
+
+A page can carry files of any type, kept in versions, and people and agents can
+watch a page or a space for new ones. What it is for: a release is a page, its
+builds and specifications are that page's files, and the link in the release
+notes keeps working through every rebuild.
+
+- **A file is a name on a page** (`page_files`); its content is its versions
+  (`page_file_versions`), which are only ever added. Uploading a name the page
+  already has, in any case, is the next version; the same bytes again add
+  nothing, so a publishing script can retry. Going back is a new version with
+  the old bytes (`restored_from`) — version 3 never changes once somebody has it.
+- **The bytes are content-addressed.** One blob per distinct content in a
+  workspace (`file_blobs`), under `<workspace>/<sha256>` in the file store. The
+  quota counts each blob once. A blob nothing refers to is removed by an hourly
+  sweep after an hour's grace, under its row's lock, so a concurrent upload of
+  the same bytes either keeps it or writes it again.
+- **The store is a module.** `packages/files` knows blobs and keys and nothing
+  about pages or permissions; the application picks the store with
+  `FILES_DRIVER`. `local` is a directory on a volume of its own (`files-data`),
+  `s3` a bucket;
+  unset is `off`, so an instance takes files only once somebody decided where
+  they go. An upload is streamed to a staging area and hashed on the way,
+  never held in memory.
+- **Visible as its page is**, like an image, and served only as a download.
+- **Watching** (`watches`) makes a new version by somebody else an inbox item,
+  `file.version` — the inbox stays a query, read under the watcher's
+  visibility at the time.
+- REST: `PUT`/`GET /api/v1/pages/{id}/files/{name}` (the stable address),
+  `GET /api/v1/pages/{id}/files`, `GET`/`DELETE /api/v1/files/{fileId}`,
+  `…/content`, `…/restore`, and `/api/v1/watches`. MCP: `wiki.list_files`,
+  `wiki.get_file`, `wiki.upload_file`, `wiki.watch` — thirty-four tools.
+  Migration `0020_files`.
+
+Building it found a bug that shipped in 0.6.0: every request that passes
+through `proxy.ts` has its body buffered and cut at 10 MB without an error, so
+an import over 10 MB never arrived whole. Both upload routes are now outside
+the proxy's matcher, and the smoke test sends a 12 MB file through the built
+application to keep it that way.
+
+**Deliberately not built**: e-mail or any push — a watch feeds the inbox, as
+everything else does; folders, a file browser across pages, WebDAV or sync;
+rendering a file in the page. **Next, if it is wanted**: a per-token webhook
+for new versions.
+
+**An S3-compatible store** sits behind the same interface: `FILES_DRIVER=s3`
+and the `FILES_S3_*` settings. Uploads are still staged and hashed on the local
+disk; committing sends the file in one request up to 16 MB and as a multipart
+upload past it, a part at a time. Requests are signed with SigV4 by
+`aws4fetch` rather than the AWS SDK. Downloads still go through the application,
+which is what applies visibility and the download headers. Tested against a
+Garage bucket (`FILES_S3_TEST_*`; the suite skips without one).
+
+**The Confluence importer carries attachments.** With files on, every
+attachment of a page that is not an image the page shows becomes one of that
+page's files: on a Server or Data Center with its earlier versions, read from
+`/rest/experimental/content/{id}/version` and each version's own
+`status=historical` entry, each with the author, date and comment recorded
+there; on Cloud at its current version. Credentials are used for one run, so
+the bytes are downloaded while the import is read: streamed through the
+import's transport into the file store, held by `import_file_versions` until
+the import is applied, and let go to the sweep if it is cancelled. An earlier
+version whose download differs in size from Confluence's record of it is
+refused — checked against cwiki.apache.org, which answers every `?version=`
+with the latest bytes — and so is nothing else: the current version is what
+the site serves. Cloud's history comes through API v2, which records no size
+per version, so an earlier version there is held instead to not being the
+current version's bytes — the current version is read first for that.
+
+**Archives carry linked files.** A Notion export or a Markdown folder brings
+the files its documents link to — PDFs, spreadsheets — as the linking page's
+files, and the links are rewritten to them when the import is applied. They are
+read only when linked and only while they fit what is left of the expanded-size
+limit, so an unlinked video in an archive still costs nothing.
+
+**Export with files.** `?files=latest` streams the space's archive with the
+latest version of every file beside its page and a `_files.json` of what is in
+it and what is not; `createZipStream` writes stored entries with data
+descriptors and stops short of the 4 GiB the classic format holds.
+
+**Watching a page reports its changes**, as one `page.updated` inbox item per
+page however many versions there were; a space watch stays files-only, since
+every edit in a space agents work in would bury the rest. Both kinds report
+only what happened after the watch began.
+
 ## Phase 7 — Launch
 
 Public launch of the repository.

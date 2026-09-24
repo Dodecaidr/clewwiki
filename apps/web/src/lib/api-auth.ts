@@ -9,7 +9,7 @@ import { lookupAgentToken, touchAgentToken } from './agent-tokens';
 import { auth } from './auth';
 import { recordAudit } from './audit';
 import { getAuditSampler } from './audit-sampler';
-import { checkImageUploadMutation, checkSessionMutation } from './csrf';
+import { checkFileUploadMutation, checkImageUploadMutation, checkSessionMutation } from './csrf';
 import { visibleSpaceIdsForUser } from './spaces/visibility';
 import { getAgentRateLimitMax, getAgentRateLimitWindowSeconds, getAuthBaseUrl } from './env';
 import { TokenBucketRateLimiter } from './rate-limit';
@@ -92,9 +92,10 @@ const UNAUTHORIZED_HEADERS = { 'WWW-Authenticate': 'Bearer realm="clewwiki"' } a
 export interface AuthenticateOptions {
   /**
    * What a cookie-authenticated mutation's body is. Everything is JSON except
-   * the image upload, whose body is the image; it has a check of its own.
+   * the image upload, whose body is the image, and the file upload, whose body
+   * is the file; each has a check of its own.
    */
-  body?: 'json' | 'image';
+  body?: 'json' | 'image' | 'file';
 }
 
 export async function authenticateRequest(
@@ -114,7 +115,9 @@ async function authenticateSession(request: Request, options: AuthenticateOption
   const csrf =
     options.body === 'image'
       ? checkImageUploadMutation(request, getAuthBaseUrl())
-      : checkSessionMutation(request, getAuthBaseUrl());
+      : options.body === 'file'
+        ? checkFileUploadMutation(request, getAuthBaseUrl())
+        : checkSessionMutation(request, getAuthBaseUrl());
   if (!csrf.ok) {
     return { ok: false, response: errorResponse(403, 'forbidden', csrf.message) };
   }

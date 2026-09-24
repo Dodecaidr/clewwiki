@@ -23,6 +23,7 @@ const nextConfig: NextConfig = {
     '@clewwiki/db',
     '@clewwiki/anchors',
     '@clewwiki/content',
+    '@clewwiki/files',
     '@clewwiki/import',
     '@clewwiki/mcp-server',
   ],

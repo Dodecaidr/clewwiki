@@ -39,9 +39,14 @@ export function proxy(request: NextRequest): NextResponse {
 export const config = {
   matcher: [
     // Everything except build assets and the Next image optimizer, which carry
-    // no HTML and are served with their own immutable caching headers.
+    // no HTML and are served with their own immutable caching headers — and
+    // the two endpoints that take large uploads. A request that passes through
+    // here has its body buffered in memory, and cut at 10 MB without an error,
+    // so that both this function and the handler could read it. An import or a
+    // file is read by its handler alone, as a stream, and answers with headers
+    // of its own.
     {
-      source: '/((?!_next/static|_next/image|favicon.ico).*)',
+      source: '/((?!_next/static|_next/image|favicon.ico|api/v1/pages/[^/]+/files/|api/v1/spaces/[^/]+/imports$).*)',
       missing: [
         { type: 'header', key: 'next-router-prefetch' },
         { type: 'header', key: 'purpose', value: 'prefetch' },

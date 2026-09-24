@@ -78,6 +78,22 @@ services:
       # Images uploaded into pages live in the database. 0 switches uploads off.
       IMAGE_MAX_UPLOAD_MB: ${IMAGE_MAX_UPLOAD_MB:-5}
       IMAGE_STORE_MAX_MB: ${IMAGE_STORE_MAX_MB:-2048}
+      # Files attached to pages, kept in versions, on the files-data volume
+      # below. `off` switches attaching files off. Back the volume up together
+      # with the database: the database says which file is which, the volume
+      # holds the bytes.
+      FILES_DRIVER: ${FILES_DRIVER:-local}
+      FILES_MAX_UPLOAD_MB: ${FILES_MAX_UPLOAD_MB:-512}
+      FILES_STORE_MAX_MB: ${FILES_STORE_MAX_MB:-20480}
+      # With FILES_DRIVER=s3 the bytes go to a bucket instead; the volume then
+      # only stages uploads while they are read. docs/deploy.md has the details.
+      FILES_S3_ENDPOINT: ${FILES_S3_ENDPOINT:-}
+      FILES_S3_BUCKET: ${FILES_S3_BUCKET:-}
+      FILES_S3_REGION: ${FILES_S3_REGION:-}
+      FILES_S3_ACCESS_KEY_ID: ${FILES_S3_ACCESS_KEY_ID:-}
+      FILES_S3_SECRET_ACCESS_KEY: ${FILES_S3_SECRET_ACCESS_KEY:-}
+      FILES_S3_FORCE_PATH_STYLE: ${FILES_S3_FORCE_PATH_STYLE:-true}
+      FILES_S3_PREFIX: ${FILES_S3_PREFIX:-}
       MCP_HTTP_ENABLED: ${MCP_HTTP_ENABLED:-false}
       MCP_HTTP_ALLOWED_ORIGINS: ${MCP_HTTP_ALLOWED_ORIGINS:-}
       # First-run setup requires a one-time token. Leave it empty and the app
@@ -98,6 +114,8 @@ services:
       # Read-only mirrors of the repositories anchors are checked against. On a
       # named volume so a restart does not re-clone every workspace's history.
       - repos-data:/data/repos
+      # The bytes of attached files, stored once per distinct content.
+      - files-data:/data/files
     ports:
       # Published on the loopback interface only, by default: 127.0.0.1:3000.
       # A reverse proxy on the same host (Caddy, nginx) reaches it there, and
@@ -116,3 +134,4 @@ services:
 volumes:
   postgres-data:
   repos-data:
+  files-data:

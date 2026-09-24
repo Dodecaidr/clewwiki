@@ -30,11 +30,21 @@ What converts: the page hierarchy; headings, lists, tables, task lists,
 blockquotes; the `code` macro with its language; `info`, `note`, `tip`,
 `warning` and `panel` as callouts; `expand`; links between imported pages,
 rewritten to the new pages; PNG, JPEG, GIF and WebP images attached to a page
-and shown on it.
+and shown on it; and, when the instance takes files, every other attachment of
+a page, which becomes one of that page's [files](guide.md#files) with its
+earlier versions, each with the date and comment Confluence recorded — and on
+a Server or Data Center the author's name.
 
 What does not: comments, labels, restrictions and page history are not read.
-Attachments other than those images stay as links to your Confluence site, with
-a warning, and work only while that site does. A macro with no Markdown
+An earlier version is carried only when the site serves it as recorded: some sites answer
+a request for any old version with the latest bytes, and a download whose size
+differs from Confluence's record of that version is left out with a warning
+rather than stored as history it is not. Cloud records no size per version, so
+there an earlier version is held to not being the current file's bytes. An attachment larger than the
+instance takes (`FILES_MAX_UPLOAD_MB`), or one that would not fit the
+workspace's store, is left out with a warning too. With files switched off,
+attachments other than images stay as links to your Confluence site, with a
+warning, and work only while that site does. A macro with no Markdown
 equivalent — Jira lists, page trees, includes, charts — becomes a visible note
 that names it, never a silent omission. [The guide](guide.md#import) has the
 full table and the limits.

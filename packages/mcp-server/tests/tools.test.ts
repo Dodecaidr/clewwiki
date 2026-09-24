@@ -27,7 +27,7 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the thirty tools docs/mcp.md names', () => {
+  it('registers exactly the thirty-four tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
       'wiki.list_spaces',
       'wiki.format_guide',
@@ -59,8 +59,12 @@ describe('tool surface', () => {
       'wiki.mark_inbox_read',
       'wiki.check_anchors',
       'wiki.link_docs',
+      'wiki.list_files',
+      'wiki.get_file',
+      'wiki.upload_file',
+      'wiki.watch',
     ]);
-    expect(TOOLS).toHaveLength(30);
+    expect(TOOLS).toHaveLength(34);
   });
 
   it('names every tool whose result carries text written by others', () => {
@@ -85,6 +89,8 @@ describe('tool surface', () => {
         'wiki.list_comments',
         'wiki.check_inbox',
         'wiki.check_anchors',
+        'wiki.list_files',
+        'wiki.get_file',
       ].sort(),
     );
   });
@@ -125,6 +131,8 @@ describe('tool surface', () => {
       'wiki.diff_page',
       'wiki.list_comments',
       'wiki.check_inbox',
+      'wiki.list_files',
+      'wiki.get_file',
     ]);
   });
 
@@ -894,5 +902,117 @@ describe('client configuration', () => {
     });
     await tool('wiki.get_presence').run(client, {});
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://wiki.example.com/api/v1/claims');
+  });
+});
+
+describe('files', () => {
+  const FILE_ID = '11111111-1111-4111-8111-111111111111';
+  const PAGE_ID = '22222222-2222-4222-8222-222222222222';
+
+  function fileResource(contentType: string, bytes: number) {
+    const version = { version: 2, bytes, content_type: contentType, url: `/api/v1/files/${FILE_ID}/content?version=2` };
+    return {
+      file_id: FILE_ID,
+      page_id: PAGE_ID,
+      name: 'Release-Notes.md',
+      latest_version: 2,
+      latest: version,
+      versions: [version, { ...version, version: 1 }],
+    };
+  }
+
+  it('uploads text as the request body, with the note in the query', async () => {
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: unknown, init: RequestInit) => {
+      seen.push({ url: String(input), init });
+      return jsonResponse(201, { file_id: FILE_ID, latest_version: 1 });
+    }) as unknown as FetchLike;
+
+    await tool('wiki.upload_file').run(clientWith(fetchMock), {
+      page_id: PAGE_ID,
+      name: 'notes v2.md',
+      content: 'Привет',
+      note: 'Первый черновик',
+    });
+    expect(seen[0]!.url).toBe(
+      `https://wiki.example.com/api/v1/pages/${PAGE_ID}/files/notes%20v2.md?note=${encodeURIComponent('Первый черновик').replace(/%20/g, '+')}`,
+    );
+    expect(seen[0]!.init.method).toBe('PUT');
+    expect((seen[0]!.init.headers as Record<string, string>)['content-type']).toBe('text/plain; charset=utf-8');
+    expect(new TextDecoder().decode(seen[0]!.init.body as Uint8Array)).toBe('Привет');
+  });
+
+  it('decodes base64, and refuses anything but exactly one kind of content', async () => {
+    const bodies: Uint8Array[] = [];
+    const fetchMock = vi.fn(async (_input: unknown, init: RequestInit) => {
+      bodies.push(init.body as Uint8Array);
+      return jsonResponse(201, {});
+    }) as unknown as FetchLike;
+    const client = clientWith(fetchMock);
+
+    await tool('wiki.upload_file').run(client, { page_id: PAGE_ID, name: 'a.bin', content_base64: 'AAEC/w==' });
+    expect([...bodies[0]!]).toEqual([0, 1, 2, 255]);
+
+    await expect(tool('wiki.upload_file').run(client, { page_id: PAGE_ID, name: 'a.bin' })).rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(
+      tool('wiki.upload_file').run(client, { page_id: PAGE_ID, name: 'a.bin', content: 'x', content_base64: 'eA==' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(tool('wiki.upload_file').run(client, { page_id: PAGE_ID, name: 'a.bin', content_base64: 'not base64!' })).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+    // URL parsing would fold `..` away before the server could refuse the name.
+    await expect(tool('wiki.upload_file').run(client, { page_id: PAGE_ID, name: '..', content: 'x' })).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+    // Past 7 MB the message would not fit what the HTTP endpoint reads, once base64.
+    await expect(
+      tool('wiki.upload_file').run(client, { page_id: PAGE_ID, name: 'big.txt', content: 'x'.repeat(7 * 1024 * 1024 + 1) }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a small text file by page and name, without regard to case', async () => {
+    const seen: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.endsWith(`/pages/${PAGE_ID}/files`)) return jsonResponse(200, { files: [fileResource('text/markdown', 12)] });
+      if (url.endsWith(`/files/${FILE_ID}`)) return jsonResponse(200, fileResource('text/markdown', 12));
+      return new Response('# Release 2\n', { status: 200, headers: { 'content-type': 'text/markdown' } });
+    }) as unknown as FetchLike;
+
+    const result = await tool('wiki.get_file').run(clientWith(fetchMock), { page_id: PAGE_ID, name: 'release-notes.MD', version: 1 });
+    expect(result).toMatchObject({ content: '# Release 2\n', content_version: 1, content_omitted: null });
+    expect(seen[2]).toBe(`https://wiki.example.com/api/v1/files/${FILE_ID}/content?version=1`);
+  });
+
+  it('describes a binary or large file instead of returning it', async () => {
+    const answer = (contentType: string, bytes: number) =>
+      vi.fn(async () => jsonResponse(200, fileResource(contentType, bytes))) as unknown as FetchLike;
+
+    const binary = await tool('wiki.get_file').run(clientWith(answer('application/zip', 10)), { file_id: FILE_ID });
+    expect(binary).toMatchObject({ content: null, content_omitted: 'binary' });
+    const large = await tool('wiki.get_file').run(clientWith(answer('text/plain', 300 * 1024)), { file_id: FILE_ID });
+    expect(large).toMatchObject({ content: null, content_omitted: 'too_large' });
+    await expect(tool('wiki.get_file').run(clientWith(answer('text/plain', 1)), { file_id: FILE_ID, version: 9 })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('watches a page or a space, and stops', async () => {
+    const seen: Array<{ method: string; body: string }> = [];
+    const fetchMock = vi.fn(async (_input: unknown, init: RequestInit) => {
+      seen.push({ method: String(init.method), body: String(init.body) });
+      return jsonResponse(200, {});
+    }) as unknown as FetchLike;
+    const client = clientWith(fetchMock);
+
+    await tool('wiki.watch').run(client, { space: 'rel' });
+    await tool('wiki.watch').run(client, { page_id: PAGE_ID, stop: true });
+    expect(seen).toEqual([
+      { method: 'POST', body: JSON.stringify({ space: 'rel' }) },
+      { method: 'DELETE', body: JSON.stringify({ page_id: PAGE_ID }) },
+    ]);
+    await expect(tool('wiki.watch').run(client, {})).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 });

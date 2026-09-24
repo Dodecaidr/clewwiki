@@ -125,6 +125,8 @@ export interface ConfluenceClientOptions {
   maxResponseBytes?: number;
   /** Largest image downloaded, in bytes. */
   maxImageBytes?: number;
+  /** Largest attachment downloaded as a file, in bytes. */
+  maxFileBytes?: number;
   /**
    * Host names the operator of this instance has opened on a private network.
    * Empty by default, which keeps every import to public addresses.
@@ -134,6 +136,25 @@ export interface ConfluenceClientOptions {
 
 /** A downloaded image, or the reason there is none — never an exception. */
 export type AttachmentDownload = { data: Uint8Array } | { failed: string };
+
+/** An attachment opened for streaming, or the reason it could not be. */
+export type AttachmentStream = { body: ReadableStream<Uint8Array> } | { failed: string };
+
+/** One version of a file attached to a page, as the site describes it. */
+export interface ConfluenceAttachment {
+  id: string;
+  title: string;
+  mediaType: string | null;
+  /** What the site says the version weighs; the download is held to it. */
+  fileSize: number | null;
+  version: number;
+  comment: string | null;
+  createdAt: Date | null;
+  /** A display name, when the site gives one (API v1 does, v2 gives only an id). */
+  author: string | null;
+  /** Path of the download under the site root, already checked to be one. */
+  downloadPath: string;
+}
 
 const DEFAULT_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 60_000;
@@ -145,6 +166,9 @@ const MAX_RETRY_DELAY_MS = 60_000;
  */
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_MAX_FILE_BYTES = 512 * 1024 * 1024;
+/** Versions of one attachment read from its history. More is an archive, not a file. */
+const MAX_HISTORY_VERSIONS = 50;
 
 /**
  * The origin's own redirect, then the media host's, then one to spare. A chain
@@ -204,6 +228,7 @@ export class ConfluenceClient {
   private readonly maxResponseBytes: number;
   private readonly maxImageBytes: number;
   private readonly imageFetch: typeof fetch;
+  private readonly fileFetch: typeof fetch;
   private hostChecked = false;
 
   constructor(credentials: ConfluenceCredentials, options: ConfluenceClientOptions = {}) {
@@ -232,6 +257,15 @@ export class ConfluenceClient {
     this.imageFetch =
       options.fetchImpl ??
       createGuardedFetch({ maxResponseBytes: this.maxImageBytes, privateHosts: this.privateHosts });
+    // And one for files, which hands the body over as a stream: an attachment
+    // is written to the file store as it arrives, never held.
+    this.fileFetch =
+      options.fetchImpl ??
+      createGuardedFetch({
+        maxResponseBytes: options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES,
+        privateHosts: this.privateHosts,
+        streamBody: true,
+      });
   }
 
   /** What may be written down about this connection: an origin, never a secret. */
@@ -302,54 +336,95 @@ export class ConfluenceClient {
    */
   async downloadAttachment(pageId: string, filename: string): Promise<AttachmentDownload> {
     try {
-      if (!this.hostChecked) {
-        await assertPublicHost(new URL(this.origin).hostname, this.lookup, this.privateHosts);
-        this.hostChecked = true;
-      }
-      let target = new URL(
+      const target = new URL(
         this.url(`/download/attachments/${encodeURIComponent(pageId)}/${encodeURIComponent(filename)}`),
       );
-
-      for (let hop = 0, attempt = 0; hop <= MAX_DOWNLOAD_HOPS; ) {
-        const sameOrigin = target.origin === this.origin;
-        if (!sameOrigin) await assertPublicHost(target.hostname, this.lookup, this.privateHosts);
-
-        const response = await this.imageFetch(target, {
-          headers: sameOrigin ? this.headers() : {},
-          redirect: 'manual',
-        });
-
-        if (response.status >= 300 && response.status < 400) {
-          const location = response.headers.get('location');
-          if (location === null || location === '') return { failed: 'a redirect that leads nowhere' };
-          let next: URL;
-          try {
-            next = new URL(location, target);
-          } catch {
-            return { failed: 'a redirect that leads nowhere' };
-          }
-          if (next.protocol !== 'https:') return { failed: 'a redirect away from https' };
-          target = next;
-          hop += 1;
-          continue;
-        }
-        if (response.type === 'opaqueredirect') return { failed: 'a redirect that could not be read' };
-
-        if ((response.status === 429 || response.status === 503) && attempt < this.maxRetries) {
-          await this.sleep(retryAfterMs(response.headers.get('retry-after'), this.retryDelayMs, attempt));
-          attempt += 1;
-          continue;
-        }
-        if (!response.ok) return { failed: `Confluence answered ${response.status}` };
-
-        return { data: await this.readBytes(response, this.maxImageBytes) };
-      }
-      return { failed: 'too many redirects' };
+      const response = await this.followDownload(target, this.imageFetch);
+      if ('failed' in response) return response;
+      return { data: await this.readBytes(response.response, this.maxImageBytes) };
     } catch (error) {
       // An `ImportError` message is written to be shown. Anything else could
       // carry an address or a path, and is not.
       return { failed: error instanceof ImportError ? error.message : 'the download failed' };
     }
+  }
+
+  /**
+   * One version of an attachment, opened as a stream, under the same rules as
+   * an image download: every hop `https` to an allowed address, and the
+   * credential to the typed origin only. The body is capped by the transport,
+   * so the stream errors rather than grows past the largest file this
+   * instance takes.
+   */
+  async openAttachment(attachment: ConfluenceAttachment): Promise<AttachmentStream> {
+    try {
+      const response = await this.followDownload(new URL(this.url(attachment.downloadPath)), this.fileFetch);
+      if ('failed' in response) return response;
+      if (response.response.body === null) return { failed: 'Confluence answered with nothing' };
+      return { body: response.response.body };
+    } catch (error) {
+      return { failed: error instanceof ImportError ? error.message : 'the download failed' };
+    }
+  }
+
+  /**
+   * Follows a download to its bytes. Confluence Cloud answers a download with
+   * a redirect to its media host, carrying a short-lived signed address. So
+   * redirects are followed here, and only here, under three rules: every hop is
+   * `https`; every host but the origin is checked to be allowed before it is
+   * dialled (and again by the transport, inside the socket's own lookup); and
+   * the `Authorization` header is sent to the origin that was typed and to
+   * nothing else. A server that redirects this client somewhere gets a request
+   * there, but never a credential.
+   */
+  private async followDownload(
+    start: URL,
+    fetchImpl: typeof fetch,
+  ): Promise<{ response: Response } | { failed: string }> {
+    if (!this.hostChecked) {
+      await assertPublicHost(new URL(this.origin).hostname, this.lookup, this.privateHosts);
+      this.hostChecked = true;
+    }
+    let target = start;
+    for (let hop = 0, attempt = 0; hop <= MAX_DOWNLOAD_HOPS; ) {
+      const sameOrigin = target.origin === this.origin;
+      if (!sameOrigin) await assertPublicHost(target.hostname, this.lookup, this.privateHosts);
+
+      const response = await fetchImpl(target, {
+        headers: sameOrigin ? this.headers() : {},
+        redirect: 'manual',
+      });
+
+      if (response.status >= 300 && response.status < 400) {
+        await response.body?.cancel().catch(() => undefined);
+        const location = response.headers.get('location');
+        if (location === null || location === '') return { failed: 'a redirect that leads nowhere' };
+        let next: URL;
+        try {
+          next = new URL(location, target);
+        } catch {
+          return { failed: 'a redirect that leads nowhere' };
+        }
+        if (next.protocol !== 'https:') return { failed: 'a redirect away from https' };
+        target = next;
+        hop += 1;
+        continue;
+      }
+      if (response.type === 'opaqueredirect') return { failed: 'a redirect that could not be read' };
+
+      if ((response.status === 429 || response.status === 503) && attempt < this.maxRetries) {
+        await response.body?.cancel().catch(() => undefined);
+        await this.sleep(retryAfterMs(response.headers.get('retry-after'), this.retryDelayMs, attempt));
+        attempt += 1;
+        continue;
+      }
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        return { failed: `Confluence answered ${response.status}` };
+      }
+      return { response };
+    }
+    return { failed: 'too many redirects' };
   }
 
   private async request(path: string): Promise<unknown> {
@@ -460,6 +535,148 @@ export class ConfluenceClient {
   }
 
   /**
+   * The files attached to a page, each at its current version.
+   *
+   * A listing is read the way pages are: over v2 by following the cursor the
+   * site gives, reduced to a path on the same origin; over v1 by counting. An
+   * entry whose download link is not a download path on this site is left out
+   * rather than followed.
+   */
+  async listAttachments(pageId: string): Promise<ConfluenceAttachment[]> {
+    const found: ConfluenceAttachment[] = [];
+    if (this.deployment === 'datacenter') {
+      const size = V1_PAGE_SIZE;
+      let start = 0;
+      for (let requests = 0; requests < MAX_ATTACHMENT_REQUESTS; requests += 1) {
+        const body = record(
+          await this.request(
+            `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment` +
+              `?expand=version,extensions&limit=${size}&start=${start}`,
+          ),
+        );
+        const results = asArray(body?.['results']);
+        for (const entry of results) {
+          const attachment = toAttachmentV1(entry, pageId, this.root, this.origin);
+          if (attachment !== null) found.push(attachment);
+        }
+        const answered = body?.['limit'];
+        const pageLimit = typeof answered === 'number' && answered > 0 ? Math.min(answered, size) : size;
+        if (results.length === 0 || results.length < pageLimit) break;
+        start += results.length;
+      }
+      return found;
+    }
+
+    let next: string | null = `/api/v2/pages/${encodeURIComponent(pageId)}/attachments?limit=${this.pageSize}`;
+    for (let requests = 0; next !== null && requests < MAX_ATTACHMENT_REQUESTS; requests += 1) {
+      const body: unknown = await this.request(next);
+      for (const entry of asArray(record(body)?.['results'])) {
+        const attachment = toAttachmentV2(entry, pageId, this.origin);
+        if (attachment !== null) found.push(attachment);
+      }
+      next = nextLink(body, this.origin);
+    }
+    return found;
+  }
+
+  /**
+   * The earlier versions of an attachment, oldest first, or `null` when the
+   * site does not say.
+   *
+   * A Server or Data Center is asked through the version list it publishes
+   * under `/rest/experimental`, and then each version's own entry for its size
+   * and download link. Cloud is asked through API v2's version list, which
+   * gives no size; its earlier versions are downloaded by `?version=` and held,
+   * by the caller, to not being the current bytes instead. Anything that goes
+   * wrong here costs the history and nothing else.
+   */
+  async listAttachmentHistory(pageId: string, current: ConfluenceAttachment): Promise<ConfluenceAttachment[] | null> {
+    if (current.version <= 1) return [];
+    if (this.deployment === 'cloud') return this.listAttachmentHistoryV2(pageId, current);
+    try {
+      const body = record(
+        await this.request(
+          `/rest/experimental/content/${encodeURIComponent(current.id)}/version?limit=${MAX_HISTORY_VERSIONS + 1}`,
+        ),
+      );
+      const numbers = asArray(body?.['results'])
+        .map((entry) => {
+          const version = record(entry);
+          const number = version?.['number'];
+          return typeof number === 'number' && Number.isInteger(number) && number >= 1 && number < current.version
+            ? {
+                number,
+                when: asString(version?.['when']),
+                by: asString(record(version?.['by'])?.['displayName']),
+                message: asString(version?.['message']),
+              }
+            : null;
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        .sort((a, b) => a.number - b.number)
+        .slice(-MAX_HISTORY_VERSIONS);
+
+      const history: ConfluenceAttachment[] = [];
+      for (const item of numbers) {
+        const entry = await this.request(
+          `/rest/api/content/${encodeURIComponent(current.id)}?status=historical&version=${item.number}`,
+        );
+        const attachment = toAttachmentV1(entry, pageId, this.root, this.origin);
+        if (attachment === null) continue;
+        history.push({
+          ...attachment,
+          title: current.title,
+          version: item.number,
+          createdAt: item.when !== null && Number.isFinite(Date.parse(item.when)) ? new Date(item.when) : attachment.createdAt,
+          author: item.by ?? attachment.author,
+          comment: attachment.comment ?? (item.message === '' ? null : item.message),
+        });
+      }
+      return history;
+    } catch {
+      return null;
+    }
+  }
+
+  private async listAttachmentHistoryV2(pageId: string, current: ConfluenceAttachment): Promise<ConfluenceAttachment[] | null> {
+    try {
+      const found: ConfluenceAttachment[] = [];
+      // Newest first, so the versions kept — the latest few — come in the first
+      // page or two, and the listing stops there instead of paging through a
+      // long history only to drop most of it.
+      let next: string | null =
+        `/api/v2/attachments/${encodeURIComponent(current.id)}/versions?sort=-modified-date&limit=${MAX_HISTORY_VERSIONS + 1}`;
+      for (
+        let requests = 0;
+        next !== null && requests < MAX_ATTACHMENT_REQUESTS && found.length < MAX_HISTORY_VERSIONS;
+        requests += 1
+      ) {
+        const body: unknown = await this.request(next);
+        for (const entry of asArray(record(body)?.['results'])) {
+          const version = record(entry);
+          const number = version?.['number'];
+          if (typeof number !== 'number' || !Number.isInteger(number) || number < 1 || number >= current.version) continue;
+          const when = asString(version?.['createdAt']);
+          const message = asString(version?.['message']);
+          found.push({
+            ...current,
+            version: number,
+            fileSize: positiveNumber(version?.['fileSize']),
+            comment: message === null || message.trim() === '' ? null : message,
+            createdAt: when !== null && Number.isFinite(Date.parse(when)) ? new Date(when) : null,
+            author: null,
+            downloadPath: fallbackDownloadPath(pageId, current.title, number),
+          });
+        }
+        next = nextLink(body, this.origin);
+      }
+      return found.sort((a, b) => a.version - b.version).slice(-MAX_HISTORY_VERSIONS);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * The same listing over API v1.
    *
    * Paged by counting. The answer says how many entries it holds (`size`) and
@@ -502,6 +719,9 @@ export class ConfluenceClient {
  * expanded, whatever is asked for; asking for it outright saves a guess.
  */
 const V1_PAGE_SIZE = 50;
+
+/** Listing requests for one page's attachments. A page with more is not read further. */
+const MAX_ATTACHMENT_REQUESTS = 20;
 
 /** `https://example.atlassian.net` from anything a person might paste. */
 export function normalizeBaseUrl(value: string): string {
@@ -676,5 +896,100 @@ function toPageV1(value: unknown, root: string): ConfluencePage | null {
     storage: asString(record(record(page?.['body'])?.['storage'])?.['value']) ?? '',
     updatedAt: updated !== null && Number.isFinite(Date.parse(updated)) ? new Date(updated) : null,
     webUrl: webui === null ? null : `${root}${webui.startsWith('/') ? webui : `/${webui}`}`,
+  };
+}
+
+const DOWNLOAD_PATH = /^\/download\/attachments\/[^/?#]+\/[^/?#]+(?:\?[^#]*)?$/;
+
+/**
+ * Reduces a download link the site gave to a path under its root, or null. The
+ * link is the server's say-so about where the next authenticated request goes,
+ * so it is accepted only as a download path on the typed origin, never with a
+ * `..` in it, and anything else is left for `fallbackDownloadPath` to rebuild.
+ */
+export function safeDownloadPath(link: string | null, root: string, origin: string): string | null {
+  if (link === null || link === '') return null;
+  let path = link;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(link) || link.startsWith('//')) {
+    let parsed: URL;
+    try {
+      parsed = new URL(link, origin);
+    } catch {
+      return null;
+    }
+    if (parsed.origin !== origin) return null;
+    path = `${parsed.pathname}${parsed.search}`;
+  }
+  const rootPath = new URL(root).pathname.replace(/\/+$/, '');
+  if (rootPath !== '' && path.startsWith(`${rootPath}/`)) path = path.slice(rootPath.length);
+  if (!DOWNLOAD_PATH.test(path)) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(path.split('?')[0] ?? '');
+  } catch {
+    return null;
+  }
+  if (decoded.split('/').some((segment) => segment === '..' || segment === '.')) return null;
+  return path;
+}
+
+function fallbackDownloadPath(pageId: string, title: string, version: number): string {
+  return `/download/attachments/${encodeURIComponent(pageId)}/${encodeURIComponent(title)}?version=${version}&api=v2`;
+}
+
+function positiveNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** An attachment as API v1 describes it, current or historical. */
+function toAttachmentV1(value: unknown, pageId: string, root: string, origin: string): ConfluenceAttachment | null {
+  const entry = record(value);
+  const id = asString(entry?.['id']);
+  const title = asString(entry?.['title']);
+  if (id === null || title === null || entry?.['type'] !== 'attachment') return null;
+  const extensions = record(entry?.['extensions']);
+  const version = record(entry?.['version']);
+  const number = version?.['number'];
+  const versionNumber = typeof number === 'number' && Number.isInteger(number) && number >= 1 ? number : 1;
+  const when = asString(version?.['when']);
+  const comment = asString(extensions?.['comment']) ?? asString(record(entry?.['metadata'])?.['comment']);
+  return {
+    id,
+    title,
+    mediaType: asString(extensions?.['mediaType']),
+    fileSize: positiveNumber(extensions?.['fileSize']),
+    version: versionNumber,
+    comment: comment === null || comment.trim() === '' ? null : comment,
+    createdAt: when !== null && Number.isFinite(Date.parse(when)) ? new Date(when) : null,
+    author: asString(record(version?.['by'])?.['displayName']),
+    downloadPath:
+      safeDownloadPath(asString(record(entry?.['_links'])?.['download']), root, origin) ??
+      fallbackDownloadPath(pageId, title, versionNumber),
+  };
+}
+
+/** An attachment as API v2 describes it. Only an author id is given, so no name. */
+function toAttachmentV2(value: unknown, pageId: string, origin: string): ConfluenceAttachment | null {
+  const entry = record(value);
+  const id = asString(entry?.['id']);
+  const title = asString(entry?.['title']);
+  if (id === null || title === null) return null;
+  const version = record(entry?.['version']);
+  const number = version?.['number'];
+  const versionNumber = typeof number === 'number' && Number.isInteger(number) && number >= 1 ? number : 1;
+  const when = asString(version?.['createdAt']);
+  const comment = asString(entry?.['comment']) ?? asString(version?.['message']);
+  return {
+    id,
+    title,
+    mediaType: asString(entry?.['mediaType']),
+    fileSize: positiveNumber(entry?.['fileSize']),
+    version: versionNumber,
+    comment: comment === null || comment.trim() === '' ? null : comment,
+    createdAt: when !== null && Number.isFinite(Date.parse(when)) ? new Date(when) : null,
+    author: null,
+    downloadPath:
+      safeDownloadPath(asString(entry?.['downloadLink']), `${origin}/wiki`, origin) ??
+      fallbackDownloadPath(pageId, title, versionNumber),
   };
 }

@@ -24,6 +24,7 @@ export async function register(): Promise<void> {
   startClaimSweep();
   startDiscussionSweep();
   startImageSweep();
+  startFileSweep();
 }
 
 /**
@@ -151,6 +152,34 @@ function startImageSweep(): void {
         }
       } catch (error) {
         console.error('[images] sweep failed', error);
+      }
+    })();
+  }, 60 * 60 * 1000);
+
+  timer.unref?.();
+}
+
+/**
+ * Removes file bytes nothing refers to any more — after a file is deleted, or
+ * its page is — and uploads abandoned half-way. Hourly, like the image sweep:
+ * a blob waits an hour after its last version goes before it may be removed.
+ */
+function startFileSweep(): void {
+  const timer = setInterval(() => {
+    void (async () => {
+      // Compared inline so the Edge build drops the import: the file store
+      // reads the disk, and only the Node.js runtime schedules sweeps.
+      if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+      try {
+        const { sweepFileBlobs } = await import('./lib/files/sweep');
+        const { removed, staged, orphans } = await sweepFileBlobs();
+        if (removed > 0 || staged > 0 || orphans > 0) {
+          console.log(
+            `[files] sweep removed ${removed} unreferenced blob(s), ${orphans} orphaned blob(s) and ${staged} abandoned upload(s)`,
+          );
+        }
+      } catch (error) {
+        console.error('[files] sweep failed', error);
       }
     })();
   }, 60 * 60 * 1000);
