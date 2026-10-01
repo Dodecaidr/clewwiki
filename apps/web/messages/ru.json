@@ -1515,7 +1515,7 @@
     "baseUrl": "Адрес",
     "baseUrlHint": "https://…, без хвоста вроде /issues.",
     "projects": "Ключи проектов",
-    "projectsHint": "Префиксы ключей задач через запятую: NSYSM, MAC.",
+    "projectsHint": "Префиксы ключей задач через запятую: APP, MAC.",
     "urlTemplate": "Адрес задачи",
     "urlTemplateHint": "С {key} или {project} и {number} внутри.",
     "tokenEnv": "Переменная с токеном",

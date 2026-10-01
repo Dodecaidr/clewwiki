@@ -36,7 +36,7 @@ export function TrackerForm() {
           <Input id="tracker-url" name="baseUrl" type="url" required placeholder="https://youtrack.example.com" />
         </Field>
         <Field label={t('projects')} htmlFor="tracker-projects" hint={t('projectsHint')}>
-          <Input id="tracker-projects" name="projects" required placeholder="NSYSM, MAC" />
+          <Input id="tracker-projects" name="projects" required placeholder="APP, MAC" />
         </Field>
         {kind === 'other' ? (
           <Field label={t('urlTemplate')} htmlFor="tracker-template" hint={t('urlTemplateHint')}>
