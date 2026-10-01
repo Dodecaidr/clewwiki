@@ -34,6 +34,8 @@ import { CommentableBody } from '@/components/commentable-body';
 import { CommentsPanel } from '@/components/comments-panel';
 import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
+import { getLivePresence } from '@/lib/presence/live';
+import { PresenceHeartbeat } from '@/components/presence-heartbeat';
 import {
   newSpaceDiscussionHref,
   newSpacePageHref,
@@ -280,8 +282,24 @@ export default async function PageView({ params }: Props) {
   // stronger statement about who may write to this page right now.
   const claim = activeClaims.find((entry) => entry.sectionId === null) ?? activeClaims[0] ?? null;
 
+  // Everybody else who has this page open right now, and the agents whose last
+  // request was about it.
+  const live = await getLivePresence({ workspaceId: session.workspace.id, spaceIds: session.spaceIds });
+  const tlive = await getTranslations('livePresence');
+  const here = [
+    ...live.people
+      .filter((person) => person.page?.id === page.id && person.userId !== session.userId)
+      .map((person) =>
+        tlive(person.mode === 'editing' ? 'personEditing' : 'personViewing', {
+          name: person.automated ? `${person.name} (${tlive('automated')})` : person.name,
+        }),
+      ),
+    ...live.agents.filter((agent) => agent.page?.id === page.id).map((agent) => tlive('agentHere', { name: agent.name })),
+  ];
+
   return (
     <article className="grid gap-6">
+      <PresenceHeartbeat pageId={page.id} mode="viewing" />
       <header className="grid gap-3 border-b border-border pb-5">
         <Breadcrumbs
           label={ts('breadcrumbLabel')}
@@ -298,6 +316,12 @@ export default async function PageView({ params }: Props) {
           <div className="grid min-w-0 gap-1">
             <h1 className="text-2xl font-semibold tracking-tight">{page.title}</h1>
             <p className="font-mono text-xs text-muted-foreground">{page.path}</p>
+            {here.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                <span className="mr-1 inline-block size-1.5 rounded-full bg-success align-middle" aria-hidden />
+                {tlive('hereNow')}: {here.join(', ')}
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {canWrite(session.role) ? (

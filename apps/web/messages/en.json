@@ -1444,5 +1444,22 @@
     "askedAt": "asked {when}",
     "hint": "Nothing to do here meanwhile. If it takes long, write to an administrator you know.",
     "check": "Check again"
+  },
+  "livePresence": {
+    "heading": "{count, plural, =0 {In the wiki now} other {In the wiki now · #}}",
+    "empty": "Nobody has the wiki open, and no agent has made a request in the last ten minutes.",
+    "people": "People",
+    "agents": "Agents",
+    "viewing": "reading",
+    "editing": "editing",
+    "nowhere": "elsewhere in the wiki",
+    "automated": "automated browser",
+    "automatedHint": "This browser reports that it is driven by automation (WebDriver): most likely an agent working through this person's session.",
+    "agentWorking": "{count, plural, one {# request} other {# requests}} in 10 min",
+    "footnote": "People are shown while a tab of theirs is open on a page; agents while their token is making requests. Holding a page for an edit is a claim, listed below.",
+    "hereNow": "Here now",
+    "personViewing": "{name} reading",
+    "personEditing": "{name} editing",
+    "agentHere": "agent {name}"
   }
 }

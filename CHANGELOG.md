@@ -9,7 +9,7 @@ tagged.
 
 ## [Unreleased]
 
-Upgrading runs migration `0021_organizations`. It makes the administrators of
+Upgrading runs migrations `0021_organizations` and `0022_live_presence`. It makes the administrators of
 the organization created at setup the administrators of the instance; nothing
 else changes until somebody creates a second organization.
 
@@ -35,6 +35,15 @@ else changes until somebody creates a second organization.
   nowhere else. Five requests an hour per client address. The address is not
   marked verified, so single sign-on never links into such an account.
 
+- **Who is in the wiki now.** *Presence* now lists, above the claims, the
+  people who have a page open — reading or editing, and on which page — and
+  the agents whose token made requests in the last ten minutes, with the page
+  their last request was about. A page shows who else is on it under its
+  title. A browser driven by WebDriver automation (Playwright, Selenium,
+  Puppeteer) is marked as such: an agent working through a person's session.
+  Over REST it is `GET /api/v1/presence`, and `wiki.get_presence` returns it
+  as `active_now`. A tab reports itself every 30 seconds while visible and
+  drops off two minutes after it stops.
 - **Theme and width switches** in the header: system, light or dark, and a
   wide or narrow page. Both are remembered per browser in a cookie, so the page
   is drawn right on the first byte. Wide is the default: on a large monitor

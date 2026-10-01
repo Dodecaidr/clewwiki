@@ -1639,3 +1639,36 @@ export type PageCommentRow = typeof pageComments.$inferSelect;
 export type NewPageCommentRow = typeof pageComments.$inferInsert;
 export type PageCollabStateRow = typeof pageCollabStates.$inferSelect;
 export type SpaceMemberRow = typeof spaceMembers.$inferSelect;
+
+export const presenceMode = pgEnum('presence_mode', ['viewing', 'editing']);
+
+/**
+ * Where each person is in the wiki right now, as their open tab last reported
+ * it. One row per person per organization, overwritten every half minute while
+ * the tab is visible; a row older than a couple of minutes means gone. Agents
+ * need no row: every request their token makes is already in the audit log.
+ */
+export const presenceHeartbeats = pgTable(
+  'presence_heartbeats',
+  {
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    pageId: uuid('page_id').references((): AnyPgColumn => pages.id, { onDelete: 'set null' }),
+    mode: presenceMode('mode').notNull().default('viewing'),
+    /**
+     * The browser said it is driven by automation (`navigator.webdriver`): an
+     * agent working through a person's session. Only a hint — an automation
+     * that hides it is not detected.
+     */
+    automated: boolean('automated').notNull().default(false),
+    seenAt: timestamp('seen_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workspaceId, table.userId] }),
+    index('presence_heartbeats_seen_idx').on(table.workspaceId, table.seenAt),
+  ],
+);
