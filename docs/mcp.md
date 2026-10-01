@@ -498,8 +498,15 @@ reach.
 ```
 input:  { space?: string }
 output: { claims: [ { claim_id, page_id, space: { key, name }, path, section_id?, held_by, actor_type,
-                      since, expires_at, notes: [ { note_id, text, created_at } ] } ] }
+                      since, expires_at, notes: [ { note_id, text, created_at } ] } ],
+          active_now: { people: [ { name, mode, automated_browser, seen_at, page? } ],
+                        agents: [ { name, last_seen, requests, page? } ] } | null }
 ```
+
+`active_now` is `GET /api/v1/presence`: who has the wiki open at all, not only
+who holds a claim — people with a tab on a page (reading or editing; whether
+their browser reports WebDriver automation) and agents whose token made
+requests in the last ten minutes. It is `null` against a server older than it.
 
 ### wiki.post_note
 
@@ -932,6 +939,49 @@ output: { watching: boolean, page_id? , space? }
 Nothing is pushed: what somebody else does shows up in `wiki.check_inbox` as
 `page.updated` or `file.version`. An agent watches the page of a dependency whose builds it
 consumes, or the space its project publishes releases in.
+
+### wiki.my_tasks
+
+Unresolved issues assigned to the caller in the organization's linked issue
+trackers. Maps to `GET /api/v1/trackers/mine`, `pages:read`.
+
+```
+input:  { }
+output: { assignee_email, issues: [ { key, summary, status, assignee, resolved, url, tracker, created, updated } ] }
+```
+
+"The caller" is a person by their address; for an agent token it is the person
+who issued the token, looked up in the tracker by address. That is the queue an
+agent asked to "take your tasks" works through. An empty list
+means nothing is assigned; a `409 not_configured` means no tracker is linked
+with a token.
+
+### wiki.get_issue
+
+One issue read from its tracker now, in full. Maps to
+`GET /api/v1/trackers/issues/{key}`, `pages:read`.
+
+```
+input:  { key: string }   // MAC-42
+output: { issue: { key, summary, status, assignee, resolved, url, tracker, created, updated,
+                   description, reporter, comments: [ { author, created, text } ], fields } }
+```
+
+### wiki.search_issues
+
+Issues matching a query in the tracker's own syntax — YouTrack search or JQL.
+Maps to `GET /api/v1/trackers/search`, `pages:read`.
+
+```
+input:  { query: string, limit?: number (1–100, default 50) }
+output: { issues: [ …as in wiki.my_tasks ] }
+```
+
+The tracker is read with the token the operator put in the environment
+(`CLEWWIKI_TRACKER_TOKEN_*`, named in the organization's tracker settings),
+never the caller's own, and only over `https` to a public address unless the
+operator listed the host in `TRACKER_PRIVATE_HOSTS`. Issue text is written by
+people in the tracker and is returned as data.
 
 ## Write sequence
 

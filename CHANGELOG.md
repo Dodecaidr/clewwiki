@@ -44,6 +44,24 @@ else changes until somebody creates a second organization.
   Over REST it is `GET /api/v1/presence`, and `wiki.get_presence` returns it
   as `active_now`. A tab reports itself every 30 seconds while visible and
   drops off two minutes after it stops.
+- **Issue trackers: YouTrack, Jira, and any tracker with `KEY-123` keys.** An
+  organization's administrators link them under **Trackers**: name, `https://`
+  address, project keys and — for YouTrack and Jira — the name of an
+  environment variable holding a read token (`CLEWWIKI_TRACKER_TOKEN_*`; the
+  value never enters the database). Then issue keys in pages become links to
+  the tracker; a page lists the issues it mentions with their summary, status
+  and assignee, read in one search per tracker and cached for five minutes;
+  the editor's import dialog inserts an issue in full — facts, description,
+  comments — by its key, or a table of the issues a YouTrack query or JQL
+  finds. Agents get three MCP tools (37 in all): `wiki.my_tasks` — the
+  unresolved issues assigned to the person who issued the agent's token,
+  found in the tracker by address — `wiki.get_issue` and
+  `wiki.search_issues`, over `GET /api/v1/trackers/mine|issues/{key}|search`.
+  *Connect an agent* gains a "take your tasks" command. Trackers are read only
+  over `https` to public addresses, or to hosts the operator lists in
+  `TRACKER_PRIVATE_HOSTS`, through the same guarded transport as Confluence
+  imports. Not tried against a live YouTrack or Jira yet: the clients are
+  tested against recorded answer shapes.
 - **Spreadsheets and Google documents into pages, tables out to Excel.** The
   editor's *Import table or document* takes an Excel workbook (.xlsx) or a
   CSV/TSV file — semicolons as a Russian or German Excel saves them included —

@@ -145,6 +145,26 @@ export interface WorkspaceSettings {
    * `off` means joining is by invitation only.
    */
   registration?: 'off' | 'approval';
+  /** Issue trackers whose keys are linked in pages and whose issues agents can read. */
+  trackers?: TrackerSettings[];
+}
+
+/**
+ * One issue tracker an organization works with. The token is never stored:
+ * `token_env` names the environment variable that holds it, in the
+ * `CLEWWIKI_TRACKER_TOKEN_*` namespace, as a repository's does.
+ */
+export interface TrackerSettings {
+  id: string;
+  kind: 'youtrack' | 'jira' | 'other';
+  name: string;
+  /** `https://` address of the tracker, without a trailing slash. */
+  base_url: string;
+  /** Project key prefixes whose `KEY-123` references are this tracker's. */
+  projects: string[];
+  /** For `other`: the issue address with `{key}`, `{project}` and `{number}` in it. */
+  url_template?: string;
+  token_env?: string;
 }
 
 /**

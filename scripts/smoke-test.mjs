@@ -50,7 +50,7 @@ import { createHash, randomBytes } from 'node:crypto';
 const BASE_URL = (process.env.SMOKE_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const ORIGIN = new URL(BASE_URL).origin;
 const HEALTH_TIMEOUT_MS = Number.parseInt(process.env.SMOKE_HEALTH_TIMEOUT_SECONDS ?? '180', 10) * 1000;
-const EXPECTED_MCP_TOOLS = 34;
+const EXPECTED_MCP_TOOLS = 37;
 const SPACE_KEY = 'SMOKE';
 
 const admin = {
