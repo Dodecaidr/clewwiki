@@ -569,7 +569,7 @@ export default async function PageView({ params }: Props) {
                   <a
                     href={issue?.url ?? (tracker ? issueUrl(tracker, key) : '#')}
                     rel="noopener noreferrer"
-                    className={cn('font-mono text-xs underline-offset-2 hover:underline', issue?.resolved && 'line-through')}
+                    className={cn('font-mono text-xs text-primary underline underline-offset-2', issue?.resolved && 'line-through')}
                   >
                     {key}
                   </a>
