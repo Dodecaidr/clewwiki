@@ -4,7 +4,7 @@ import { getFormatter, getTranslations } from 'next-intl/server';
 
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
-import { getSessionContext } from '@/lib/session';
+import { getSessionContext, getSignedInUser } from '@/lib/session';
 import { listSpaceSummaries } from '@/lib/spaces/service';
 import { spaceHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
@@ -25,6 +25,10 @@ export default async function HomePage({
 
   const session = await getSessionContext();
   const t = await getTranslations('home');
+
+  if (!session && (await getSignedInUser())) {
+    redirect('/pending');
+  }
 
   if (!session) {
     return (

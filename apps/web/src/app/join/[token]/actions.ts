@@ -2,7 +2,9 @@
 
 import { redirect } from 'next/navigation';
 
-import { MemberError, acceptInvitation } from '@/lib/members/service';
+import { MemberError, acceptInvitation, acceptInvitationAsMember } from '@/lib/members/service';
+import { rememberOrganization } from '@/lib/orgs/cookie';
+import { getSignedInUser } from '@/lib/session';
 
 export interface JoinFormState {
   error?: 'invalidInvitation' | 'emailTaken' | 'password' | 'generic';
@@ -31,5 +33,25 @@ export async function acceptInvitationAction(_previous: JoinFormState, formData:
     console.error('[join] accepting an invitation failed', error);
     return { error: 'generic' };
   }
+  redirect('/');
+}
+
+/**
+ * The same invitation accepted by an account that already exists — the person
+ * is in another organization on this instance and signed in as the address
+ * the invitation names. They are switched to the organization they joined.
+ */
+export async function acceptAsMemberAction(formData: FormData): Promise<void> {
+  const token = formData.get('token');
+  const user = await getSignedInUser();
+  if (typeof token !== 'string' || !user) redirect('/login');
+  let workspaceId: string;
+  try {
+    ({ workspaceId } = await acceptInvitationAsMember({ token, userId: user.id, email: user.email }));
+  } catch (error) {
+    if (error instanceof MemberError) redirect(`/join/${encodeURIComponent(token)}?failed=1`);
+    throw error;
+  }
+  await rememberOrganization(workspaceId);
   redirect('/');
 }

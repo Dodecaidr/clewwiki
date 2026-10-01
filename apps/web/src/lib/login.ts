@@ -138,7 +138,7 @@ export interface LoginInput {
  * One sign-in attempt. Returns only whether it succeeded: the caller answers a
  * refusal by the limiter and a wrong password identically.
  */
-export async function attemptLogin(input: LoginInput): Promise<{ ok: boolean }> {
+export async function attemptLogin(input: LoginInput): Promise<{ ok: boolean; userId?: string }> {
   const account = normalizeAccount(input.email);
   const address = resolveClientAddress(input.headers);
   const gate = consumeLoginAttempt(account, clientKey(input.headers));
@@ -155,6 +155,7 @@ export async function attemptLogin(input: LoginInput): Promise<{ ok: boolean }> 
   }
 
   let ok = false;
+  let userId: string | undefined;
   try {
     const result = await auth.api.signInEmail({
       body: { email: input.email, password: input.password },
@@ -163,6 +164,7 @@ export async function attemptLogin(input: LoginInput): Promise<{ ok: boolean }> 
       headers: input.headers,
     });
     ok = Boolean(result?.user);
+    userId = result?.user?.id;
   } catch {
     ok = false;
   }
@@ -170,5 +172,5 @@ export async function attemptLogin(input: LoginInput): Promise<{ ok: boolean }> 
   if (!ok) {
     await auditLoginEvent('auth.login_failed', account, address);
   }
-  return { ok };
+  return ok ? { ok, userId } : { ok };
 }

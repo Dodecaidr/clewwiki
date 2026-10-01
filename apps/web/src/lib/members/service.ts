@@ -3,7 +3,7 @@ import 'server-only';
 import { randomBytes } from 'node:crypto';
 
 import { and, asc, count, desc, eq, gt, isNull, sql } from 'drizzle-orm';
-import { invitations, memberships, users } from '@clewwiki/db';
+import { invitations, memberships, spaceMembers, users } from '@clewwiki/db';
 import type { MembershipRole } from '@clewwiki/db';
 
 import { hashTokenSecret, secureCompareHash } from '../agent-token-crypto';
@@ -385,6 +385,47 @@ export async function acceptInvitation(input: AcceptInvitationInput): Promise<{ 
   return { userId, workspaceId: open.workspaceId };
 }
 
+/**
+ * An invitation accepted by an account that already exists — somebody in one
+ * organization invited into another. The account must be the one signed in
+ * and its address must be the one invited; its password does not change.
+ */
+export async function acceptInvitationAsMember(input: {
+  token: string;
+  userId: string;
+  email: string;
+}): Promise<{ workspaceId: string }> {
+  const open = await findOpenInvitation(input.token);
+  if (!open || open.email !== input.email.trim().toLowerCase()) throw new MemberError('invalidInvitation');
+
+  return getDatabase().transaction(async (tx) => {
+    const [claimed] = await tx
+      .update(invitations)
+      .set({ acceptedAt: new Date(), acceptedUserId: input.userId })
+      .where(and(eq(invitations.id, open.id), isNull(invitations.acceptedAt), isNull(invitations.revokedAt)))
+      .returning({ id: invitations.id });
+    if (!claimed) throw new MemberError('invalidInvitation');
+    const [joined] = await tx
+      .insert(memberships)
+      .values({ workspaceId: open.workspaceId, userId: input.userId, role: open.role })
+      .onConflictDoNothing()
+      .returning({ id: memberships.id });
+    if (!joined) throw new MemberError('alreadyMember');
+    await recordAudit(
+      {
+        workspaceId: open.workspaceId,
+        actorType: 'user',
+        actorId: input.userId,
+        action: 'member.joined',
+        target: input.userId,
+        metadata: { invitation_id: open.id, role: open.role, existing_account: true },
+      },
+      tx,
+    );
+    return { workspaceId: open.workspaceId };
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Roles and removal                                                   */
 /* ------------------------------------------------------------------ */
@@ -456,9 +497,24 @@ export async function removeMember(input: { workspaceId: string; admin: Admin; u
     if (!current) throw new MemberError('notFound');
     if (current.role === 'admin' && admins <= 1) throw new MemberError('lastAdmin');
 
-    // The membership, the sessions, the credentials and the space memberships
-    // all cascade from the account.
-    await tx.delete(users).where(eq(users.id, input.userId));
+    // An account in another organization too keeps existing there and only
+    // leaves this one. Otherwise the account goes: the membership, sessions,
+    // credentials and space memberships all cascade from it.
+    const [elsewhere] = await tx
+      .select({ id: memberships.id })
+      .from(memberships)
+      .where(and(eq(memberships.userId, input.userId), sql`${memberships.workspaceId} <> ${input.workspaceId}`))
+      .limit(1);
+    if (elsewhere) {
+      await tx
+        .delete(memberships)
+        .where(and(eq(memberships.workspaceId, input.workspaceId), eq(memberships.userId, input.userId)));
+      await tx
+        .delete(spaceMembers)
+        .where(and(eq(spaceMembers.workspaceId, input.workspaceId), eq(spaceMembers.userId, input.userId)));
+    } else {
+      await tx.delete(users).where(eq(users.id, input.userId));
+    }
     await recordAudit(
       {
         workspaceId: input.workspaceId,
