@@ -411,6 +411,7 @@ describe('REST calls', () => {
       'https://wiki.example.com/api/v1/search?q=auth&space=API',
       'https://wiki.example.com/api/v1/pages?space=API&depth=1',
       'https://wiki.example.com/api/v1/claims?space=API',
+      'https://wiki.example.com/api/v1/presence?space=API',
     ]);
   });
 });

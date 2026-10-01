@@ -65,10 +65,10 @@ const writeRoutes: WriteRoute[] = routeFiles(apiRoot)
   .sort((a, b) => a.pattern.localeCompare(b.pattern));
 
 /**
- * The writes a viewer is meant to make: their own read mark, and what they
- * watch — both change nothing anybody else sees.
+ * The writes a viewer is meant to make: their own read mark, what they watch,
+ * and where their open tab is — none of it changes anything anybody else reads.
  */
-const OPEN_TO_VIEWERS = new Set(['inbox/read', 'watches']);
+const OPEN_TO_VIEWERS = new Set(['inbox/read', 'watches', 'presence']);
 
 describe.skipIf(!probe.reachable)('the viewer role over REST', () => {
   let db: Database;

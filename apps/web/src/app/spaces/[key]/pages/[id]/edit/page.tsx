@@ -16,6 +16,7 @@ import { spaceHref, spacePageEditHref, spacePageHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 import { assertSameWorkspace } from '@/lib/workspace';
 import { findPage, findSpaceById } from '@/lib/spaces/visibility';
+import { PresenceHeartbeat } from '@/components/presence-heartbeat';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,6 +114,7 @@ export default async function EditPage({ params }: Props) {
 
   return (
     <div className="grid gap-6">
+      <PresenceHeartbeat pageId={page.id} mode="editing" />
       <h1 className="text-2xl font-semibold tracking-tight">{t('editTitle')}</h1>
       <Card>
         <CardHeader>
