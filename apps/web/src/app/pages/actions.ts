@@ -17,6 +17,7 @@ import { getWriterSession } from '@/lib/session';
 import { spaceHref, spacePageHref } from '@/lib/spaces/urls';
 import { findPage, findSpaceById, findSpaceByKey } from '@/lib/spaces/visibility';
 import { canViewPage } from '@/lib/spaces/guards';
+import { issueLinker, readTrackers } from '@/lib/trackers/settings';
 
 /**
  * The write actions behind the page forms.
@@ -463,6 +464,6 @@ export async function renderPreviewAction(markdown: string): Promise<string> {
   const session = await getWriterSession();
   if (!session) return '';
   if (typeof markdown !== 'string' || markdown.length > PAGE_BODY_MAX_LENGTH) return '';
-  return renderMarkdown(markdown, await renderLabels());
+  return renderMarkdown(markdown, await renderLabels(), undefined, issueLinker(readTrackers(session.workspace)));
 }
 

@@ -18,6 +18,8 @@ import { unified } from 'unified';
 import { visit } from 'unist-util-visit';
 import type { Element, ElementContent, Nodes, Properties, Root } from 'hast';
 
+import type { IssueLinker } from '../trackers/settings';
+
 /**
  * Markdown rendering.
  *
@@ -254,6 +256,56 @@ function rehypeBlockMarks() {
   };
 }
 
+/**
+ * Turns issue keys in text — `MAC-42` — into links to the tracker that owns
+ * them, from the organization's tracker settings. Runs after sanitising: the
+ * links it adds are built here from an administrator's `https:` address, not
+ * taken from the page. Text inside links, code and pre stays as written.
+ */
+function rehypeIssueLinks() {
+  return (tree: Root, file: { data: Record<string, unknown> }): void => {
+    const linker = file.data.issueLinker as IssueLinker | undefined;
+    if (!linker) return;
+    const skip = new Set(['a', 'code', 'pre', 'script', 'style']);
+
+    const walk = (parent: Root | Element): void => {
+      const next: Array<Root['children'][number]> = [];
+      let changed = false;
+      for (const child of parent.children) {
+        if (child.type === 'element') {
+          if (!skip.has(child.tagName)) walk(child);
+          next.push(child);
+          continue;
+        }
+        if (child.type !== 'text') {
+          next.push(child);
+          continue;
+        }
+        const value = child.value;
+        let last = 0;
+        for (const match of value.matchAll(new RegExp(linker.pattern.source, 'g'))) {
+          const key = match[0];
+          const href = linker.href(key);
+          if (!href || match.index === undefined) continue;
+          if (match.index > last) next.push({ type: 'text', value: value.slice(last, match.index) });
+          next.push({
+            type: 'element',
+            tagName: 'a',
+            properties: { href, className: ['issue-link'], rel: ['noopener', 'noreferrer'] },
+            children: [{ type: 'text', value: key }],
+          });
+          last = match.index + key.length;
+          changed = true;
+        }
+        if (last === 0) next.push(child);
+        else if (last < value.length) next.push({ type: 'text', value: value.slice(last) });
+      }
+      if (changed) parent.children = next as typeof parent.children;
+    };
+    walk(tree);
+  };
+}
+
 const svgProperties = [...new Set(CHART_SVG_ATTRIBUTES.map((attribute) => find(svg, attribute).property))];
 
 /**
@@ -296,6 +348,7 @@ function createProcessor(labels: RenderLabels) {
       .use(rehypeMermaid)
       .use(rehypeCallouts, labels)
       .use(rehypeBlockMarks)
+      .use(rehypeIssueLinks)
       .use(rehypeStringify)
       .freeze()
   );
@@ -325,9 +378,13 @@ export async function renderMarkdown(
   body: string,
   labels: RenderLabels = {},
   blockMarks?: BlockMarks,
+  issueLinker?: IssueLinker | null,
 ): Promise<string> {
+  const data: Record<string, unknown> = {};
+  if (blockMarks) data.blockMarks = blockMarks;
+  if (issueLinker) data.issueLinker = issueLinker;
   const file = await processorFor(labels).process(
-    blockMarks ? { value: body, data: { blockMarks } } : body,
+    Object.keys(data).length > 0 ? { value: body, data } : body,
   );
   return String(file);
 }

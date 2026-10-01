@@ -59,7 +59,7 @@ describe('stdio transport', () => {
     return { isError: result.isError === true, data: JSON.parse(text) as Record<string, unknown> };
   }
 
-  it('advertises the thirty-four tools, with the content contract on the ones that return stored text', async () => {
+  it('advertises the thirty-seven tools, with the content contract on the ones that return stored text', async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((entry) => entry.name).sort();
 
@@ -99,6 +99,9 @@ describe('stdio transport', () => {
         'wiki.get_file',
         'wiki.upload_file',
         'wiki.watch',
+        'wiki.my_tasks',
+        'wiki.get_issue',
+        'wiki.search_issues',
       ].sort(),
     );
 

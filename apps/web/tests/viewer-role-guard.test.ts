@@ -39,6 +39,7 @@ const OPEN_TO_VIEWERS: Record<string, string> = {
   'settings/members/actions.ts': 'administrators only, checked by role in every action',
   'tokens/actions.ts': 'administrators only, checked by role in every action',
   'settings/members/access-actions.ts': 'administrators only, checked by role in every action',
+  'settings/trackers/actions.ts': 'administrators only, checked by role in every action',
   'orgs/actions.ts': "switching among one's own organizations; creating one is for instance administrators",
   'o/[slug]/register/actions.ts': 'asking to join: there is no membership yet',
 };
@@ -65,7 +66,12 @@ describe('server actions and the viewer role', () => {
   });
 
   it('keeps the exceptions honest: the administrator-only ones check the role', () => {
-    for (const name of ['settings/members/actions.ts', 'settings/members/access-actions.ts', 'tokens/actions.ts']) {
+    for (const name of [
+      'settings/members/actions.ts',
+      'settings/members/access-actions.ts',
+      'settings/trackers/actions.ts',
+      'tokens/actions.ts',
+    ]) {
       const source = readFileSync(path.join(root, name), 'utf8');
       const actions = source.match(/export async function \w+Action\b/g) ?? [];
       const checks = source.match(/role !== 'admin'|role === 'admin'|requireAdmin\(\)/g) ?? [];

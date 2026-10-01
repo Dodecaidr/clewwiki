@@ -257,7 +257,7 @@ is unchanged; only where the image comes from differs.
 
 ## Connecting an AI coding agent (MCP)
 
-Agents talk to clewwiki through the Model Context Protocol with thirty-four
+Agents talk to clewwiki through the Model Context Protocol with thirty-seven
 tools — `wiki.list_spaces`, `wiki.format_guide`, `wiki.get_rules`,
 `wiki.list_skills`, `wiki.get_skill`, `wiki.search`,
 `wiki.get_page`, `wiki.create_page`, `wiki.claim`, `wiki.write_page`,
@@ -674,6 +674,8 @@ container.
 | `IMPORT_MAX_UPLOAD_MB` | no | `200` | Largest import upload. Refused from the declared `Content-Length`, before the body is read. |
 | `IMPORT_MAX_EXPANDED_MB` | no | `256` | Most an uploaded ZIP may expand to. The upload and what it expands to are held in memory together until the import is staged, so on a host with little memory lower both: a container that runs out is killed, not refused. |
 | `IMPORT_CONFLUENCE_PRIVATE_HOSTS` | no | empty | Host names of Confluence Server or Data Center sites on a private network that imports may connect to, comma-separated. Empty keeps imports to public addresses. Only private ranges open up; the loopback, link-local, multicast and reserved space stay refused whatever is listed. Names, not addresses: what a name resolves to is checked again as the socket connects. |
+| `CLEWWIKI_TRACKER_TOKEN`, `CLEWWIKI_TRACKER_TOKEN_<NAME>` | no | unset | Tokens of linked issue trackers. An organization administrator links a tracker under **Trackers** and names one of these variables; the value never enters the database, a response or a log. Read access is enough. For Jira Cloud the value is `email:api-token`; for YouTrack and Jira Data Center, a permanent or personal access token. Without one, issue keys in pages are still linked, but issues are not read. |
+| `TRACKER_PRIVATE_HOSTS` | no | empty | Host names of issue trackers on a private network the server may read from, comma-separated — the same rule as `IMPORT_CONFLUENCE_PRIVATE_HOSTS`. |
 | `OIDC_ISSUER` | no | empty | The OpenID Connect issuer, or its discovery document. Set with the two below to offer single sign-on; leave all three empty for password sign-in only. Must be `https`, except on localhost. |
 | `OIDC_CLIENT_ID` | no | empty | The client this instance is registered as at the provider. |
 | `OIDC_CLIENT_SECRET` | no | empty | **Secret.** The client secret. Setting only some of these three refuses to start rather than starting without single sign-on. |

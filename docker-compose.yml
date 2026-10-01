@@ -110,6 +110,13 @@ services:
       # like the second one for each extra token you define in .env.
       CLEWWIKI_GIT_TOKEN: ${CLEWWIKI_GIT_TOKEN:-}
       # CLEWWIKI_GIT_TOKEN_DOCS: ${CLEWWIKI_GIT_TOKEN_DOCS:-}
+      # Issue tracker tokens, the same way: an organization's tracker setting
+      # names CLEWWIKI_TRACKER_TOKEN or CLEWWIKI_TRACKER_TOKEN_<NAME>. Add a line
+      # for each one you define in .env.
+      CLEWWIKI_TRACKER_TOKEN: ${CLEWWIKI_TRACKER_TOKEN:-}
+      CLEWWIKI_TRACKER_TOKEN_YOUTRACK: ${CLEWWIKI_TRACKER_TOKEN_YOUTRACK:-}
+      CLEWWIKI_TRACKER_TOKEN_JIRA: ${CLEWWIKI_TRACKER_TOKEN_JIRA:-}
+      TRACKER_PRIVATE_HOSTS: ${TRACKER_PRIVATE_HOSTS:-}
     volumes:
       # Read-only mirrors of the repositories anchors are checked against. On a
       # named volume so a restart does not re-clone every workspace's history.
