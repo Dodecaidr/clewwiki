@@ -336,3 +336,28 @@ export function getFilesMaxUploadMb(): number {
 export function getFilesStoreMaxMb(): number {
   return optionalNumber('FILES_STORE_MAX_MB', 20480);
 }
+
+/**
+ * The namespace an issue tracker's token variable must be in. As with a
+ * repository token, an administrator names a variable and the operator sets
+ * it; the namespace keeps "name a variable" from reaching any other secret.
+ */
+export const TRACKER_TOKEN_ENV_PATTERN = /^CLEWWIKI_TRACKER_TOKEN(?:_[A-Z0-9]{1,40})?$/;
+
+export function getTrackerToken(variableName: string | undefined | null): string | null {
+  if (!variableName || !TRACKER_TOKEN_ENV_PATTERN.test(variableName)) return null;
+  const value = process.env[variableName];
+  return value && value.trim() !== '' ? value.trim() : null;
+}
+
+/**
+ * Tracker host names the operator allows on a private network — a YouTrack or
+ * Jira inside the company. The same rule as `IMPORT_CONFLUENCE_PRIVATE_HOSTS`:
+ * names, not addresses; loopback and link-local stay refused whatever is listed.
+ */
+export function getTrackerPrivateHosts(): string[] {
+  return (process.env.TRACKER_PRIVATE_HOSTS ?? '')
+    .split(',')
+    .map((host) => host.trim())
+    .filter((host) => host !== '');
+}

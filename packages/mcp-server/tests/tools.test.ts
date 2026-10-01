@@ -27,7 +27,7 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the thirty-four tools docs/mcp.md names', () => {
+  it('registers exactly the thirty-seven tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
       'wiki.list_spaces',
       'wiki.format_guide',
@@ -63,8 +63,11 @@ describe('tool surface', () => {
       'wiki.get_file',
       'wiki.upload_file',
       'wiki.watch',
+      'wiki.my_tasks',
+      'wiki.get_issue',
+      'wiki.search_issues',
     ]);
-    expect(TOOLS).toHaveLength(34);
+    expect(TOOLS).toHaveLength(37);
   });
 
   it('names every tool whose result carries text written by others', () => {
@@ -91,6 +94,9 @@ describe('tool surface', () => {
         'wiki.check_anchors',
         'wiki.list_files',
         'wiki.get_file',
+        'wiki.my_tasks',
+        'wiki.get_issue',
+        'wiki.search_issues',
       ].sort(),
     );
   });
@@ -133,6 +139,25 @@ describe('tool surface', () => {
       'wiki.check_inbox',
       'wiki.list_files',
       'wiki.get_file',
+      'wiki.my_tasks',
+      'wiki.get_issue',
+      'wiki.search_issues',
+    ]);
+  });
+
+  it('reads tracker issues through the wiki, never from the tracker directly', async () => {
+    const seen: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      seen.push(String(input));
+      return jsonResponse(200, { issues: [] });
+    }) as unknown as FetchLike;
+    await tool('wiki.my_tasks').run(clientWith(fetchMock), {});
+    await tool('wiki.get_issue').run(clientWith(fetchMock), { key: 'mac-42' });
+    await tool('wiki.search_issues').run(clientWith(fetchMock), { query: 'project: MAC #Unresolved', limit: 5 });
+    expect(seen).toEqual([
+      'https://wiki.example.com/api/v1/trackers/mine',
+      'https://wiki.example.com/api/v1/trackers/issues/MAC-42',
+      'https://wiki.example.com/api/v1/trackers/search?q=project%3A+MAC+%23Unresolved&limit=5',
     ]);
   });
 

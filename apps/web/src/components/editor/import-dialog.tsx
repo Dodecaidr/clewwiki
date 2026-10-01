@@ -15,7 +15,16 @@ interface ConvertResult {
   dropped_images: number;
 }
 
-type Source = 'file' | 'google';
+type Source = 'file' | 'google' | 'tracker';
+
+/** REST error codes of the tracker endpoint, as the dialog's messages name them. */
+const TRACKER_ERRORS: Record<string, string> = {
+  not_configured: 'trackerNotConfigured',
+  not_found: 'trackerNotFound',
+  tracker_denied: 'trackerDenied',
+  tracker_unavailable: 'unavailable',
+  not_supported: 'trackerNotConfigured',
+};
 
 /**
  * Brings a spreadsheet or a Google Doc into the page being edited: an Excel
@@ -40,6 +49,7 @@ function ImportDialogBody({ onCancel, onInsert }: { onCancel: () => void; onInse
   const t = useTranslations('sheetImport');
   const [source, setSource] = useState<Source>('file');
   const [link, setLink] = useState('');
+  const [issueQuery, setIssueQuery] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ConvertResult | null>(null);
@@ -51,14 +61,14 @@ function ImportDialogBody({ onCancel, onInsert }: { onCancel: () => void; onInse
     try {
       const response = await request();
       const body = (await response.json().catch(() => null)) as
-        | (ConvertResult & { error?: { details?: { reason?: string } } })
+        | (Partial<ConvertResult> & { markdown?: string; error?: { code?: string; details?: { reason?: string } } })
         | null;
-      if (!response.ok || !body || body.error) {
-        const reason = body?.error?.details?.reason;
+      if (!response.ok || !body || body.error || typeof body.markdown !== 'string') {
+        const reason = body?.error?.details?.reason ?? TRACKER_ERRORS[body?.error?.code ?? ''];
         setError(t(`error_${reason ?? 'generic'}` as 'error_generic'));
         return;
       }
-      setResult(body);
+      setResult({ markdown: body.markdown, sheets: body.sheets ?? [], dropped_images: body.dropped_images ?? 0 });
     } catch {
       setError(t('error_generic'));
     } finally {
@@ -74,6 +84,19 @@ function ImportDialogBody({ onCancel, onInsert }: { onCancel: () => void; onInse
         body: file,
       }),
     );
+
+  // A key such as MAC-42 brings that issue in full; anything else is a search.
+  const fromTracker = () => {
+    const value = issueQuery.trim();
+    const body = /^[A-Za-z][A-Za-z0-9_]{0,19}-\d{1,9}$/.test(value) ? { key: value.toUpperCase() } : { query: value };
+    return run(() =>
+      fetch('/api/v1/trackers/markdown', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+  };
 
   const fromLink = () =>
     run(() =>
@@ -104,7 +127,7 @@ function ImportDialogBody({ onCancel, onInsert }: { onCancel: () => void; onInse
     >
       <div className="grid gap-4 text-sm">
         <div role="tablist" className="inline-flex w-fit rounded-(--radius-base) border border-border p-0.5">
-          {(['file', 'google'] as const).map((value) => (
+          {(['file', 'google', 'tracker'] as const).map((value) => (
             <button
               key={value}
               type="button"
@@ -120,7 +143,7 @@ function ImportDialogBody({ onCancel, onInsert }: { onCancel: () => void; onInse
                 source === value ? 'bg-secondary font-medium' : 'text-muted-foreground hover:text-foreground',
               )}
             >
-              {value === 'file' ? t('tabFile') : t('tabGoogle')}
+              {value === 'file' ? t('tabFile') : value === 'google' ? t('tabGoogle') : t('tabTracker')}
             </button>
           ))}
         </div>
@@ -139,6 +162,28 @@ function ImportDialogBody({ onCancel, onInsert }: { onCancel: () => void; onInse
               className="text-sm"
             />
           </Field>
+        ) : source === 'tracker' ? (
+          <div className="grid gap-2">
+            <Field label={t('trackerLabel')} htmlFor="tracker-query" hint={t('trackerHint')}>
+              <Input
+                id="tracker-query"
+                value={issueQuery}
+                placeholder="MAC-42 · project: MAC #Unresolved"
+                onChange={(event) => setIssueQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (issueQuery.trim() !== '') void fromTracker();
+                  }
+                }}
+              />
+            </Field>
+            <div>
+              <Button type="button" variant="outline" size="sm" disabled={pending || issueQuery.trim() === ''} onClick={() => void fromTracker()}>
+                {t('fetch')}
+              </Button>
+            </div>
+          </div>
         ) : (
           <div className="grid gap-2">
             <Field label={t('linkLabel')} htmlFor="sheet-link" hint={t('linkHint')}>

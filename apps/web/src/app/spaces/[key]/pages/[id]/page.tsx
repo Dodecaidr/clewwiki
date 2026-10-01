@@ -36,6 +36,8 @@ import { CommentsPanel } from '@/components/comments-panel';
 import { readRepositorySettings } from '@/lib/repository/settings';
 import { getSessionContext } from '@/lib/session';
 import { getLivePresence } from '@/lib/presence/live';
+import { getIssueSummaries } from '@/lib/trackers/service';
+import { findIssueKeys, issueLinker, issueUrl, readTrackers, trackerForKey } from '@/lib/trackers/settings';
 import { PresenceHeartbeat } from '@/components/presence-heartbeat';
 import {
   newSpaceDiscussionHref,
@@ -195,12 +197,22 @@ export default async function PageView({ params }: Props) {
     if (thread.anchor.state !== 'current') continue;
     (threadsByBlock[String(thread.anchor.blockIndex)] ??= []).push(thread.root.id);
   }
-  const html = await renderMarkdown(page.body, await renderLabels(), {
-    startLines: splitParagraphs(page.body).map((block) => block.startLine),
-    openThreads: new Map(
-      Object.entries(threadsByBlock).map(([index, ids]) => [Number(index), ids.length]),
-    ),
-  });
+  const trackers = readTrackers(session.workspace);
+  const html = await renderMarkdown(
+    page.body,
+    await renderLabels(),
+    {
+      startLines: splitParagraphs(page.body).map((block) => block.startLine),
+      openThreads: new Map(
+        Object.entries(threadsByBlock).map(([index, ids]) => [Number(index), ids.length]),
+      ),
+    },
+    issueLinker(trackers),
+  );
+  // The issues this page mentions, with their state where the tracker can be read.
+  const issueKeys = findIssueKeys(page.body, trackers);
+  const issueSummaries = issueKeys.length > 0 ? await getIssueSummaries(session.workspace, issueKeys) : new Map();
+  const ttr = await getTranslations('trackers');
 
   const ta = await getTranslations('anchors');
   const ti = await getTranslations('pageImages');
@@ -544,6 +556,40 @@ export default async function PageView({ params }: Props) {
           threadsByBlock={threadsByBlock}
         />
       )}
+
+      {issueKeys.length > 0 ? (
+        <section className="grid gap-2 rounded-(--radius-base) border border-border p-4 text-sm">
+          <h2 className="font-semibold">{ttr('panelHeading', { count: issueKeys.length })}</h2>
+          <ul className="grid gap-1">
+            {issueKeys.map((key) => {
+              const issue = issueSummaries.get(key);
+              const tracker = trackerForKey(trackers, key);
+              return (
+                <li key={key} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <a
+                    href={issue?.url ?? (tracker ? issueUrl(tracker, key) : '#')}
+                    rel="noopener noreferrer"
+                    className={cn('font-mono text-xs underline-offset-2 hover:underline', issue?.resolved && 'line-through')}
+                  >
+                    {key}
+                  </a>
+                  {issue ? (
+                    <>
+                      <span className="min-w-0">{issue.summary}</span>
+                      {issue.status ? (
+                        <span className="rounded-(--radius-base) border border-border px-1.5 text-xs text-muted-foreground">
+                          {issue.status}
+                        </span>
+                      ) : null}
+                      <span className="text-xs text-muted-foreground">{issue.assignee ?? ttr('unassigned')}</span>
+                    </>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       <FilesPanel
         pageId={page.id}
