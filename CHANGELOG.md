@@ -44,6 +44,20 @@ else changes until somebody creates a second organization.
   Over REST it is `GET /api/v1/presence`, and `wiki.get_presence` returns it
   as `active_now`. A tab reports itself every 30 seconds while visible and
   drops off two minutes after it stops.
+- **Spreadsheets and Google documents into pages, tables out to Excel.** The
+  editor's *Import table or document* takes an Excel workbook (.xlsx) or a
+  CSV/TSV file — semicolons as a Russian or German Excel saves them included —
+  and inserts its sheets as tables at the cursor, one per sheet under its name;
+  or a Google Sheets or Google Docs link shared with anyone who has it. Cells
+  come across as shown: a formula's result, a date as a date, hidden sheets
+  left out. Nothing is stored until the page is saved. A page with tables
+  offers them under *Export* as an .xlsx workbook — a sheet per table, named
+  after the heading above it, header row bold and frozen — or a single table
+  as CSV. Over REST: `PUT|POST /api/v1/sheets/convert` and
+  `GET /api/v1/export/{id}?format=xlsx|csv`. Workbooks are read and written by
+  the project's own code, no spreadsheet library; the old binary .xls is not
+  read. A Google document is fetched only from Google's own hosts, built from
+  the document id, never from the address as given.
 - **Theme and width switches** in the header: system, light or dark, and a
   wide or narrow page. Both are remembered per browser in a cookie, so the page
   is drawn right on the first byte. Wide is the default: on a large monitor

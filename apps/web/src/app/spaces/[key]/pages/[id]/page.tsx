@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { markdownTables } from '@clewwiki/import/sheets';
 import { notFound, redirect } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
@@ -282,6 +283,9 @@ export default async function PageView({ params }: Props) {
   // stronger statement about who may write to this page right now.
   const claim = activeClaims.find((entry) => entry.sectionId === null) ?? activeClaims[0] ?? null;
 
+  // Offered as a download only when there is something to download.
+  const tableCount = markdownTables(page.body).length;
+
   // Everybody else who has this page open right now, and the agents whose last
   // request was about it.
   const live = await getLivePresence({ workspaceId: session.workspace.id, spaceIds: session.spaceIds });
@@ -362,7 +366,7 @@ export default async function PageView({ params }: Props) {
               >
                 {t('export')}
               </summary>
-              <div className="absolute right-0 z-10 mt-1 grid w-40 gap-1 rounded-(--radius-base) border border-border bg-card p-1 text-sm shadow-sm">
+              <div className="absolute right-0 z-10 mt-1 grid w-48 gap-1 rounded-(--radius-base) border border-border bg-card p-1 text-sm shadow-sm">
                 <a
                   className="rounded-(--radius-base) px-2 py-1.5 hover:bg-secondary"
                   href={`/api/v1/export/${page.id}?format=md`}
@@ -375,6 +379,24 @@ export default async function PageView({ params }: Props) {
                 >
                   {t('exportHtml')}
                 </a>
+                {tableCount > 0 ? (
+                  <>
+                    <a
+                      className="rounded-(--radius-base) px-2 py-1.5 hover:bg-secondary"
+                      href={`/api/v1/export/${page.id}?format=xlsx`}
+                    >
+                      {t('exportXlsx', { count: tableCount })}
+                    </a>
+                    {tableCount === 1 ? (
+                      <a
+                        className="rounded-(--radius-base) px-2 py-1.5 hover:bg-secondary"
+                        href={`/api/v1/export/${page.id}?format=csv`}
+                      >
+                        {t('exportCsv')}
+                      </a>
+                    ) : null}
+                  </>
+                ) : null}
               </div>
             </details>
 

@@ -9,7 +9,8 @@
     "./confluence": "./src/confluence/index.ts",
     "./notion": "./src/notion/index.ts",
     "./markdown": "./src/markdown/index.ts",
-    "./pdf": "./src/pdf/index.ts"
+    "./pdf": "./src/pdf/index.ts",
+    "./sheets": "./src/sheets/index.ts"
   },
   "scripts": {
     "test": "vitest run",
