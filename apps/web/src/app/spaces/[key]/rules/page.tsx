@@ -14,6 +14,7 @@ import { getSessionContext } from '@/lib/session';
 import { spacePageEditHref, spacePageHref, spaceSettingsHref } from '@/lib/spaces/urls';
 import { formatDateTime } from '@/lib/utils';
 import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
+import { issueLinker, readTrackers } from '@/lib/trackers/settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,7 +84,7 @@ export default async function SpaceRulesPage({ params }: Props) {
     );
   }
 
-  const html = await renderMarkdown(page.body, await renderLabels());
+  const html = await renderMarkdown(page.body, await renderLabels(), undefined, issueLinker(readTrackers(session.workspace)));
 
   return (
     <article className="grid gap-5">

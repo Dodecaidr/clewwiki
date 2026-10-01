@@ -263,6 +263,10 @@ export function ConnectWizard({
             <CopyBlock code={t('dailyUpdate', { space: spaceKey })} wrap />
           </div>
           <div className="grid gap-1.5">
+            <p className="font-medium">{t('dailyTasksTitle')}</p>
+            <CopyBlock code={t('dailyTasks', { space: spaceKey })} wrap />
+          </div>
+          <div className="grid gap-1.5">
             <p className="font-medium">{t('dailyDiscussTitle')}</p>
             <CopyBlock code={t('dailyDiscuss', { space: spaceKey })} wrap />
           </div>

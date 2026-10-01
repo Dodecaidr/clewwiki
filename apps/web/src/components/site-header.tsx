@@ -135,6 +135,9 @@ export async function SiteHeader({ view }: { view: { theme: Theme; width: Width 
                   </span>
                 ) : null}
               </Link>
+              <Link href="/settings/trackers" className={linkClass}>
+                {t('trackers')}
+              </Link>
               <Link href="/tokens" className={linkClass}>
                 {t('tokens')}
               </Link>

@@ -24,6 +24,7 @@ import { formatDateTime } from '@/lib/utils';
 import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
 import { WatchButton } from '@/components/watch-button';
 import { isWatching } from '@/lib/files/watches';
+import { issueLinker, readTrackers } from '@/lib/trackers/settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,7 +129,7 @@ export default async function SpaceOverview({ params }: Props) {
   const homePage = home && home.spaceId === space.id ? home : null;
 
   if (homePage) {
-    const html = await renderMarkdown(homePage.body, await renderLabels());
+    const html = await renderMarkdown(homePage.body, await renderLabels(), undefined, issueLinker(readTrackers(session.workspace)));
     return (
       <article className="grid gap-5">
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
