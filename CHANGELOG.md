@@ -69,6 +69,12 @@ else changes until somebody creates a second organization.
   and, for Claude Code, a one-liner that installs them as `/wiki-read` and
   `/wiki-update`.
 
+### Security
+
+- **Next.js 16.3.8.** Next.js before 16.3.6 has a critical remote code
+  execution advisory in `next/og` (GHSA-vcvr-r3jv-pc5j). clewwiki does not use
+  `next/og`, but the vulnerable code ships in the image; upgrade.
+
 ### Fixed
 
 - A long page title in the space sidebar was drawn over the page beside it;

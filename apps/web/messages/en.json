@@ -623,7 +623,7 @@
   },
   "members": {
     "title": "Members",
-    "intro": "The people of this workspace. There is no self-registration and no e-mail is sent: an administrator makes an invitation link and hands it over, and the person who opens it chooses their own name and password.",
+    "intro": "The people of this organization. Nobody is sent an email: an administrator makes an invitation link and hands it over, or approves a request to join below, and the person picks their own name and password.",
     "inviteHeading": "Invite somebody",
     "inviteIntro": "The link works once, for this address, for seven days. It is shown here exactly once — only its hash is stored — so copy it before leaving the page. Inviting the same address again replaces the earlier link.",
     "email": "E-mail address",
