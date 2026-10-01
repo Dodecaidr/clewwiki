@@ -1,6 +1,6 @@
 @import 'tailwindcss';
 
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 /*
  * Colour tokens are defined once per theme and consumed only through Tailwind
@@ -44,8 +44,43 @@
   --chart-8: #e34948;
 }
 
+/*
+ * Dark tokens apply when the reader chose dark, or left the choice to the
+ * system and the system is dark. The block is written twice because a media
+ * query cannot be OR-ed with an attribute selector.
+ */
+:root[data-theme='dark'] {
+  --background: oklch(0.17 0.008 264);
+  --foreground: oklch(0.95 0.003 264);
+  --muted: oklch(0.24 0.011 264);
+  --muted-foreground: oklch(0.69 0.011 264);
+  --card: oklch(0.21 0.01 264);
+  --card-foreground: oklch(0.95 0.003 264);
+  --border: oklch(0.31 0.012 264);
+  --input: oklch(0.31 0.012 264);
+  --primary: oklch(0.72 0.12 250);
+  --primary-foreground: oklch(0.17 0.008 264);
+  --secondary: oklch(0.26 0.011 264);
+  --secondary-foreground: oklch(0.95 0.003 264);
+  --destructive: oklch(0.62 0.18 25);
+  --destructive-foreground: oklch(0.17 0.008 264);
+  --success: oklch(0.72 0.13 156);
+  --ring: oklch(0.72 0.12 250);
+  --warning: oklch(0.78 0.14 75);
+  --important: oklch(0.72 0.12 295);
+
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #008300;
+  --chart-7: #9085e9;
+  --chart-8: #e66767;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --background: oklch(0.17 0.008 264);
     --foreground: oklch(0.95 0.003 264);
     --muted: oklch(0.24 0.011 264);
@@ -105,6 +140,18 @@
 @layer base {
   * {
     border-color: var(--color-border);
+  }
+
+  :root {
+    color-scheme: light;
+  }
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+      color-scheme: dark;
+    }
   }
 
   body {

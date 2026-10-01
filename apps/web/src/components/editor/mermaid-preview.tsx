@@ -3,6 +3,8 @@
 import { checkMermaidSource } from '@clewwiki/content/mermaid';
 import { useEffect, useId, useState } from 'react';
 
+import { isDarkNow } from '@/lib/view/prefs';
+
 /**
  * A Mermaid diagram drawn live in the editor.
  *
@@ -41,7 +43,7 @@ export function MermaidPreview({ source, labels }: { source: string; labels: Mer
       void (async () => {
         try {
           const { default: mermaid } = await import('mermaid');
-          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          const prefersDark = isDarkNow();
           mermaid.initialize({
             startOnLoad: false,
             securityLevel: 'strict',

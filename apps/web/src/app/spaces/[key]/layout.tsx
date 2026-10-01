@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
@@ -13,6 +14,7 @@ import { countOpenDiscussions } from '@/lib/discussions/service';
 import { countPendingPages } from '@/lib/reviews/service';
 import type { ClaimRecord } from '@/lib/claims/service';
 import { getPageTree } from '@/lib/pages/service';
+import { TREE_KIND_COOKIE, readTreeKind } from '@/lib/pages/tree-filter';
 import type { PageTreeNode } from '@/lib/pages/service';
 import { getSessionContext } from '@/lib/session';
 import {
@@ -48,6 +50,7 @@ function toTreeItem(
     id: node.id,
     title: node.title,
     path: node.path,
+    kind: node.kind,
     claimLabel: claim ? labels.claim(claim) : null,
     staleAnchorCount: stale,
     staleAnchorLabel: stale > 0 ? labels.staleAnchors(stale) : null,
@@ -163,8 +166,8 @@ export default async function SpaceLayout({
         </div>
       </header>
 
-      <div className="grid gap-8 lg:grid-cols-[13rem_minmax(0,1fr)]">
-        <aside className="grid content-start gap-3">
+      <div className="grid gap-8 lg:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[19rem_minmax(0,1fr)]">
+        <aside className="grid min-w-0 content-start gap-3">
           {/* Rules and skills sit above the tree rather than inside it: they
               are not pages of the project, they are how the project tells an
               agent how to work in it. */}
@@ -238,6 +241,14 @@ export default async function SpaceLayout({
               nodes={tree.map((node) => toTreeItem(node, claims, staleAnchors, labels))}
               emptyLabel={t('empty')}
               hrefBase={spacePagesBase(space.key)}
+              initialKind={readTreeKind((await cookies()).get(TREE_KIND_COOKIE)?.value)}
+              filterLabels={{
+                group: t('treeFilterLabel'),
+                all: t('treeFilterAll'),
+                technical: t('kind_technical'),
+                human: t('kind_human'),
+                none: t('treeFilterNone'),
+              }}
             />
           </nav>
         </aside>

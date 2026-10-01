@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from 'react';
 
+import { isDarkNow } from '@/lib/view/prefs';
+
 /**
  * A rendered page body.
  *
@@ -27,9 +29,7 @@ export function PageBody({ html }: { html: string }) {
       const { default: mermaid } = await import('mermaid');
       if (cancelled) return;
 
-      const prefersDark =
-        typeof window !== 'undefined' &&
-        window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const prefersDark = isDarkNow();
 
       mermaid.initialize({
         startOnLoad: false,

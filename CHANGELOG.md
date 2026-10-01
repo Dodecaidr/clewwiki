@@ -9,6 +9,24 @@ tagged.
 
 ## [Unreleased]
 
+### Added
+
+- **Theme and width switches** in the header: system, light or dark, and a
+  wide or narrow page. Both are remembered per browser in a cookie, so the page
+  is drawn right on the first byte. Wide is the default: on a large monitor
+  the old column used a third of the screen.
+- **Technical / for-people filter** above a space's page tree. Pages of the
+  other kind that lead to a match stay, dimmed.
+- **Everyday commands** on *Connect an agent*: what to tell a connected agent
+  to read the wiki before a task, update it after one, or open a discussion —
+  and, for Claude Code, a one-liner that installs them as `/wiki-read` and
+  `/wiki-update`.
+
+### Fixed
+
+- A long page title in the space sidebar was drawn over the page beside it;
+  it is now cut with an ellipsis and shown in full on hover.
+
 ## [0.7.0] - 2026-09-24
 
 Files attached to pages, in versions, with watching. Upgrading runs migration

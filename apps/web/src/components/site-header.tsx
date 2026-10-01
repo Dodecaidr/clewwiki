@@ -4,15 +4,18 @@ import { getTranslations } from 'next-intl/server';
 import { signOutAction } from '@/app/actions';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import { SearchBox } from '@/components/search-box';
+import { ViewSwitcher } from '@/components/view-switcher';
 import { Button } from '@/components/ui/button';
 import { countUnread } from '@/lib/inbox/service';
 import { getSessionContext } from '@/lib/session';
 import { spaceHref } from '@/lib/spaces/urls';
 import { findSpaces } from '@/lib/spaces/visibility';
+import { shellWidthClass } from '@/lib/view/prefs';
+import type { Theme, Width } from '@/lib/view/prefs';
 
 const linkClass = 'whitespace-nowrap text-muted-foreground hover:text-foreground';
 
-export async function SiteHeader() {
+export async function SiteHeader({ view }: { view: { theme: Theme; width: Width } }) {
   const t = await getTranslations('nav');
   const tc = await getTranslations('common');
   const session = await getSessionContext();
@@ -27,7 +30,7 @@ export async function SiteHeader() {
 
   return (
     <header className="border-b border-border">
-      <nav className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-x-6 gap-y-3 px-6 py-4">
+      <nav className={`mx-auto flex w-full ${shellWidthClass(view.width)} flex-wrap items-center gap-x-6 gap-y-3 px-6 py-4`}>
         <Link href="/" className="font-semibold tracking-tight">
           clewwiki
         </Link>
@@ -99,6 +102,7 @@ export async function SiteHeader() {
         <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
           {session ? <SearchBox /> : null}
           <LanguageSwitcher />
+          <ViewSwitcher theme={view.theme} width={view.width} />
           {session ? (
             <Link href="/settings/account" className={`${linkClass} text-sm`} title={t('account')}>
               {session.name}

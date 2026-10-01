@@ -247,6 +247,49 @@ export function ConnectWizard({
           <p className="text-xs text-muted-foreground">{t('step4Note')}</p>
         </CardBody>
       </Card>
+
+      {/* Once connected, people ask "what do I type to make it read or update
+          the wiki?". The answer is a sentence, not a tool name: the agent
+          already knows the tools from the prompt above. */}
+      <Card>
+        <StepHeader number={6} title={t('stepDailyTitle')} description={t('stepDailyIntro')} />
+        <CardBody className="grid gap-4 text-sm">
+          <div className="grid gap-1.5">
+            <p className="font-medium">{t('dailyReadTitle')}</p>
+            <CopyBlock code={t('dailyRead', { space: spaceKey })} wrap />
+          </div>
+          <div className="grid gap-1.5">
+            <p className="font-medium">{t('dailyUpdateTitle')}</p>
+            <CopyBlock code={t('dailyUpdate', { space: spaceKey })} wrap />
+          </div>
+          <div className="grid gap-1.5">
+            <p className="font-medium">{t('dailyDiscussTitle')}</p>
+            <CopyBlock code={t('dailyDiscuss', { space: spaceKey })} wrap />
+          </div>
+          {host === 'claude-code' ? (
+            <div className="grid gap-1.5">
+              <p className="font-medium">{t('dailySlashTitle')}</p>
+              <p className="text-xs text-muted-foreground">{t('dailySlashHint')}</p>
+              <CopyBlock
+                code={[
+                  'mkdir -p .claude/commands',
+                  "cat > .claude/commands/wiki-update.md <<'EOF'",
+                  t('dailyUpdate', { space: spaceKey }),
+                  '',
+                  '$ARGUMENTS',
+                  'EOF',
+                  "cat > .claude/commands/wiki-read.md <<'EOF'",
+                  t('dailyRead', { space: spaceKey }),
+                  '',
+                  '$ARGUMENTS',
+                  'EOF',
+                ].join('\n')}
+                wrap
+              />
+            </div>
+          ) : null}
+        </CardBody>
+      </Card>
     </div>
   );
 }
