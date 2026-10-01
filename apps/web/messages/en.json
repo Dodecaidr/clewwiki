@@ -1515,7 +1515,7 @@
     "baseUrl": "Address",
     "baseUrlHint": "https://…, without a trailing path such as /issues.",
     "projects": "Project keys",
-    "projectsHint": "The prefixes of its issue keys, comma-separated: NSYSM, MAC.",
+    "projectsHint": "The prefixes of its issue keys, comma-separated: APP, MAC.",
     "urlTemplate": "Issue address",
     "urlTemplateHint": "With {key}, or {project} and {number}, in it.",
     "tokenEnv": "Token variable",

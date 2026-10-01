@@ -9,9 +9,18 @@ tagged.
 
 ## [Unreleased]
 
-Upgrading runs migrations `0021_organizations` and `0022_live_presence`. It makes the administrators of
-the organization created at setup the administrators of the instance; nothing
-else changes until somebody creates a second organization.
+## [0.8.0] - 2026-10-01
+
+Organizations, requests to join, live presence, spreadsheets and Google
+documents in pages, and issue trackers. It also moves to Next.js 16.3.8 for a
+critical advisory: upgrade even if none of the rest is wanted.
+
+Upgrading runs migrations `0021_organizations` and `0022_live_presence`. The
+first makes the administrators of the organization created at setup the
+administrators of the instance; nothing else changes until somebody creates a
+second organization. To read issues from YouTrack or Jira, add the tracker
+token variables to the `web` service's environment — the shipped
+`docker-compose.yml` and `.env.example` show them.
 
 ### Added
 
@@ -838,7 +847,8 @@ image are published from this tag; earlier commits were development on
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.4.0...v0.5.0

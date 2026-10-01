@@ -24,7 +24,7 @@ const youtrack: TrackerSettings = {
   kind: 'youtrack',
   name: 'YouTrack',
   base_url: 'https://yt.example.com',
-  projects: ['NSYSM', 'MAC'],
+  projects: ['APP', 'MAC'],
   token_env: 'CLEWWIKI_TRACKER_TOKEN_YT',
 };
 const jira: TrackerSettings = {
@@ -61,12 +61,12 @@ afterEach(() => {
 
 describe('tracker settings', () => {
   it('keeps what an administrator may link, and nothing that would carry a secret', () => {
-    expect(normalizeTracker({ kind: 'youtrack', name: ' YT ', baseUrl: 'https://yt.example.com/youtrack/', projects: 'mac, nsysm;MAC' }, 'id1')).toEqual({
+    expect(normalizeTracker({ kind: 'youtrack', name: ' YT ', baseUrl: 'https://yt.example.com/youtrack/', projects: 'mac, app;MAC' }, 'id1')).toEqual({
       id: 'id1',
       kind: 'youtrack',
       name: 'YT',
       base_url: 'https://yt.example.com/youtrack',
-      projects: ['MAC', 'NSYSM'],
+      projects: ['MAC', 'APP'],
     });
     expect(field({ baseUrl: 'http://yt.example.com' })).toBe('base_url');
     expect(field({ baseUrl: 'https://user:pass@yt.example.com' })).toBe('base_url');
@@ -83,8 +83,8 @@ describe('tracker settings', () => {
 
   it('finds keys of linked projects only, and builds each tracker’s issue address', () => {
     const trackers = [youtrack, jira, gitlab];
-    expect(findIssueKeys('See NSYSM-978, MAC-1 and WEB-7; not XNSYSM-1, MAC-2x or ABC-3. NSYSM-978 again. GL-15', trackers)).toEqual([
-      'NSYSM-978',
+    expect(findIssueKeys('See APP-978, MAC-1 and WEB-7; not XAPP-1, MAC-2x or ABC-3. APP-978 again. GL-15', trackers)).toEqual([
+      'APP-978',
       'MAC-1',
       'WEB-7',
       'GL-15',
