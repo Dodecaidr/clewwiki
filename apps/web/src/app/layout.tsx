@@ -5,6 +5,8 @@ import type { ReactNode } from 'react';
 
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
+import { shellWidthClass } from '@/lib/view/prefs';
+import { getViewPrefs } from '@/lib/view/server';
 
 import './globals.css';
 
@@ -24,14 +26,16 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const locale = await getLocale();
+  const view = await getViewPrefs();
+  const shell = shellWidthClass(view.width);
 
   return (
-    <html lang={locale}>
+    <html lang={locale} data-theme={view.theme}>
       <body className="flex min-h-dvh flex-col">
         <NextIntlClientProvider>
-          <SiteHeader />
-          <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">{children}</main>
-          <SiteFooter />
+          <SiteHeader view={view} />
+          <main className={`mx-auto w-full ${shell} flex-1 px-6 py-10`}>{children}</main>
+          <SiteFooter shellClass={shell} />
         </NextIntlClientProvider>
       </body>
     </html>
