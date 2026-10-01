@@ -126,12 +126,18 @@ export function issueUrl(tracker: TrackerSettings, key: string): string {
     .replace(/\{number\}/g, encodeURIComponent(number));
 }
 
-/** Every distinct issue key in a text, in order of first appearance. */
+/**
+ * Every distinct issue key in a page body, in order of first appearance —
+ * outside code, the same keys the renderer turns into links.
+ */
 export function findIssueKeys(text: string, trackers: TrackerSettings[]): string[] {
   const pattern = issueKeyPattern(trackers);
   if (!pattern) return [];
+  const prose = text
+    .replace(/^(\s*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1\2[^\n]*$/gm, '')
+    .replace(/`[^`\n]*`/g, '');
   const keys = new Set<string>();
-  for (const match of text.matchAll(pattern)) keys.add(`${match[1]}-${match[2]}`);
+  for (const match of prose.matchAll(pattern)) keys.add(`${match[1]}-${match[2]}`);
   return [...keys];
 }
 

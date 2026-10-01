@@ -89,6 +89,7 @@ describe('tracker settings', () => {
       'WEB-7',
       'GL-15',
     ]);
+    expect(findIssueKeys('MAC-1 and `MAC-2`\n\n```\nMAC-3\n```\nMAC-4', trackers)).toEqual(['MAC-1', 'MAC-4']);
     expect(trackerForKey(trackers, 'WEB-7')?.name).toBe('Jira');
     expect(issueUrl(youtrack, 'MAC-1')).toBe('https://yt.example.com/issue/MAC-1');
     expect(issueUrl(jira, 'WEB-7')).toBe('https://acme.atlassian.net/browse/WEB-7');
