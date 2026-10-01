@@ -15,7 +15,7 @@ import { getAgentRateLimitMax, getAgentRateLimitWindowSeconds, getAuthBaseUrl } 
 import { TokenBucketRateLimiter } from './rate-limit';
 import { hasAllScopes } from './scopes';
 import type { AgentScope } from './scopes';
-import { getMembershipForUser, getWorkspaceById } from './workspace';
+import { chosenOrgFromCookieHeader, getActiveMembership, getWorkspaceById } from './workspace';
 
 export interface UserIdentity {
   type: 'user';
@@ -130,7 +130,10 @@ async function authenticateSession(request: Request, options: AuthenticateOption
     };
   }
 
-  const membership = await getMembershipForUser(session.user.id);
+  const membership = await getActiveMembership(
+    session.user.id,
+    chosenOrgFromCookieHeader(request.headers.get('cookie')),
+  );
   if (!membership) {
     return {
       ok: false,

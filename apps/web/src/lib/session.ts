@@ -1,11 +1,11 @@
 import { canWrite } from './roles';
 import 'server-only';
 
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import type { MembershipRole, Workspace } from '@clewwiki/db';
 
 import { auth } from './auth';
-import { getMembershipForUser, getWorkspaceById } from './workspace';
+import { ORG_COOKIE, getActiveMembership, getWorkspaceById } from './workspace';
 import { visibleSpaceIdsForUser } from './spaces/visibility';
 
 export interface SessionContext {
@@ -36,7 +36,9 @@ export async function getSessionContext(): Promise<SessionContext | null> {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) return null;
 
-  const membership = await getMembershipForUser(session.user.id);
+  // The organization the reader switched to, if they are still in it.
+  const chosen = (await cookies()).get(ORG_COOKIE)?.value;
+  const membership = await getActiveMembership(session.user.id, chosen);
   if (!membership) return null;
 
   const workspace = await getWorkspaceById(membership.workspaceId);
@@ -62,4 +64,16 @@ export async function getSessionContext(): Promise<SessionContext | null> {
 export async function getWriterSession(): Promise<SessionContext | null> {
   const session = await getSessionContext();
   return session && canWrite(session.role) ? session : null;
+}
+
+/**
+ * The signed-in account whether or not it belongs to any organization — for
+ * the few screens that serve exactly that case: waiting for approval, asking
+ * to join one more organization, accepting an invitation with an account that
+ * already exists.
+ */
+export async function getSignedInUser(): Promise<{ id: string; name: string; email: string } | null> {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user) return null;
+  return { id: session.user.id, name: session.user.name, email: session.user.email };
 }

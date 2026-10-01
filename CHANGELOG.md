@@ -9,7 +9,31 @@ tagged.
 
 ## [Unreleased]
 
+Upgrading runs migration `0021_organizations`. It makes the administrators of
+the organization created at setup the administrators of the instance; nothing
+else changes until somebody creates a second organization.
+
 ### Added
+
+- **Organizations.** One instance can now hold several, each with its own
+  members, spaces, agent tokens, administrators and settings — the data was
+  already scoped per workspace, and an organization is a workspace. An
+  instance administrator creates one under **Organizations** and becomes its
+  first administrator. One account can belong to several and switches between
+  them from the menu next to the logo; each has its own entrance at
+  `/o/<address>`, which signs in straight into it. An invitation to an address
+  that already has an account is accepted with that account. Removing a member
+  of two organizations removes them from one and keeps the account. Single
+  sign-on with `OIDC_SIGN_UP` still provisions into the organization made at
+  setup.
+- **Asking to join.** An organization's administrators can open requests under
+  **Members**; the sign-in page then offers *Ask to join*, and
+  `/o/<address>/register` takes a name, an address, a password and a note.
+  Nobody gets in on their own: the account exists but sees only *Waiting for
+  approval* until an administrator approves it with a role (the menu shows how
+  many are waiting) or rejects it, which deletes an account that belongs
+  nowhere else. Five requests an hour per client address. The address is not
+  marked verified, so single sign-on never links into such an account.
 
 - **Theme and width switches** in the header: system, light or dark, and a
   wide or narrow page. Both are remembered per browser in a cookie, so the page

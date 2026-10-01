@@ -11,7 +11,7 @@ import { Field, Input } from '@/components/ui/field';
 
 const initialState: LoginFormState = {};
 
-export function LoginForm() {
+export function LoginForm({ org, next }: { org?: string; next?: string }) {
   const t = useTranslations('login');
   const tc = useTranslations('common');
   const [state, action, pending] = useActionState(signInAction, initialState);
@@ -19,6 +19,8 @@ export function LoginForm() {
   return (
     <form action={action} className="grid gap-5">
       {state.error ? <Alert tone="error">{t('error')}</Alert> : null}
+      {org ? <input type="hidden" name="org" value={org} /> : null}
+      {next ? <input type="hidden" name="next" value={next} /> : null}
 
       <Field label={t('email')} htmlFor="email">
         <Input id="email" name="email" type="email" required autoComplete="username" />

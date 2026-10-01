@@ -2,11 +2,16 @@ import { redirect } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import type { Metadata } from 'next';
 
+import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select } from '@/components/ui/field';
+import { getAuthBaseUrl } from '@/lib/env';
 import { listInvitations, listMembers } from '@/lib/members/service';
+import { listPendingAccessRequests, readRegistrationMode } from '@/lib/orgs/access';
 import { getSessionContext } from '@/lib/session';
 import { formatDateTime } from '@/lib/utils';
 
+import { decideAccessAction, setRegistrationAction } from './access-actions';
 import { InviteForm, RemoveMemberButton, ResetLinkButton, RevokeInvitationButton, RoleForm } from './member-forms';
 
 export const dynamic = 'force-dynamic';
@@ -25,10 +30,13 @@ export default async function MembersPage() {
   const t = await getTranslations('members');
   const format = await getFormatter();
   const isAdmin = session.role === 'admin';
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, requests] = await Promise.all([
     listMembers(session.workspace.id),
     isAdmin ? listInvitations(session.workspace.id) : Promise.resolve([]),
+    isAdmin ? listPendingAccessRequests(session.workspace.id) : Promise.resolve([]),
   ]);
+  const registration = readRegistrationMode(session.workspace);
+  const registerLink = `${getAuthBaseUrl().replace(/\/+$/, '')}/o/${session.workspace.slug}/register`;
 
   return (
     <div className="grid gap-6">
@@ -68,6 +76,77 @@ export default async function MembersPage() {
                   ))}
                 </ul>
               </div>
+            ) : null}
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {isAdmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('accessHeading')}</CardTitle>
+            <CardDescription>{t('accessIntro')}</CardDescription>
+          </CardHeader>
+          <CardBody className="grid gap-5 text-sm">
+            <form action={setRegistrationAction} className="flex flex-wrap items-center gap-3">
+              <span>{registration === 'approval' ? t('registrationOn') : t('registrationOff')}</span>
+              <input type="hidden" name="mode" value={registration === 'approval' ? 'off' : 'approval'} />
+              <Button type="submit" variant="outline" size="sm">
+                {registration === 'approval' ? t('registrationTurnOff') : t('registrationTurnOn')}
+              </Button>
+            </form>
+            {registration === 'approval' ? (
+              <p className="text-xs text-muted-foreground">
+                {t('registrationLink')}{' '}
+                <span className="font-mono break-all text-foreground">{registerLink}</span>
+              </p>
+            ) : null}
+            {requests.length > 0 ? (
+              <div className="grid gap-2">
+                <h3 className="text-sm font-medium">{t('requestsHeading', { count: requests.length })}</h3>
+                <ul className="grid gap-2">
+                  {requests.map((request) => (
+                    <li
+                      key={request.id}
+                      className="grid gap-2 rounded-(--radius-base) border border-border px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        <span className="font-medium">{request.name}</span>
+                        <span className="font-mono text-xs text-muted-foreground">{request.email}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDateTime(format, request.createdAt) ?? ''}
+                        </span>
+                      </div>
+                      {request.message ? (
+                        <p className="whitespace-pre-wrap text-xs text-muted-foreground">{request.message}</p>
+                      ) : null}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <form action={decideAccessAction} className="flex items-center gap-2">
+                          <input type="hidden" name="requestId" value={request.id} />
+                          <input type="hidden" name="decision" value="approve" />
+                          <Select name="role" defaultValue="viewer" aria-label={t('roleLabel')}>
+                            <option value="viewer">{t('role_viewer')}</option>
+                            <option value="editor">{t('role_editor')}</option>
+                            <option value="admin">{t('role_admin')}</option>
+                          </Select>
+                          <Button type="submit" size="sm">
+                            {t('approve')}
+                          </Button>
+                        </form>
+                        <form action={decideAccessAction}>
+                          <input type="hidden" name="requestId" value={request.id} />
+                          <input type="hidden" name="decision" value="reject" />
+                          <Button type="submit" variant="outline" size="sm">
+                            {t('reject')}
+                          </Button>
+                        </form>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : registration === 'approval' ? (
+              <p className="text-xs text-muted-foreground">{t('requestsNone')}</p>
             ) : null}
           </CardBody>
         </Card>

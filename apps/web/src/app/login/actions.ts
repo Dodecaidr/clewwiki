@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { auth } from '@/lib/auth';
+import { rememberOrganization } from '@/lib/orgs/cookie';
+import { getMembership, getMembershipForUser, getWorkspaceBySlug } from '@/lib/workspace';
 import { attemptLogin } from '@/lib/login';
 import { OIDC_PROVIDER_ID } from '@/lib/oidc';
 
@@ -38,11 +40,30 @@ export async function signInAction(
     password: parsed.data.password,
     headers: new Headers(await headers()),
   });
-  if (!result.ok) {
+  if (!result.ok || !result.userId) {
     return { error: 'invalid' };
   }
 
-  redirect('/');
+  // Signed in through an organization's entrance: work in that organization.
+  const org = formData.get('org');
+  if (typeof org === 'string' && org !== '') {
+    const workspace = await getWorkspaceBySlug(org.toLowerCase());
+    if (workspace && (await getMembership(result.userId, workspace.id))) {
+      await rememberOrganization(workspace.id);
+    }
+  }
+  // An account still waiting for approval has nothing to open yet.
+  if (!(await getMembershipForUser(result.userId))) redirect('/pending');
+
+  redirect(safeNext(formData.get('next')));
+}
+
+/** Only a path on this site: `//host` and absolute URLs would make sign-in an open redirect. */
+function safeNext(value: FormDataEntryValue | null): string {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) {
+    return '/';
+  }
+  return value.length > 500 ? '/' : value;
 }
 
 /**

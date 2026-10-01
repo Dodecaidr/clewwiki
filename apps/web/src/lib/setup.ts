@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { eq } from 'drizzle-orm';
-import { memberships, users, withAdvisoryLock, workspaces } from '@clewwiki/db';
+import { instanceAdmins, memberships, users, withAdvisoryLock, workspaces } from '@clewwiki/db';
 
 import { auth } from './auth';
 import { markEmailVerified } from './members/verified';
@@ -86,6 +86,8 @@ export async function completeSetup(input: SetupInput): Promise<SetupOutcome> {
         if (!workspace) throw new Error('The workspace could not be created');
 
         await tx.insert(memberships).values({ workspaceId: workspace.id, userId, role: 'admin' });
+        // The first account runs the instance, and so may create organizations.
+        await tx.insert(instanceAdmins).values({ userId }).onConflictDoNothing();
 
         await recordAudit(
           {

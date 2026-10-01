@@ -140,6 +140,9 @@ export const auth = betterAuth({
   // server-side (`auth.api`, not the HTTP router). Closing the public route
   // means nobody can register themselves — before setup, when an
   // account created this way would lock the operator out of /setup, or after.
+  // An organization that takes requests to join (`lib/orgs/access`) creates
+  // the account server-side too, with no membership until an administrator
+  // approves it, and leaves the address unverified.
   disabledPaths: ['/sign-up/email'],
   // `nextCookies` must stay last, so the provider plugin goes before it.
   plugins: [...(oidc === null ? [] : [oidcPlugins(oidc)]), nextCookies()],

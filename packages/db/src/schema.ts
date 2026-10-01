@@ -139,6 +139,12 @@ export interface WorkspaceSettings {
    * within the bounds the claim service enforces.
    */
   claim_ttl_seconds?: number;
+  /**
+   * Whether people may ask to join from the sign-in page. `approval` opens
+   * the request form; every request waits for an administrator. Absent or
+   * `off` means joining is by invitation only.
+   */
+  registration?: 'off' | 'approval';
 }
 
 /**
@@ -272,6 +278,56 @@ export const memberships = pgTable(
   (table) => [
     uniqueIndex('memberships_workspace_user_key').on(table.workspaceId, table.userId),
     index('memberships_user_idx').on(table.userId),
+  ],
+);
+
+/**
+ * Accounts that run the instance rather than one organization: they may create
+ * organizations. Every workspace is an organization; each has its own members,
+ * spaces, tokens and administrators, and an instance administrator is not a
+ * member of an organization unless they are added to it like anybody else.
+ */
+export const instanceAdmins = pgTable('instance_admins', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const accessRequestStatus = pgEnum('access_request_status', ['pending', 'approved', 'rejected']);
+
+/**
+ * Somebody asking to join an organization from its sign-in page.
+ *
+ * The account exists from the moment of asking — it holds the password the
+ * person chose — but it has no membership, so it can sign in and see nothing
+ * but "waiting for approval". An administrator approves with a role, which
+ * writes the membership, or rejects, which deletes the account when it belongs
+ * to no organization at all.
+ */
+export const accessRequests = pgTable(
+  'access_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** What the person wrote about who they are; shown to administrators only. */
+    message: text('message').notNull().default(''),
+    status: accessRequestStatus('status').notNull().default('pending'),
+    role: membershipRole('role'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decidedBy: text('decided_by').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    index('access_requests_workspace_idx').on(table.workspaceId, table.status, table.createdAt),
+    uniqueIndex('access_requests_pending_key')
+      .on(table.workspaceId, table.userId)
+      .where(sql`${table.status} = 'pending'`),
   ],
 );
 

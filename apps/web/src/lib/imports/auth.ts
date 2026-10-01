@@ -7,7 +7,7 @@ import { checkSessionMutation, checkUploadMutation } from '../csrf';
 import { getAuthBaseUrl } from '../env';
 import { apiError } from '../api-response';
 import { visibleSpaceIdsForUser } from '../spaces/visibility';
-import { getMembershipForUser, getWorkspaceById } from '../workspace';
+import { chosenOrgFromCookieHeader, getActiveMembership, getWorkspaceById } from '../workspace';
 import type { ImportActor } from './service';
 import type { UserIdentity } from '../api-auth';
 
@@ -65,7 +65,10 @@ export async function authorizeImportRequest(
     return { ok: false, response: apiError(401, 'unauthenticated', 'Authentication required') };
   }
 
-  const membership = await getMembershipForUser(session.user.id);
+  const membership = await getActiveMembership(
+    session.user.id,
+    chosenOrgFromCookieHeader(request.headers.get('cookie')),
+  );
   if (!membership) {
     return {
       ok: false,

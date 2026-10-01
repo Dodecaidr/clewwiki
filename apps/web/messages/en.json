@@ -22,7 +22,9 @@
     "inbox": "Inbox",
     "inboxUnread": "{count, plural, one {# unread} other {# unread}}",
     "members": "Members",
-    "account": "Your account"
+    "account": "Your account",
+    "organizations": "Organizations",
+    "accessRequests": "{count, plural, one {# request to join} other {# requests to join}}"
   },
   "home": {
     "title": "clewwiki",
@@ -530,7 +532,11 @@
     "ssoIntro": "Your organisation's single sign-on is set up on this wiki.",
     "ssoSubmit": "Continue with {name}",
     "ssoDenied": "You signed in, but you are not a member of this wiki. Ask an administrator to invite you.",
-    "ssoFailed": "Single sign-on did not complete. Try again, or sign in with a password."
+    "ssoFailed": "Single sign-on did not complete. Try again, or sign in with a password.",
+    "titleOrg": "Sign in to {org}",
+    "noAccount": "No account yet?",
+    "requestAccess": "Ask to join",
+    "inviteOnly": "No account yet? Ask an administrator for an invitation."
   },
   "join": {
     "title": "Join",
@@ -549,7 +555,12 @@
     "error_emailTaken": "An account with this address already exists. Sign in instead.",
     "error_password": "The password must be 12 to 256 characters.",
     "error_generic": "The account could not be created. Ask an administrator to look at the server log.",
-    "intro_viewer": "You were invited as a viewer: you can read pages, discussions and comments, search and export, and you have an inbox. You cannot change anything."
+    "intro_viewer": "You were invited as a viewer: you can read pages, discussions and comments, search and export, and you have an inbox. You cannot change anything.",
+    "existingSignedIn": "You already have an account with {email}. Join with it — your password stays the same.",
+    "joinExisting": "Join {workspace}",
+    "wrongAccount": "You are signed in as {signedIn}, but the invitation is for {invited}. Sign out and open the link again.",
+    "existingSignIn": "{email} already has an account on this wiki.",
+    "signInToJoin": "Sign in to join"
   },
   "reset": {
     "title": "Choose a new password",
@@ -628,7 +639,7 @@
     "joinedAt": "joined {when}",
     "saveRole": "Save",
     "remove": "Remove",
-    "removeConfirm": "Remove {name}? Their account is deleted and they are signed out everywhere. What they wrote stays, under their name.",
+    "removeConfirm": "Remove {name}? They leave this organization and their sessions here end; an account in no other organization is deleted. What they wrote stays under their name.",
     "removeYes": "Remove",
     "removeNo": "Cancel",
     "error_forbidden": "Only an administrator can do this.",
@@ -649,7 +660,19 @@
     "error_rateLimited": "Too many attempts. Wait a quarter of an hour.",
     "error_invalidReset": "That reset link no longer works.",
     "role_viewer": "Viewer",
-    "rolesHint": "A viewer reads everything they can see and changes nothing. An editor also writes pages, takes part in discussions and reviews what agents change. An administrator also manages members, agent tokens and spaces."
+    "rolesHint": "A viewer reads everything they can see and changes nothing. An editor also writes pages, takes part in discussions and reviews what agents change. An administrator also manages members, agent tokens and spaces.",
+    "accessHeading": "Requests to join",
+    "accessIntro": "Let people ask to join from the sign-in page. Nobody gets in on their own: every request waits here for an administrator, who picks the role.",
+    "registrationOn": "Requests are open.",
+    "registrationOff": "Requests are closed — joining is by invitation only.",
+    "registrationTurnOn": "Open requests",
+    "registrationTurnOff": "Close requests",
+    "registrationLink": "Link to the request form:",
+    "requestsHeading": "{count, plural, one {# request waiting} other {# requests waiting}}",
+    "requestsNone": "No requests waiting.",
+    "roleLabel": "Role",
+    "approve": "Approve",
+    "reject": "Reject"
   },
   "account": {
     "title": "Your account",
@@ -1362,5 +1385,64 @@
     "theme_dark": "Theme: dark",
     "width_wide": "Use the full width of the screen",
     "width_narrow": "Use a narrower column"
+  },
+  "orgs": {
+    "title": "Organizations",
+    "intro": "Each organization has its own members, spaces, agent tokens and administrators; nothing is shared between them. One account can be in several.",
+    "mineHeading": "Your organizations",
+    "mineNone": "You are not in any organization yet.",
+    "current": "Current",
+    "switch": "Switch",
+    "role_admin": "Administrator",
+    "role_editor": "Editor",
+    "role_viewer": "Reader",
+    "createHeading": "New organization",
+    "createIntro": "You become its first administrator and invite people from Members. Its entrance is /o/….",
+    "name": "Name",
+    "slug": "Address",
+    "slugHint": "Lower-case letters, digits and hyphens, 2–40 characters. Appears in /o/….",
+    "create": "Create organization",
+    "allHeading": "{count, plural, one {# organization on this instance} other {# organizations on this instance}}",
+    "allIntro": "Visible to instance administrators only.",
+    "memberCount": "{count, plural, one {# member} other {# members}}",
+    "notMember": "You are not a member",
+    "error_forbidden": "Only an instance administrator can create organizations.",
+    "error_name": "Give the organization a name of up to 80 characters.",
+    "error_slug": "The address must be 2–40 lower-case letters, digits or hyphens, and not a reserved word.",
+    "error_slugTaken": "That address is taken.",
+    "error_generic": "Something went wrong. Try again."
+  },
+  "register": {
+    "title": "Ask to join",
+    "heading": "Ask to join {org}",
+    "intro": "An administrator will look at your request and choose your role. You can sign in in the meantime; you will see that the request is waiting.",
+    "introSignedIn": "You are signed in as {name}. The request is sent with this account.",
+    "name": "Name",
+    "email": "Email",
+    "password": "Password",
+    "passwordHint": "At least 12 characters.",
+    "message": "Who you are",
+    "messageHint": "Optional: team, role, who sent you here. Only administrators see it.",
+    "submit": "Send request",
+    "haveAccount": "Already have an account?",
+    "signIn": "Sign in",
+    "error_closed": "This organization does not take requests.",
+    "error_email": "That does not look like an email address.",
+    "error_emailTaken": "There is already an account with this address. Sign in and ask from there.",
+    "error_password": "The password must be 12 to 256 characters.",
+    "error_name": "Enter a name of up to 100 characters.",
+    "error_alreadyMember": "You are already a member.",
+    "error_alreadyRequested": "Your request is already waiting.",
+    "error_notFound": "Request not found.",
+    "error_rateLimited": "Too many requests from here. Try again in an hour.",
+    "error_generic": "Something went wrong. Try again."
+  },
+  "pending": {
+    "title": "Waiting for approval",
+    "waiting": "{name}, your request is with the administrators. You get in as soon as one of them approves it.",
+    "noOrganization": "{name}, your account is not in any organization on this wiki.",
+    "askedAt": "asked {when}",
+    "hint": "Nothing to do here meanwhile. If it takes long, write to an administrator you know.",
+    "check": "Check again"
   }
 }
