@@ -91,7 +91,9 @@
     "versionShort": "v{version}",
     "treeFilterLabel": "Show pages",
     "treeFilterAll": "All",
-    "treeFilterNone": "No pages of this kind yet."
+    "treeFilterNone": "No pages of this kind yet.",
+    "exportXlsx": "{count, plural, one {Table as Excel (.xlsx)} other {# tables as Excel (.xlsx)}}",
+    "exportCsv": "Table as CSV"
   },
   "spaces": {
     "settings": "Space settings",
@@ -387,7 +389,8 @@
     "sessionOffline": "The connection to the editing session was lost. It reconnects by itself; what you type meanwhile is kept and sent when it is back.",
     "sessionReset": "This page was changed while the session was paused, so this editor is showing a version that no longer exists.",
     "sessionReload": "Load the page again",
-    "markdownLocked": "Somebody else is editing this page with you, so Markdown is shown here and not edited: two people cannot type into one text box. Use the Visual tab."
+    "markdownLocked": "Somebody else is editing this page with you, so Markdown is shown here and not edited: two people cannot type into one text box. Use the Visual tab.",
+    "importTable": "Import table or document"
   },
   "movePage": {
     "title": "Move to another space",
@@ -1461,5 +1464,29 @@
     "personViewing": "{name} reading",
     "personEditing": "{name} editing",
     "agentHere": "agent {name}"
+  },
+  "sheetImport": {
+    "title": "Import a table or a document",
+    "description": "An Excel workbook or a CSV file becomes Markdown tables, one per sheet. A Google Sheet or Google Doc is read by its link. Nothing is stored until you save the page.",
+    "cancel": "Cancel",
+    "insert": "Insert",
+    "tabFile": "File",
+    "tabGoogle": "Google link",
+    "fileLabel": "Excel or CSV file",
+    "fileHint": ".xlsx, .csv or .tsv, up to 8 MB. The old .xls format is not read — save it as .xlsx first.",
+    "linkLabel": "Google Sheets or Google Docs link",
+    "linkHint": "The document must be shared as “Anyone with the link”. Private documents cannot be read.",
+    "fetch": "Fetch",
+    "working": "Reading…",
+    "sheetSize": "{rows, plural, one {# row} other {# rows}} × {columns, plural, one {# column} other {# columns}}",
+    "droppedImages": "{count, plural, one {# image} other {# images}} from the document could not come along; add them to the page separately.",
+    "error_format": "This file type is not read. Use .xlsx, .csv or .tsv.",
+    "error_unreadable": "The file could not be read as a spreadsheet.",
+    "error_notGoogle": "That is not a Google Sheets or Google Docs link.",
+    "error_notPublic": "The document is not shared by link. In Google, choose Share → “Anyone with the link”.",
+    "error_tooLarge": "The file is larger than 8 MB.",
+    "error_unavailable": "Google did not answer. Try again in a moment.",
+    "error_empty": "There is nothing in it to insert.",
+    "error_generic": "Something went wrong. Try again."
   }
 }

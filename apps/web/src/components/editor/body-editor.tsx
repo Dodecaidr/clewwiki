@@ -17,6 +17,7 @@ import type { MarkdownStore } from './collab/use-session';
 import type { SessionProvider } from './collab/provider';
 import type { ParsedMarkdown } from './markdown-bridge';
 import type { VisualEditorHandle } from './visual-editor';
+import { ImportDialog } from './import-dialog';
 import { PageBody } from '@/components/page-body';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/card';
@@ -92,6 +93,7 @@ export function BodyEditor({
   const hintId = useId();
   const issuesId = useId();
   const [mode, setMode] = useState<EditorMode>('visual');
+  const [importing, setImporting] = useState(false);
   const [body, setBody] = useState(initialBody);
   const [notice, setNotice] = useState<'unsafe' | null>(null);
   const [rawBlocks, setRawBlocks] = useState(0);
@@ -209,18 +211,44 @@ export function BodyEditor({
             </button>
           ))}
         </div>
-        {mode === 'markdown' ? (
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            aria-pressed={showPreview}
-            onClick={() => setShowPreview((value) => !value)}
+            disabled={mode === 'markdown' && markdownLocked}
+            onClick={() => setImporting(true)}
           >
-            {showPreview ? t('hidePreview') : t('showPreview')}
+            {t('importTable')}
           </Button>
-        ) : null}
+          {mode === 'markdown' ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-pressed={showPreview}
+              onClick={() => setShowPreview((value) => !value)}
+            >
+              {showPreview ? t('hidePreview') : t('showPreview')}
+            </Button>
+          ) : null}
+        </div>
       </div>
+
+      <ImportDialog
+        open={importing}
+        onCancel={() => setImporting(false)}
+        onInsert={(markdown) => {
+          setImporting(false);
+          // In the visual tab it lands at the cursor; in the Markdown tab, at the end.
+          if (mode === 'visual' && visualRef.current?.insertMarkdown(markdown)) return;
+          const current = mode === 'visual' && visualRef.current ? visualRef.current.getMarkdown() : body;
+          const next = current.trim() === '' ? markdown : `${current.replace(/\s+$/, '')}\n\n${markdown}\n`;
+          update(next);
+          if (session && mode === 'markdown') session.applyMarkdown(next);
+          if (mode === 'visual') setVisualKey((key) => key + 1);
+        }}
+      />
 
       {/* JSON-encoded: a browser rewrites line breaks in submitted fields to
           CRLF, and the stored Markdown must arrive byte for byte. */}

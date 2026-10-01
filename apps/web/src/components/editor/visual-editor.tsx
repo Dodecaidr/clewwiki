@@ -40,6 +40,8 @@ import type { ImageUploadError } from './upload-image';
 
 export interface VisualEditorHandle {
   getMarkdown: () => string;
+  /** Inserts Markdown at the cursor, as structure rather than text. */
+  insertMarkdown: (markdown: string) => boolean;
 }
 
 export interface VisualEditorProps {
@@ -316,7 +318,10 @@ export default function VisualEditor({
   useEffect(() => {
     controller.attach(editor);
     handleRef.current = editor
-      ? { getMarkdown: () => serializeDocument(editor.getJSON(), parsedRef.current) }
+      ? {
+          getMarkdown: () => serializeDocument(editor.getJSON(), parsedRef.current),
+          insertMarkdown: (markdown: string) => controller.pasteMarkdown(markdown),
+        }
       : null;
     return () => {
       controller.dispose();
