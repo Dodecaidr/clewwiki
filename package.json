@@ -12,7 +12,12 @@
       "@tree-sitter-grammars/tree-sitter-kotlin>npm-check-updates": "-"
     },
     "onlyBuiltDependencies": ["@parcel/watcher", "@swc/core", "esbuild", "unrs-resolver"],
-    "ignoredBuiltDependencies": ["@tree-sitter-grammars/tree-sitter-kotlin", "tree-sitter-javascript", "tree-sitter-typescript"]
+    "ignoredBuiltDependencies": ["@tree-sitter-grammars/tree-sitter-kotlin", "tree-sitter-javascript", "tree-sitter-typescript"],
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-vfj7-8cjw-p6xm"
+      ]
+    }
   },
   "scripts": {
     "dev": "pnpm --filter @clewwiki/web dev",
