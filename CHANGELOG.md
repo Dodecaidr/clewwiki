@@ -9,6 +9,14 @@ tagged.
 
 ## [Unreleased]
 
+### Security
+
+- The dependency audit ignores GHSA-vfj7-8cjw-p6xm (`braces`, denial of
+  service through deeply nested patterns). It reaches the repository only
+  through the lint toolchain (`eslint-config-next` → `fast-glob` →
+  `micromatch`), never the image or the published package, and no fixed
+  version exists yet. Revisit when one does.
+
 ## [0.8.0] - 2026-10-01
 
 Organizations, requests to join, live presence, spreadsheets and Google
