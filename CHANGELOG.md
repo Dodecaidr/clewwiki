@@ -9,7 +9,11 @@ tagged.
 
 ## [Unreleased]
 
-Upgrading runs migration `0023_development`.
+## [0.9.0] - 2026-10-05
+
+Development: where each branch stands, which release it belongs to, and what
+was merged with no release to ship in. Upgrading runs migration
+`0023_development`; nothing else needs changing.
 
 ### Added
 
@@ -881,7 +885,8 @@ image are published from this tag; earlier commits were development on
   with an explicit partial result instead of silent truncation, and
   recomputation moved to a `POST` requiring `pages:write`.
 
-[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Dodecaidr/clewwiki/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Dodecaidr/clewwiki/compare/v0.5.0...v0.6.0
