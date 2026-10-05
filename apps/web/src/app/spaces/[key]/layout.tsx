@@ -12,6 +12,7 @@ import { getStaleAnchorCounts } from '@/lib/anchors/service';
 import { getActiveClaimsByPage } from '@/lib/claims/service';
 import { countOpenDiscussions } from '@/lib/discussions/service';
 import { countPendingPages } from '@/lib/reviews/service';
+import { buildOverview, listStreams } from '@/lib/development/service';
 import type { ClaimRecord } from '@/lib/claims/service';
 import { getPageTree } from '@/lib/pages/service';
 import { TREE_KIND_COOKIE, readTreeKind } from '@/lib/pages/tree-filter';
@@ -20,6 +21,7 @@ import { getSessionContext } from '@/lib/session';
 import {
   newSpacePageHref,
   spaceChangesHref,
+  spaceDevelopmentHref,
   spaceDiscussionsHref,
   spaceHref,
   spacePagesBase,
@@ -96,7 +98,7 @@ export default async function SpaceLayout({
   const tdis = await getTranslations('discussions');
   const trev = await getTranslations('reviews');
   const format = await getFormatter();
-  const [tree, claims, staleAnchors, openDiscussions, pendingReviews] = await Promise.all([
+  const [tree, claims, staleAnchors, openDiscussions, pendingReviews, streams] = await Promise.all([
     getPageTree(session.workspace.id, space.id),
     // One query each for the whole sidebar rather than one per node: presence
     // and anchor state are cheap only if they are read in bulk.
@@ -104,7 +106,12 @@ export default async function SpaceLayout({
     getStaleAnchorCounts(session.workspace.id),
     countOpenDiscussions(session.workspace.id, [space.id]),
     countPendingPages(session.workspace.id, space.id),
+    listStreams(session.workspace.id, space.id),
   ]);
+  // Merged into the default branch with no release to ship in: the thing a team
+  // forgets, so it is counted where everybody looks.
+  const mergedUnreleased = buildOverview(streams, []).mergedUnreleased.length;
+  const tdev = await getTranslations('development');
   const openCount = openDiscussions.get(space.id) ?? 0;
 
   const labels: TreeLabels = {
@@ -204,6 +211,21 @@ export default async function SpaceLayout({
             {/* The number is pages, not revisions: it is how many things there
                 are to read, which is what somebody deciding whether to look
                 now or later wants to know. */}
+            <Link
+              href={spaceDevelopmentHref(space.key)}
+              className="flex items-center justify-between gap-2 rounded-(--radius-base) px-2 py-1 font-medium hover:bg-secondary"
+            >
+              <span>{tdev('title')}</span>
+              {mergedUnreleased > 0 ? (
+                <span
+                  aria-label={tdev('mergedUnreleasedBadge', { count: mergedUnreleased })}
+                  title={tdev('mergedUnreleasedBadge', { count: mergedUnreleased })}
+                  className="rounded-full border border-warning px-1.5 text-xs font-medium tabular-nums"
+                >
+                  {mergedUnreleased}
+                </span>
+              ) : null}
+            </Link>
             <Link
               href={spaceChangesHref(space.key)}
               className="flex items-center justify-between gap-2 rounded-(--radius-base) px-2 py-1 font-medium hover:bg-secondary"

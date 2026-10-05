@@ -60,6 +60,7 @@ const openSchema = z.object({
   title: z.string().trim().min(1).max(MAX_DISCUSSION_TITLE_LENGTH),
   body: z.string().trim().min(1).max(MAX_MESSAGE_BYTES),
   pageId: z.union([z.uuid(), z.literal('')]),
+  streamId: z.union([z.uuid(), z.literal('')]),
 });
 
 export async function openDiscussionAction(
@@ -74,6 +75,7 @@ export async function openDiscussionAction(
     title: formText(formData, 'title'),
     body: formText(formData, 'body'),
     pageId: formText(formData, 'pageId'),
+    streamId: formText(formData, 'streamId'),
   });
   if (!parsed.success) {
     return { error: 'validation', message: parsed.error.issues[0]?.message };
@@ -91,6 +93,7 @@ export async function openDiscussionAction(
       title: parsed.data.title,
       body: parsed.data.body,
       pageId: parsed.data.pageId === '' ? null : parsed.data.pageId,
+      streamId: parsed.data.streamId === '' ? null : parsed.data.streamId,
     });
     discussionId = result.discussion.id;
   } catch (error) {

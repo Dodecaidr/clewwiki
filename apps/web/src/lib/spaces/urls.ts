@@ -110,3 +110,11 @@ export function spacePageChangesHref(
   const base = `${spacePageHref(spaceKey, pageId)}/changes`;
   return range ? `${base}?from=${range.from}&to=${range.to}` : base;
 }
+
+export function spaceDevelopmentHref(key: string): string {
+  return `${spaceHref(key)}/development`;
+}
+
+export function spaceStreamHref(key: string, streamId: string): string {
+  return `${spaceDevelopmentHref(key)}/${streamId}`;
+}

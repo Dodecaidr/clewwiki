@@ -984,6 +984,8 @@ export const discussions = pgTable(
     pageId: uuid('page_id').references((): AnyPgColumn => pages.id, { onDelete: 'set null' }),
     /** A named section of that page, or null for the whole page. */
     sectionId: text('section_id'),
+    /** The line of development — a branch — this thread is a problem of, if any. */
+    streamId: uuid('stream_id').references((): AnyPgColumn => devStreams.id, { onDelete: 'set null' }),
     lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     /** Who resolved it: an actor id, or `system` when the sweep closed it. */
@@ -1690,5 +1692,95 @@ export const presenceHeartbeats = pgTable(
   (table) => [
     primaryKey({ columns: [table.workspaceId, table.userId] }),
     index('presence_heartbeats_seen_idx').on(table.workspaceId, table.seenAt),
+  ],
+);
+
+export const devReleaseState = pgEnum('dev_release_state', ['planned', 'shipped']);
+
+/**
+ * A release a space is heading for: the streams that must be in it, and
+ * whether each of them has reached the default branch yet. Shipping one
+ * records when; what was in it stays attached.
+ */
+export const devReleases = pgTable(
+  'dev_releases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    /** As the team names it: `2.4.0`, `October`. Unique in its space. */
+    name: text('name').notNull(),
+    state: devReleaseState('state').notNull().default('planned'),
+    /** The day it is meant to go out, if there is one. */
+    dueOn: text('due_on'),
+    notes: text('notes').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    shippedAt: timestamp('shipped_at', { withTimezone: true }),
+  },
+  (table) => [uniqueIndex('dev_releases_space_name_key').on(table.spaceId, sql`lower(${table.name})`)],
+);
+
+export interface DevStreamBranch {
+  commit: string;
+  committed_at: string;
+  subject: string;
+  ahead: number;
+  behind: number;
+  merged: boolean;
+  /** False once the branch is no longer in the repository. */
+  present: boolean;
+  default_branch: string;
+  synced_at: string;
+}
+
+export const devStreamState = pgEnum('dev_stream_state', ['planned', 'active', 'review', 'merged', 'paused', 'dropped']);
+
+/**
+ * A line of development in a space — usually one git branch: what it is for,
+ * how far it has got, which issues it carries, where its documentation lives.
+ * The space's *Development* view is the list of these; its problems are the
+ * discussions attached to it, and their decisions land under `docsPageId` so
+ * they outlive the threads.
+ */
+export const devStreams = pgTable(
+  'dev_streams',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    spaceId: uuid('space_id')
+      .notNull()
+      .references((): AnyPgColumn => spaces.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    /** The git branch, when the stream is one. Unique in its space. */
+    ref: text('ref'),
+    state: devStreamState('state').notNull().default('active'),
+    /** Where it is heading and why, in Markdown. */
+    goal: text('goal').notNull().default(''),
+    /** Issue keys the stream carries besides those in its branch name. */
+    issueKeys: text('issue_keys').array().notNull().default(sql`'{}'::text[]`),
+    /** The release it is meant to ship in, if decided. */
+    releaseId: uuid('release_id').references((): AnyPgColumn => devReleases.id, { onDelete: 'set null' }),
+    /** The page its documentation and decisions live under. */
+    docsPageId: uuid('docs_page_id').references((): AnyPgColumn => pages.id, { onDelete: 'set null' }),
+    createdByType: actorType('created_by_type').notNull(),
+    createdById: text('created_by_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    /** When it was seen merged into the repository's default branch, or marked so. */
+    mergedAt: timestamp('merged_at', { withTimezone: true }),
+    /** The branch as the last repository sync saw it; null before one, or with no branch. */
+    branch: jsonb('branch').$type<DevStreamBranch | null>(),
+  },
+  (table) => [
+    index('dev_streams_space_idx').on(table.spaceId, table.state, table.updatedAt),
+    uniqueIndex('dev_streams_space_ref_key')
+      .on(table.spaceId, table.ref)
+      .where(sql`${table.ref} is not null`),
   ],
 );

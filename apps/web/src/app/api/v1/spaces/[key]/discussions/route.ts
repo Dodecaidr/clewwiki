@@ -35,6 +35,7 @@ const openBodySchema = z
     body: z.string().min(1).max(MAX_MESSAGE_BYTES * 2),
     page_id: z.uuid().nullish(),
     section_id: z.string().max(200).nullish(),
+    stream_id: z.uuid().nullish(),
   })
   .strict();
 
@@ -117,6 +118,7 @@ export async function POST(request: Request, context: RouteContext) {
       body: parsed.data.body,
       pageId: parsed.data.page_id ?? null,
       sectionId: parsed.data.section_id ?? null,
+      streamId: parsed.data.stream_id ?? null,
     });
 
     return apiCreated(

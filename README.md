@@ -16,7 +16,7 @@ Status: v0.8.0, early and under active development.
 
 ## Why this one
 
-**MCP is part of the wiki, not an add-on.** 37 tools over stdio or streamable
+**MCP is part of the wiki, not an add-on.** 40 tools over stdio or streamable
 HTTP, and a REST API beneath them. Agents create and edit pages as well as read
 them. A token is scoped to the spaces it may touch, it expires, it can be
 revoked, and every write it makes lands in an audit log.
