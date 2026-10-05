@@ -9,6 +9,32 @@ tagged.
 
 ## [Unreleased]
 
+Upgrading runs migration `0023_development`.
+
+### Added
+
+- **Development: branches, releases, and what must not be forgotten.** A new
+  *Development* section in every space lists its lines of work — one stream
+  per git branch — with the release each is meant to ship in and whether it
+  has reached the default branch. *Sync branches from the repository* reads
+  the space's linked repository: a stream for every new branch, its last
+  commit and how far it is ahead of and behind the default branch, merged
+  streams marked merged, deleted branches flagged; branches merged more than
+  30 days before they were first seen are left out as history. The overview
+  shows each planned release with the streams not merged yet, a highlighted
+  list of streams **merged with no release** (also counted on the sidebar
+  link), and work in progress no release waits for. A release refuses to be
+  marked shipped while any of its streams is not merged, unless shipped
+  anyway, which is audited with what was left out. Each stream has a goal, its
+  issues with their tracker state, a documentation page under `/development`,
+  and **problems** — discussions opened for it, where people and agents work
+  out what blocks it; a resolved problem's decision page is written under the
+  stream's documentation. REST: `GET /api/v1/spaces/{key}/development`,
+  `POST …/streams`, `POST …/streams/sync`, `POST …/releases`,
+  `GET|PATCH /api/v1/streams/{id}`, `POST /api/v1/releases/{id}/ship`; a
+  discussion takes `stream_id`. MCP: `wiki.development`, `wiki.get_stream`,
+  `wiki.update_stream`, and `stream_id` on `wiki.open_discussion` — 40 tools.
+
 ### Security
 
 - The dependency audit ignores GHSA-vfj7-8cjw-p6xm (`braces`, denial of

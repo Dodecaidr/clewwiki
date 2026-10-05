@@ -24,11 +24,16 @@ export function OpenDiscussionForm({
   spaceKey,
   pageId,
   pageTitle,
+  streamId = null,
+  streamTitle = null,
   cancelHref,
 }: {
   spaceKey: string;
   pageId: string | null;
   pageTitle: string | null;
+  /** The development stream this is a problem of. */
+  streamId?: string | null;
+  streamTitle?: string | null;
   cancelHref: string;
 }) {
   const t = useTranslations('discussions');
@@ -39,6 +44,10 @@ export function OpenDiscussionForm({
     <form action={action} className="grid gap-4">
       <input type="hidden" name="spaceKey" value={spaceKey} />
       <input type="hidden" name="pageId" value={pageId ?? ''} />
+      <input type="hidden" name="streamId" value={streamId ?? ''} />
+      {streamTitle ? (
+        <p className="text-sm text-muted-foreground">{t('aboutStream', { title: streamTitle })}</p>
+      ) : null}
 
       {state.error ? (
         <Alert tone="error">{state.message ?? t('errorGeneric')}</Alert>

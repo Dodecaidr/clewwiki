@@ -27,7 +27,7 @@ function tool(name: string) {
 }
 
 describe('tool surface', () => {
-  it('registers exactly the thirty-seven tools docs/mcp.md names', () => {
+  it('registers exactly the forty tools docs/mcp.md names', () => {
     expect(TOOLS.map((definition) => definition.name)).toEqual([
       'wiki.list_spaces',
       'wiki.format_guide',
@@ -66,8 +66,11 @@ describe('tool surface', () => {
       'wiki.my_tasks',
       'wiki.get_issue',
       'wiki.search_issues',
+      'wiki.development',
+      'wiki.get_stream',
+      'wiki.update_stream',
     ]);
-    expect(TOOLS).toHaveLength(37);
+    expect(TOOLS).toHaveLength(40);
   });
 
   it('names every tool whose result carries text written by others', () => {
@@ -97,6 +100,8 @@ describe('tool surface', () => {
         'wiki.my_tasks',
         'wiki.get_issue',
         'wiki.search_issues',
+        'wiki.development',
+        'wiki.get_stream',
       ].sort(),
     );
   });
@@ -142,6 +147,25 @@ describe('tool surface', () => {
       'wiki.my_tasks',
       'wiki.get_issue',
       'wiki.search_issues',
+      'wiki.development',
+      'wiki.get_stream',
+    ]);
+  });
+
+  it('reads development through the wiki and reports progress with a PATCH', async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${String(input)} ${init?.body ? String(init.body) : ''}`.trim());
+      return jsonResponse(200, {});
+    }) as unknown as FetchLike;
+    const id = '00000000-0000-4000-8000-000000000001';
+    await tool('wiki.development').run(clientWith(fetchMock), { space: 'API' });
+    await tool('wiki.get_stream').run(clientWith(fetchMock), { stream_id: id });
+    await tool('wiki.update_stream').run(clientWith(fetchMock), { stream_id: id, state: 'review' });
+    expect(calls).toEqual([
+      'GET https://wiki.example.com/api/v1/spaces/API/development',
+      `GET https://wiki.example.com/api/v1/streams/${id}`,
+      `PATCH https://wiki.example.com/api/v1/streams/${id} {"state":"review"}`,
     ]);
   });
 

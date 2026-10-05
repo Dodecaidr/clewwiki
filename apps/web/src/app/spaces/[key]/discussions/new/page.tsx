@@ -10,10 +10,11 @@ import { readDiscussionPolicy } from '@/lib/discussions/retention';
 import { getSessionContext } from '@/lib/session';
 import { spaceDiscussionsHref, spaceHref } from '@/lib/spaces/urls';
 import { findPage, findSpaceByKey } from '@/lib/spaces/visibility';
+import { getStream } from '@/lib/development/service';
 
 export const dynamic = 'force-dynamic';
 
-type Props = { params: Promise<{ key: string }>; searchParams: Promise<{ page?: string }> };
+type Props = { params: Promise<{ key: string }>; searchParams: Promise<{ page?: string; stream?: string }> };
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations('discussions');
@@ -43,7 +44,12 @@ export default async function NewDiscussionPage({ params, searchParams }: Props)
   const t = await getTranslations('discussions');
   const policy = readDiscussionPolicy(space.settings);
 
-  const requested = (await searchParams).page;
+  const query = await searchParams;
+  const requested = query.page;
+  // `stream` makes the thread a problem of that line of development.
+  const stream =
+    query.stream && /^[0-9a-f-]{36}$/i.test(query.stream) ? await getStream(session.workspace.id, query.stream) : null;
+  const streamHere = stream && stream.spaceId === space.id ? stream : null;
   // A page from another space, or one that has been deleted, simply does not
   // prefill: the thread is still worth opening.
   const about = requested ? await findPage(session, requested) : null;
@@ -80,6 +86,8 @@ export default async function NewDiscussionPage({ params, searchParams }: Props)
             spaceKey={space.key}
             pageId={page?.id ?? null}
             pageTitle={page?.title ?? null}
+            streamId={streamHere?.id ?? null}
+            streamTitle={streamHere?.title ?? null}
             cancelHref={spaceDiscussionsHref(space.key)}
           />
           <div className="mt-3">

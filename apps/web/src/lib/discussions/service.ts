@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { and, asc, count, desc, eq, inArray, isNull, lte } from 'drizzle-orm';
-import { discussionMessages, discussions, pages, spaces } from '@clewwiki/db';
+import { devStreams, discussionMessages, discussions, pages, spaces } from '@clewwiki/db';
 import type { SQL } from 'drizzle-orm';
 import type { ActorKind, DiscussionStatusValue, SpaceSettings } from '@clewwiki/db';
 
@@ -63,6 +63,7 @@ export interface DiscussionRecord {
   openedByLabel: string;
   pageId: string | null;
   sectionId: string | null;
+  streamId: string | null;
   lastActivityAt: Date;
   resolvedAt: Date | null;
   resolvedBy: string | null;
@@ -106,6 +107,7 @@ const discussionColumns = {
   openedByLabel: discussions.openedByLabel,
   pageId: discussions.pageId,
   sectionId: discussions.sectionId,
+  streamId: discussions.streamId,
   lastActivityAt: discussions.lastActivityAt,
   resolvedAt: discussions.resolvedAt,
   resolvedBy: discussions.resolvedBy,
@@ -590,6 +592,8 @@ export interface OpenDiscussionInput {
   body: string;
   pageId?: string | null;
   sectionId?: string | null;
+  /** The development stream this is a problem of. */
+  streamId?: string | null;
 }
 
 export interface OpenDiscussionResult {
@@ -619,6 +623,15 @@ export async function openDiscussion(
       // about a page the caller may not be able to see.
       throw new PageServiceError('not_found', 'Page not found');
     }
+  }
+
+  if (input.streamId) {
+    const [stream] = await db
+      .select({ id: devStreams.id })
+      .from(devStreams)
+      .where(and(eq(devStreams.id, input.streamId), eq(devStreams.workspaceId, input.workspaceId), eq(devStreams.spaceId, space.id)))
+      .limit(1);
+    if (!stream) throw new PageServiceError('not_found', 'Stream not found in this space');
   }
 
   // Applied before the count, so threads that should already be gone do not
@@ -657,6 +670,7 @@ export async function openDiscussion(
         openedByLabel: input.actor.label,
         pageId: input.pageId ?? null,
         sectionId,
+        streamId: input.streamId ?? null,
         lastActivityAt: now,
         expiresAt: nextExpiry('open', now, space.policy),
       })
@@ -694,6 +708,7 @@ export async function openDiscussion(
           title: created.title,
           page_id: created.pageId,
           section_id: created.sectionId,
+          stream_id: input.streamId ?? null,
         },
       },
       tx,
@@ -875,6 +890,18 @@ async function resolveDecisionsParent(
   return parent;
 }
 
+async function streamDocsParent(workspaceId: string, spaceId: string, discussionId: string): Promise<PageRecord | null> {
+  const [row] = await getDatabase()
+    .select({ docsPageId: devStreams.docsPageId })
+    .from(discussions)
+    .innerJoin(devStreams, eq(devStreams.id, discussions.streamId))
+    .where(and(eq(discussions.id, discussionId), eq(discussions.workspaceId, workspaceId)))
+    .limit(1);
+  if (!row?.docsPageId) return null;
+  const page = await getPageById(workspaceId, row.docsPageId);
+  return page && page.spaceId === spaceId && page.deletedAt === null ? page : null;
+}
+
 /**
  * Rewrites an existing decision page, taking and giving back a claim around the
  * write.
@@ -1001,7 +1028,10 @@ export async function resolveDiscussion(
     );
     created = false;
   } else {
-    const parent = await resolveDecisionsParent(space, input.workspaceId, input.actor, locale);
+    // A problem of a development stream is decided where that stream's
+    // documentation lives, so the decision stays with the branch.
+    const streamDocs = await streamDocsParent(input.workspaceId, space.id, thread.discussion.id);
+    const parent = streamDocs ?? (await resolveDecisionsParent(space, input.workspaceId, input.actor, locale));
     page = await createPage({
       workspaceId: input.workspaceId,
       spaceId: space.id,

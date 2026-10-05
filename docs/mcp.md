@@ -568,7 +568,7 @@ Opens a thread with its first message. Maps to
 
 ```
 input:  { space: string, title: string (max 200 chars), body: string (max 8 KB),
-          page_id?: string, section_id?: string }
+          page_id?: string, section_id?: string, stream_id?: string }
 output: { …the discussion resource…, message: { … } }
 errors: VALIDATION (empty title, oversized body, space already at its open cap),
         NOT_FOUND (space or page out of reach), CONFLICT (archived space)
@@ -982,6 +982,58 @@ The tracker is read with the token the operator put in the environment
 never the caller's own, and only over `https` to a public address unless the
 operator listed the host in `TRACKER_PRIVATE_HOSTS`. Issue text is written by
 people in the tracker and is returned as data.
+
+### wiki.development
+
+The space's development overview. Maps to `GET /api/v1/spaces/{key}/development`,
+`pages:read`.
+
+```
+input:  { space: string }
+output: { space, releases: [ { release_id, name, state, due_on, notes, shipped_at,
+                               streams: [ stream… ], not_merged: [ title… ] } ],
+          merged_without_release: [ stream… ], in_progress_without_release: [ stream… ] }
+stream: { stream_id, title, branch, state, merged, goal, issue_keys, release_id, release,
+          docs_page_id, open_problems, git: { last_commit, last_commit_at, last_commit_subject,
+          ahead, behind, merged, present, default_branch, synced_at } | null, updated_at, merged_at }
+```
+
+A stream is one line of development — usually one git branch. `git` is the
+branch as the last repository sync saw it (`POST /api/v1/spaces/{key}/streams/sync`,
+`pages:write`, which also creates streams for new branches and marks merged
+ones); it is never read from git on a request. `merged_without_release` is the
+list a team loses track of: in the default branch, in no release.
+
+### wiki.get_stream
+
+One stream with its problems and issues. Maps to `GET /api/v1/streams/{id}`,
+`pages:read`.
+
+```
+input:  { stream_id: string }
+output: { stream, problems: [ { discussion_id, title, status, opened_by, last_activity_at, decision_page_id } ],
+          issues: [ …as in wiki.get_issue without description, or { key, readable: false } ] }
+```
+
+Problems are discussions opened with `stream_id` (see `wiki.open_discussion`).
+When one is resolved, its decision page is written under the stream's
+documentation page, so it stays with the branch after the thread is deleted.
+
+### wiki.update_stream
+
+Report progress. Maps to `PATCH /api/v1/streams/{id}`, `pages:write`.
+
+```
+input:  { stream_id, state?: planned|active|review|merged|paused|dropped, goal?, issue_keys?,
+          release_id?: string|null, branch?: string|null }
+output: { stream }
+```
+
+Releases are created with `POST /api/v1/spaces/{key}/releases` and shipped with
+`POST /api/v1/releases/{id}/ship`, which answers `409` with `details.missing`
+while any of its streams has not reached the default branch, unless
+`{"force": true}`. Neither has a tool: planning and shipping a release is a
+person's call.
 
 ## Write sequence
 

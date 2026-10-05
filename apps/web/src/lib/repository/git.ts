@@ -387,3 +387,77 @@ export async function probeRepository(
     return { ok: false, error: sanitizeGitError(error) };
   }
 }
+
+export interface BranchInfo {
+  name: string;
+  commit: string;
+  committedAt: string;
+  /** The last commit's subject line: written by whoever committed it, shown as data. */
+  subject: string;
+  /** Already contained in the default branch. */
+  merged: boolean;
+  /** Commits on the branch the default branch lacks, and the other way round. */
+  ahead: number;
+  behind: number;
+}
+
+const MAX_BRANCHES = 200;
+
+/**
+ * The branches of the space's mirror, newest commit first, each measured
+ * against the default branch. The mirror must have been synced first.
+ */
+export async function listBranches(
+  dir: string,
+  settings: RepositorySettings,
+): Promise<{ defaultBranch: string; branches: BranchInfo[] }> {
+  let defaultBranch = settings.default_ref?.trim() || '';
+  try {
+    if (defaultBranch === '') {
+      defaultBranch = (await git(['symbolic-ref', '--quiet', '--short', 'HEAD'], settings, dir)).trim();
+    }
+  } catch {
+    defaultBranch = 'main';
+  }
+  if (!isSafeRef(defaultBranch)) throw new PageServiceError('validation', `Unsupported ref: ${defaultBranch}`);
+  const base = await resolveCommit(dir, defaultBranch, settings);
+
+  let listing: string;
+  let merged: string;
+  try {
+    listing = await git(
+      [
+        'for-each-ref',
+        '--sort=-committerdate',
+        `--count=${MAX_BRANCHES}`,
+        '--format=%(refname:short)%00%(objectname)%00%(committerdate:iso-strict)%00%(subject)',
+        'refs/heads',
+      ],
+      settings,
+      dir,
+    );
+    merged = await git(['for-each-ref', `--merged=${base}`, '--format=%(refname:short)', 'refs/heads'], settings, dir);
+  } catch (error) {
+    throw repositoryError('The branches could not be listed', error);
+  }
+  const mergedSet = new Set(merged.split('\n').map((line) => line.trim()).filter(Boolean));
+
+  const branches: BranchInfo[] = [];
+  for (const line of listing.split('\n')) {
+    if (line.trim() === '') continue;
+    const [name = '', commit = '', committedAt = '', subject = ''] = line.split('\0');
+    if (!isSafeRef(name)) continue;
+    let ahead = 0;
+    let behind = 0;
+    try {
+      const counts = (await git(['rev-list', '--left-right', '--count', `${base}...${commit}`], settings, dir)).trim();
+      const [left = '0', right = '0'] = counts.split(/\s+/);
+      behind = Number(left) || 0;
+      ahead = Number(right) || 0;
+    } catch {
+      // A branch that cannot be measured is still listed.
+    }
+    branches.push({ name, commit, committedAt, subject: subject.slice(0, 300), merged: mergedSet.has(name), ahead, behind });
+  }
+  return { defaultBranch, branches };
+}

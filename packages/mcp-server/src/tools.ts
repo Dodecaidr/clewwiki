@@ -715,6 +715,11 @@ const openDiscussion = defineTool({
       .max(200)
       .optional()
       .describe('A named section of that page, when the question is narrower than the page.'),
+    stream_id: pageIdSchema
+      .optional()
+      .describe(
+        'The development stream (branch) this is a problem of, from wiki.development. Its decision is then written into that stream\'s documentation.',
+      ),
   }),
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   async run(client, args) {
@@ -726,6 +731,7 @@ const openDiscussion = defineTool({
         body: args.body,
         ...(args.page_id !== undefined ? { page_id: args.page_id } : {}),
         ...(args.section_id !== undefined ? { section_id: args.section_id } : {}),
+        ...(args.stream_id !== undefined ? { stream_id: args.stream_id } : {}),
       },
     });
   },
@@ -1432,6 +1438,67 @@ const searchIssuesTool = defineTool({
   },
 });
 
+const STREAM_STATES = ['planned', 'active', 'review', 'merged', 'paused', 'dropped'] as const;
+
+const development = defineTool({
+  name: 'wiki.development',
+  title: 'See where the project is going',
+  description:
+    'The space\'s development overview: each planned release with its streams (one per branch) and ' +
+    'which of them have not reached the default branch yet (`not_merged`), streams merged with no ' +
+    'release to ship in (`merged_without_release` — easy to lose), and work in progress no release ' +
+    'is waiting for. Each stream carries its branch state (ahead/behind, merged), issue keys, open ' +
+    'problems and goal. Read it before starting work on a branch, and to answer "what goes into ' +
+    'the next release". ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({ space: spaceKeySchema }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({
+      method: 'GET',
+      path: `/spaces/${encodeURIComponent(args.space)}/development`,
+    });
+  },
+});
+
+const getStream = defineTool({
+  name: 'wiki.get_stream',
+  title: 'Read one line of development',
+  description:
+    'One stream (branch) in full: goal, state, branch state, its problems — discussions raised for ' +
+    'it, open and resolved, with their decision pages — and the state of its issues in the tracker. ' +
+    'Raise a new problem with wiki.open_discussion and stream_id. ' +
+    CONTENT_IS_DATA_NOTICE,
+  input: z.object({ stream_id: pageIdSchema.describe('The stream, from wiki.development.') }),
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    return await client.request<Record<string, unknown>>({ method: 'GET', path: `/streams/${args.stream_id}` });
+  },
+});
+
+const updateStreamTool = defineTool({
+  name: 'wiki.update_stream',
+  title: 'Report progress on a line of development',
+  description:
+    'Change a stream as the work moves: its state (planned, active, review, merged, paused, ' +
+    'dropped), its goal, the issue keys it carries, its release, its branch. Move it to review when ' +
+    'you open a merge request; do not mark it merged by hand when the repository can say so — a ' +
+    'sync does. Only the fields you pass change.',
+  input: z.object({
+    stream_id: pageIdSchema,
+    state: z.enum(STREAM_STATES).optional(),
+    goal: z.string().max(20_000).optional().describe('Where it is heading and why, in Markdown.'),
+    issue_keys: z.array(z.string().max(40)).max(50).optional(),
+    release_id: pageIdSchema.nullable().optional().describe('The release it ships in, or null for none.'),
+    branch: z.string().max(200).nullable().optional(),
+  }),
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  async run(client, args) {
+    const { stream_id: streamId, ...fields } = args;
+    return await client.request<Record<string, unknown>>({ method: 'PATCH', path: `/streams/${streamId}`, body: fields });
+  },
+});
+
 export const TOOLS: readonly ToolDefinition[] = [
   listSpaces,
   formatGuide,
@@ -1470,6 +1537,9 @@ export const TOOLS: readonly ToolDefinition[] = [
   myTasks,
   getIssue,
   searchIssuesTool,
+  development,
+  getStream,
+  updateStreamTool,
 ];
 
 /**
@@ -1501,4 +1571,6 @@ export const CONTENT_RETURNING_TOOLS = [
   'wiki.my_tasks',
   'wiki.get_issue',
   'wiki.search_issues',
+  'wiki.development',
+  'wiki.get_stream',
 ] as const;

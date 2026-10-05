@@ -34,6 +34,8 @@ export interface DiscussionResource {
   /** The page the discussion is about, or null. */
   page_id: string | null;
   section_id: string | null;
+  /** The development stream this is a problem of, or null. */
+  stream_id: string | null;
   message_count: number;
   participants: Array<{ type: 'user' | 'agent'; label: string }>;
   last_activity_at: string;
@@ -64,6 +66,7 @@ export function toDiscussionResource(
     opened_at: discussion.createdAt.toISOString(),
     page_id: discussion.pageId,
     section_id: discussion.sectionId,
+    stream_id: discussion.streamId,
     message_count: discussion.messageCount,
     participants: discussion.participants.map((entry) => ({
       type: entry.type,
@@ -114,6 +117,7 @@ export function toDiscussionStub(
     opened_at: discussion.createdAt.toISOString(),
     page_id: discussion.pageId,
     section_id: discussion.sectionId,
+    stream_id: discussion.streamId,
     last_activity_at: discussion.lastActivityAt.toISOString(),
     resolved_at: discussion.resolvedAt?.toISOString() ?? null,
     resolved_by: discussion.resolvedBy,

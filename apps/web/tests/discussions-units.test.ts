@@ -144,6 +144,7 @@ describe('closed for inactivity', () => {
       openedByLabel: 'backend-agent',
       pageId: null,
       sectionId: null,
+      streamId: null,
       lastActivityAt: new Date('2026-03-01T00:00:00.000Z'),
       resolvedAt: new Date('2026-03-15T00:00:00.000Z'),
       resolvedBy: 'system',
